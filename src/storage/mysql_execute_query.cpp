@@ -92,6 +92,20 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 		} else {
 			return result + " AND " + filter_str;
 		}
+	} else if (child.type == PhysicalOperatorType::PROJECTION) {
+		auto &proj = child.Cast<PhysicalProjection>();
+		for (auto &expr : proj.select_list) {
+			switch (expr->type) {
+			case ExpressionType::BOUND_REF:
+			case ExpressionType::BOUND_COLUMN_REF:
+			case ExpressionType::VALUE_CONSTANT:
+				break;
+			default:
+				throw NotImplementedException("Unsupported expression type in projection - only simple deletes/updates "
+				                              "are supported in the MySQL connector");
+			}
+		}
+		return ExtractFilters(*child.children[0], statement);
 	} else if (child.type == PhysicalOperatorType::TABLE_SCAN) {
 		auto &table_scan = child.Cast<PhysicalTableScan>();
 		if (!table_scan.table_filters) {

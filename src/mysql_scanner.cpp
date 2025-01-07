@@ -159,7 +159,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 }
 
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
-  	InsertionOrderPreservingMap<string> result;
+	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
 	result["Table"] = bind_data.table.name;
 	return result;
