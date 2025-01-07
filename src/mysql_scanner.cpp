@@ -158,9 +158,11 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 	output.SetCardinality(r);
 }
 
-static string MySQLScanToString(const FunctionData *bind_data_p) {
-	auto &bind_data = bind_data_p->Cast<MySQLBindData>();
-	return bind_data.table.name;
+static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
+  	InsertionOrderPreservingMap<string> result;
+	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
+	result["Table"] = bind_data.table.name;
+	return result;
 }
 
 static void MySQLScanSerialize(Serializer &serializer, const optional_ptr<FunctionData> bind_data_p,
