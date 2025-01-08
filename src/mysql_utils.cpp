@@ -139,7 +139,9 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			} else if (val == "preferred") {
 				result.ssl_mode = SSL_MODE_PREFERRED;
 			} else {
-				throw InvalidInputException("Invalid dsn - ssl mode must be either disabled, required, verify_ca, verify_identity or preferred - got %s", value);
+				throw InvalidInputException("Invalid dsn - ssl mode must be either disabled, required, verify_ca, "
+				                            "verify_identity or preferred - got %s",
+				                            value);
 			}
 		} else if (key == "ssl_ca") {
 			set_options.insert("ssl_ca");
