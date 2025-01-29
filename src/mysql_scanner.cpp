@@ -148,6 +148,11 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			// '\1')
 			CastBoolFromMySQL(context, gstate.varchar_chunk.data[c], output.data[c], r);
 			break;
+		case LogicalTypeId::TIMESTAMP_TZ: {
+			string error;
+			VectorOperations::DefaultTryCast(gstate.varchar_chunk.data[c], output.data[c], r, &error);
+			break;
+		}
 		default: {
 			string error;
 			VectorOperations::TryCast(context, gstate.varchar_chunk.data[c], output.data[c], r, &error);

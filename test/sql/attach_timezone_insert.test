@@ -6,11 +6,16 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require icu
+
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
 statement ok
 USE s
+
+statement ok
+SET TimeZone='UTC'
 
 statement ok
 CREATE OR REPLACE TABLE timestamp_with_tz_tbl(ts TIMESTAMP WITH TIME ZONE);
@@ -22,3 +27,36 @@ query I
 SELECT * FROM timestamp_with_tz_tbl
 ----
 2000-01-01 12:12:12+00
+
+statement ok
+INSERT INTO timestamp_with_tz_tbl VALUES (TIMESTAMPTZ '2001-01-01 12:12:12+04:00')
+
+query I
+SELECT * FROM timestamp_with_tz_tbl
+----
+2000-01-01 12:12:12+00
+2001-01-01 08:12:12+00
+
+statement ok
+SET TimeZone='EST'
+
+query I
+SELECT * FROM timestamp_with_tz_tbl
+----
+2000-01-01 07:12:12-05
+2001-01-01 03:12:12-05
+
+statement ok
+create or replace table new_tbl(t timestamp with time zone);
+
+statement ok
+INSERT INTO new_tbl SELECT * FROM timestamp_with_tz_tbl
+
+statement ok
+SET TimeZone='UTC'
+
+query I
+SELECT * FROM new_tbl
+----
+2000-01-01 12:12:12+00
+2001-01-01 08:12:12+00
