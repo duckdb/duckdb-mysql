@@ -9,7 +9,7 @@ namespace duckdb {
 
 MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context)
     : Transaction(manager, context), access_mode(mysql_catalog.access_mode) {
-	connection = MySQLConnection::Open(mysql_catalog.path);
+	connection = MySQLConnection::Open(mysql_catalog.connection_string);
 }
 
 MySQLTransaction::~MySQLTransaction() = default;
