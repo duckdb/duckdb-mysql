@@ -18,10 +18,11 @@ class MySQLSchemaEntry;
 
 class MySQLCatalog : public Catalog {
 public:
-	explicit MySQLCatalog(AttachedDatabase &db_p, const string &path, AccessMode access_mode);
+	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode);
 	~MySQLCatalog();
 
-	string path;
+	string connection_string;
+	string attach_path;
 	AccessMode access_mode;
 
 public:
@@ -29,6 +30,8 @@ public:
 	string GetCatalogType() override {
 		return "mysql";
 	}
+
+	static string GetConnectionString(ClientContext &context, const string &attach_path, string secret_name);
 
 	optional_ptr<CatalogEntry> CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) override;
 
