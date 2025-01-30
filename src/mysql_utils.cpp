@@ -247,11 +247,13 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 			// retry
 			result =
 			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
-			if (result) {
-				return result;
-			}
 		}
-		throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s", dsn, mysql_error(mysql));
+		if (!result) {
+			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s", dsn, mysql_error(mysql));
+		}
+	}
+	if (mysql_set_character_set(result, "utf8mb4") != 0) {
+		throw IOException("Failed to set MySQL character set");
 	}
 	D_ASSERT(mysql == result);
 	return result;
