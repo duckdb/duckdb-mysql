@@ -18,8 +18,15 @@ CREATE SECRET (
 	PORT 0
 );
 
+# uri with mysql: prefix
+statement ok
+ATTACH 'mysql:root@localhost' AS uri_attach
+
+statement ok
+DETACH uri_attach
+
 # try various URIs
-foreach uri mysql://localhost mysql://localhost:0 mysql://root@localhost mysql://root@localhost:0 mysql://root:@localhost:0 mysql://root:@localhost:0?compression=preferred
+foreach uri localhost root@localhost mysql://localhost mysql://localhost:0 mysql://root@localhost mysql://root@localhost:0 mysql://root:@localhost:0 mysql://root:@localhost:0?compression=preferred
 
 statement ok
 ATTACH '${uri}' AS uri_attach (TYPE MYSQL)

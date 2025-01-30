@@ -137,7 +137,7 @@ struct URIValue {
 	string value;
 };
 
-vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_count) {
+vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_count, ErrorData &error) {
 	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
 	vector<string> result;
 	if (token_count == 1) {
@@ -154,7 +154,8 @@ vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_cou
 	} else if (tokens[1].delimiter == '@') {
 		// user:password@
 		if (tokens[0].delimiter != ':') {
-			throw ParserException("Invalid URI string - expected user:password");
+			error = ParserException("Invalid URI string - expected user:password");
+			return result;
 		}
 		D_ASSERT(token_count > 2);
 		result.emplace_back("user");
@@ -180,7 +181,7 @@ vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_cou
 		}
 		// we still have a "/schema"
 		if (tokens[current_pos].delimiter != '/') {
-			throw ParserException("Invalid URI string - expected host:port/schema");
+			error = ParserException("Invalid URI string - expected host:port/schema");
 		}
 		result.emplace_back("db");
 		current_pos++;
@@ -189,16 +190,19 @@ vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_cou
 		result.emplace_back("db");
 		current_pos++;
 	} else {
-		throw ParserException("Invalid URI string - expected host:port or host/schema");
+		error = ParserException("Invalid URI string - expected host:port or host/schema");
 	}
 	if (current_pos + 1 != token_count) {
-		throw ParserException("Invalid URI string - expected ? after [user[:[password]]@]host[:port][/schema]");
+		error = ParserException("Invalid URI string - expected ? after [user[:[password]]@]host[:port][/schema]");
 	}
 	return result;
 }
 
-void ParseMainAttributes(const vector<URIToken> &tokens, idx_t token_count, vector<URIValue> &result) {
-	auto attribute_names = GetAttributeNames(tokens, token_count);
+void ParseMainAttributes(const vector<URIToken> &tokens, idx_t token_count, vector<URIValue> &result, ErrorData &error) {
+	auto attribute_names = GetAttributeNames(tokens, token_count, error);
+	if (error.HasError()) {
+		return;
+	}
 	D_ASSERT(attribute_names.size() == token_count);
 	for(idx_t i = 0; i < token_count; i++) {
 		result.emplace_back(attribute_names[i], tokens[i].value);
@@ -242,7 +246,7 @@ void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vect
 	}
 }
 
-vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens) {
+vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens, ErrorData &error) {
 	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
 	vector<URIValue> result;
 	if (tokens.empty()) {
@@ -259,33 +263,21 @@ vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens) {
 	}
 
 	// parse the main attributes in the string
-	ParseMainAttributes(tokens, attribute_start, result);
+	ParseMainAttributes(tokens, attribute_start, result, error);
 	// parse key-value attributes
 	ParseAttributes(tokens, attribute_start, result);
 
 	return result;
 }
 
-string ConvertURIToConnectionString(const string &dsn) {
-	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
-	idx_t start_pos = 0;
-	// skip the past the scheme (either mysql:// or mysqlx://)
-	if (StringUtil::StartsWith(dsn, "mysql://")) {
-		start_pos = 8;
-	} else if (StringUtil::StartsWith(dsn, "mysqlx://")) {
-		start_pos = 9;
-	} else {
-		// should be caught before
-		throw InternalException("Invalid MySQL URI");
-	}
+bool TryConvertURIInternal(const string &dsn, idx_t start_pos, string &connection_string, ErrorData &error) {
 	// parse tokens from the string
 	auto tokens = ParseURITokens(dsn, start_pos);
 
-	auto values = ExtractURIValues(tokens);
-	if (values.empty()) {
-		throw ParserException("Invalid MySQL URI - URI cannot be empty");
+	auto values = ExtractURIValues(tokens, error);
+	if (error.HasError()) {
+		return false;
 	}
-	string connection_string;
 	for(auto &val : values) {
 		if (!connection_string.empty()) {
 			connection_string += " ";
@@ -294,14 +286,32 @@ string ConvertURIToConnectionString(const string &dsn) {
 		connection_string += "=";
 		connection_string += EscapeConnectionString(val.value);
 	}
-	return connection_string;
+	return true;
 }
 
-static bool IsMySQLURI(const string &dsn) {
-	if (StringUtil::StartsWith(dsn, "mysql://") || StringUtil::StartsWith(dsn, "mysqlx://")) {
-		return true;
+void TryConvertURI(string &dsn) {
+	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
+	idx_t start_pos = 0;
+	// skip the past the scheme (either mysql:// or mysqlx://)
+	if (StringUtil::StartsWith(dsn, "mysql://")) {
+		start_pos = 8;
+	} else if (StringUtil::StartsWith(dsn, "mysqlx://")) {
+		start_pos = 9;
 	}
-	return false;
+
+	// try to convert this as a URI
+	string connection_string;
+	ErrorData error;
+	if (TryConvertURIInternal(dsn, start_pos, connection_string, error)) {
+		// success! this is a URI
+		dsn = std::move(connection_string);
+		return;
+	}
+	// not a URI
+	if (start_pos > 0) {
+		// but it started with mysql:// or mysqlx:// - throw an error
+		error.Throw();
+	}
 }
 
 string MySQLCatalog::GetConnectionString(ClientContext &context, const string &attach_path, string secret_name) {
@@ -315,10 +325,10 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 	}
 	auto secret_entry = GetSecret(context, secret_name);
 	auto connection_string = attach_path;
-	if (IsMySQLURI(connection_string)) {
-		// if this is a URI (mysql://....) convert it to a connection string
-		connection_string = ConvertURIToConnectionString(connection_string);
-	}
+
+	// if the connection string is a URI, try and convert it
+	TryConvertURI(connection_string);
+
 	if (secret_entry) {
 		// secret found - read data
 		const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
