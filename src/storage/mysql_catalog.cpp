@@ -64,6 +64,246 @@ unique_ptr<SecretEntry> GetSecret(ClientContext &context, const string &secret_n
 	return nullptr;
 }
 
+struct URIToken {
+	string value;
+	char delimiter;
+};
+
+string UnescapePercentage(const string &input, idx_t start, idx_t end) {
+	// url escapes encoded as [ESC][RESULT]
+	auto url_escapes = "20 3C<3E>23#25%2B+7B{7D}7C|5C\\5E^7E~5B[5D]60`3B;2F/3F?3A;40@3D=26&24$";
+
+	string result;
+	for(idx_t i = start; i < end; i++) {
+		if (i + 2 < end && input[i] == '%') {
+			// find the escape code
+			char first_char = StringUtil::CharacterToUpper(input[i + 1]);
+			char second_char = StringUtil::CharacterToUpper(input[i + 2]);
+			char escape_result = '\0';
+			for(idx_t esc_pos = 0; url_escapes[esc_pos]; esc_pos += 3) {
+				if (first_char == url_escapes[esc_pos] && second_char == url_escapes[esc_pos + 1]) {
+					// found the correct escape
+					escape_result = url_escapes[esc_pos + 2];
+					break;
+				}
+			}
+			if (escape_result != '\0') {
+				// found the escape - skip forward
+				result += escape_result;
+				i += 2;
+				continue;
+			}
+			// escape not found - just put the % in as normal
+		}
+		result += input[i];
+	}
+	return result;
+}
+
+vector<URIToken> ParseURITokens(const string &dsn, idx_t start) {
+	vector<URIToken> result;
+	for(idx_t pos = start; pos < dsn.size(); pos++) {
+		switch(dsn[pos]) {
+			case ':':
+			case '@':
+			case '/':
+			case '?':
+			case '=':
+			case '&': {
+				// found a delimiter
+				URIToken token;
+				token.value = UnescapePercentage(dsn, start, pos);
+				token.delimiter = dsn[pos];
+				start = pos + 1;
+				result.push_back(std::move(token));
+				break;
+			}
+			default:
+				// include in token
+				break;
+		}
+	}
+	URIToken token;
+	token.value = UnescapePercentage(dsn, start, dsn.size());
+	token.delimiter = '\0';
+	result.push_back(std::move(token));
+	return result;
+}
+
+struct URIValue {
+	URIValue(string name_p, string value_p) : name(std::move(name_p)), value(std::move(value_p)) {}
+
+	string name;
+	string value;
+};
+
+vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_count) {
+	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
+	vector<string> result;
+	if (token_count == 1) {
+		// only one token - always the host
+		result.emplace_back("host");
+		return result;
+	}
+	idx_t current_pos = 0;
+	if (tokens[0].delimiter == '@') {
+		// user@...
+		result.emplace_back("user");
+		result.emplace_back("host");
+		current_pos = 1;
+	} else if (tokens[1].delimiter == '@') {
+		// user:password@
+		if (tokens[0].delimiter != ':') {
+			throw ParserException("Invalid URI string - expected user:password");
+		}
+		D_ASSERT(token_count > 2);
+		result.emplace_back("user");
+		result.emplace_back("passwd");
+		result.emplace_back("host");
+		current_pos = 2;
+	} else {
+		// neither user nor password - this MUST be the host
+		result.emplace_back("host");
+		current_pos = 0;
+	}
+	if (current_pos + 1 == token_count) {
+		// we have parsed the entire string (until the attributes)
+		return result;
+	}
+	// we are at host_pos
+	if (tokens[current_pos].delimiter == ':') {
+		// host:port
+		result.emplace_back("port");
+		current_pos++;
+		if (current_pos + 1 == token_count) {
+			return result;
+		}
+		// we still have a "/schema"
+		if (tokens[current_pos].delimiter != '/') {
+			throw ParserException("Invalid URI string - expected host:port/schema");
+		}
+		result.emplace_back("db");
+		current_pos++;
+	} else if (tokens[current_pos].delimiter == '/') {
+		// host/schema
+		result.emplace_back("db");
+		current_pos++;
+	} else {
+		throw ParserException("Invalid URI string - expected host:port or host/schema");
+	}
+	if (current_pos + 1 != token_count) {
+		throw ParserException("Invalid URI string - expected ? after [user[:[password]]@]host[:port][/schema]");
+	}
+	return result;
+}
+
+void ParseMainAttributes(const vector<URIToken> &tokens, idx_t token_count, vector<URIValue> &result) {
+	auto attribute_names = GetAttributeNames(tokens, token_count);
+	D_ASSERT(attribute_names.size() == token_count);
+	for(idx_t i = 0; i < token_count; i++) {
+		result.emplace_back(attribute_names[i], tokens[i].value);
+	}
+}
+
+void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vector<URIValue> &result) {
+	unordered_map<string, string> uri_attribute_map;
+	uri_attribute_map["socket"] = "socket";
+	uri_attribute_map["compression"] = "compression";
+	uri_attribute_map["ssl-mode"] = "ssl_mode";
+	uri_attribute_map["ssl-ca"] = "ssl_ca";
+	uri_attribute_map["ssl-capath"] = "ssl_capath";
+	uri_attribute_map["ssl-cert"] = "ssl_cert";
+	uri_attribute_map["ssl-cipher"] = "ssl_cipher";
+	uri_attribute_map["ssl-crl"] = "ssl_crl";
+	uri_attribute_map["ssl-crlpath"] = "ssl_crlpath";
+	uri_attribute_map["ssl-key"] = "ssl_key";
+
+	// parse key=value attributes
+	for(idx_t i = attribute_start; i < tokens.size(); i += 2) {
+		// check if the format is correct
+		if (i + 1 >= tokens.size() || tokens[i].delimiter != '=') {
+			throw ParserException("Invalid URI string - expected attribute=value pairs after ?");
+		}
+		if (tokens[i + 1].delimiter != '\0' && tokens[i + 1].delimiter != '&') {
+			throw ParserException("Invalid URI string - attribute=value pairs must be separated by &");
+		}
+		auto entry = uri_attribute_map.find(tokens[i].value);
+		if (entry == uri_attribute_map.end()) {
+			string supported_options;
+			for(auto &entry : uri_attribute_map) {
+				if (!supported_options.empty()) {
+					supported_options += ", ";
+				}
+				supported_options += entry.first;
+			}
+			throw ParserException("Invalid URI string - unsupported attribute \"%s\"\nSupported options: %s", tokens[i].value, supported_options);
+		}
+		result.emplace_back(entry->second, tokens[i + 1].value);
+	}
+}
+
+vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens) {
+	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
+	vector<URIValue> result;
+	if (tokens.empty()) {
+		return result;
+	}
+	// figure out how many "non-attribute" tokens we have
+	idx_t attribute_start = tokens.size();
+	for(idx_t i = 0; i < tokens.size(); i++) {
+		if (tokens[i].delimiter == '?') {
+			// found a question-mark - this is a token
+			attribute_start = i + 1;
+			break;
+		}
+	}
+
+	// parse the main attributes in the string
+	ParseMainAttributes(tokens, attribute_start, result);
+	// parse key-value attributes
+	ParseAttributes(tokens, attribute_start, result);
+
+	return result;
+}
+
+string ConvertURIToConnectionString(const string &dsn) {
+	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
+	idx_t start_pos = 0;
+	// skip the past the scheme (either mysql:// or mysqlx://)
+	if (StringUtil::StartsWith(dsn, "mysql://")) {
+		start_pos = 8;
+	} else if (StringUtil::StartsWith(dsn, "mysqlx://")) {
+		start_pos = 9;
+	} else {
+		// should be caught before
+		throw InternalException("Invalid MySQL URI");
+	}
+	// parse tokens from the string
+	auto tokens = ParseURITokens(dsn, start_pos);
+
+	auto values = ExtractURIValues(tokens);
+	if (values.empty()) {
+		throw ParserException("Invalid MySQL URI - URI cannot be empty");
+	}
+	string connection_string;
+	for(auto &val : values) {
+		if (!connection_string.empty()) {
+			connection_string += " ";
+		}
+		connection_string += val.name;
+		connection_string += "=";
+		connection_string += EscapeConnectionString(val.value);
+	}
+	return connection_string;
+}
+
+static bool IsMySQLURI(const string &dsn) {
+	if (StringUtil::StartsWith(dsn, "mysql://") || StringUtil::StartsWith(dsn, "mysqlx://")) {
+		return true;
+	}
+	return false;
+}
+
 string MySQLCatalog::GetConnectionString(ClientContext &context, const string &attach_path, string secret_name) {
 	// if no secret is specified we default to the unnamed mysql secret, if it
 	// exists
@@ -75,6 +315,10 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 	}
 	auto secret_entry = GetSecret(context, secret_name);
 	auto connection_string = attach_path;
+	if (IsMySQLURI(connection_string)) {
+		// if this is a URI (mysql://....) convert it to a connection string
+		connection_string = ConvertURIToConnectionString(connection_string);
+	}
 	if (secret_entry) {
 		// secret found - read data
 		const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
