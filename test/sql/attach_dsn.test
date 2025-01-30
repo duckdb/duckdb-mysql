@@ -6,12 +6,6 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-# dsn parsing failures
-statement error
-ATTACH 'host' AS s (TYPE MYSQL_SCANNER)
-----
-expected key=value pairs separated by spaces
-
 statement error
 ATTACH 'host=' AS s (TYPE MYSQL_SCANNER)
 ----

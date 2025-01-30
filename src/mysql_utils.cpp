@@ -125,6 +125,19 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			} else {
 				result.client_flag &= ~CLIENT_COMPRESS;
 			}
+		} else if (key == "compression") {
+			set_options.insert("compress");
+			auto val = StringUtil::Lower(value);
+			if (val == "required") {
+				result.client_flag |= CLIENT_COMPRESS;
+			} else if (val == "disabled") {
+				result.client_flag &= ~CLIENT_COMPRESS;
+			} else if (val == "preferred") {
+				// nop
+			} else {
+				throw InvalidInputException("Invalid dsn - compression mode must be either disabled/required/preferred - got %s",
+											value);
+			}
 		} else if (key == "ssl_mode") {
 			set_options.insert("ssl_mode");
 			auto val = StringUtil::Lower(value);
