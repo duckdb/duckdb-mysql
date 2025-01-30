@@ -1,0 +1,61 @@
+# name: test/sql/attach_uri.test
+# description: Test attaching using a URI
+# group: [storage]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+PRAGMA enable_verification
+
+# create a default secret that fills in the correct missing values in the URI
+statement ok
+CREATE SECRET (
+	TYPE MYSQL,
+	HOST localhost,
+	USER root,
+	PORT 0
+);
+
+# try various URIs
+foreach uri mysql://localhost mysql://localhost:0 mysql://root@localhost mysql://root@localhost:0 mysql://root:@localhost:0 mysql://root:@localhost:0?compression=preferred
+
+statement ok
+ATTACH '${uri}' AS uri_attach (TYPE MYSQL)
+
+statement ok
+DETACH uri_attach
+
+endloop
+
+# now with an unknown database
+foreach uri mysql://localhost/unknown_db mysql://localhost:0/unknown_db mysql://root@localhost/unknown_db mysql://root@localhost:0/unknown_db mysql://root:@localhost:0/unknown_db
+
+statement error
+ATTACH '${uri}' AS secret_attach (TYPE MYSQL)
+----
+unknown_db
+
+endloop
+
+# invalid URIs
+foreach uri mysql://abc@abc@localhost mysql://abc:abc:abc mysql://abc:abc/abc/abc mysql://localhost?abc mysql://localhost?abc=1?abc=2
+
+statement error
+ATTACH '${uri}' AS secret_attach (TYPE MYSQL)
+----
+Invalid URI string
+
+endloop
+
+# unrecognized attribute
+statement error
+ATTACH 'mysql://root@localhost?unrecognized_attribute=42' AS secret_attach (TYPE MYSQL)
+----
+unrecognized_attribute
+
+statement error
+ATTACH 'mysql://root@localhost?attribute_with_escape_codes_%20%3C%3E%23%25%2B%7B%7D%7C%5C%5E%7E%5B%5D%60%3B%2F%3F%3A%40%3D%26%24%XX%=42' AS secret_attach (TYPE MYSQL)
+----
+attribute_with_escape_codes_ <>#%+{}|\^~[]`;/?;@=&$%XX%
