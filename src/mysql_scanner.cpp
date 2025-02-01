@@ -179,12 +179,20 @@ static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer,
 	throw NotImplementedException("MySQLScanDeserialize");
 }
 
+static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
+	auto &bind_data = bind_data_p->Cast<MySQLBindData>();
+	BindInfo info(ScanType::EXTERNAL);
+	info.table = bind_data.table;
+	return info;
+}
+
 MySQLScanFunction::MySQLScanFunction()
     : TableFunction("mysql_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLScan,
                     MySQLBind, MySQLInitGlobalState, MySQLInitLocalState) {
 	to_string = MySQLScanToString;
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
+	get_bind_info = MySQLGetBindInfo;
 	projection_pushdown = true;
 }
 

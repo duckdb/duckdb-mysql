@@ -1,0 +1,19 @@
+# name: test/sql/attach_constraints.test
+# description: Test create table with constraints and use describe
+# group: [storage]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s1.constraints(s STRING NOT NULL, i INTEGER DEFAULT 12);
+
+query IIIIII
+DESCRIBE s1.constraints
+----
+s	VARCHAR	NO	NULL	NULL	NULL
+i	INTEGER	YES	NULL	12	NULL
