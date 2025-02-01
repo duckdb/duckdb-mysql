@@ -66,3 +66,16 @@ SELECT COLUMNS(*)::VARCHAR FROM s.all_types
 false	-128	-32768	-2147483648	-9223372036854775808	0	0	0	2000-01-01	00:00:00	2000-01-01 01:02:03	2000-01-01 01:02:03	2000-01-01 01:02:03	2000-01-01 01:02:03	00:00:00+15:00	2000-01-01 01:02:03	-999.9	-99999.9999	-999999999999.999999	-9999999999999999999999999999.9999999999	00000000-0000-0000-0000-000000000000	00:00:00	🦆🦆🦆🦆🦆🦆	thisisalongblob\x00withnullbytes	0010001001011100010101011010111	DUCK_DUCK_ENUM	enum_0	enum_0
 true	127	32767	2147483647	9223372036854775807	255	65535	4294967295	2000-01-01	24:00:00	2000-01-01 01:02:03	2000-01-01 01:02:03	2000-01-01 01:02:03	2000-01-01 01:02:03	00:00:00+15:00	2000-01-01 01:02:03	999.9	99999.9999	999999999999.999999	9999999999999999999999999999.9999999999	ffffffff-ffff-ffff-ffff-ffffffffffff	83 years 3 months 999 days 00:16:39.999999	goo\0se	\x00\x00\x00a	10101	GOOSE	enum_299	enum_69999
 NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+
+# filter pushdown
+foreach column_name bool tinyint smallint int bigint utinyint usmallint uint date time timestamp timestamp_s timestamp_ms timestamp_ns time_tz timestamp_tz dec_4_1 dec_9_4 dec_18_6 dec38_10 uuid interval varchar blob bit small_enum medium_enum large_enum
+
+statement ok
+SET VARIABLE minimum_value=(SELECT MIN(${column_name}) min_val FROM s.all_types);
+
+query I
+SELECT ANY_VALUE(${column_name})=getvariable('minimum_value') FROM s.all_types WHERE ${column_name}=getvariable('minimum_value')
+----
+true
+
+endloop
