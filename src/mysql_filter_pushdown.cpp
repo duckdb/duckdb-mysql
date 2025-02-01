@@ -1,5 +1,7 @@
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_utils.hpp"
+#include "duckdb/planner/filter/optional_filter.hpp"
+#include "duckdb/planner/filter/in_filter.hpp"
 
 namespace duckdb {
 
@@ -77,6 +79,21 @@ string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &fi
 		auto operator_string = TransformComparison(constant_filter.comparison_type);
 		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
 	}
+	case TableFilterType::OPTIONAL_FILTER: {
+		auto &optional_filter = filter.Cast<OptionalFilter>();
+		return TransformFilter(column_name, *optional_filter.child_filter);
+	}
+	case TableFilterType::IN_FILTER: {
+		auto &in_filter = filter.Cast<InFilter>();
+		string in_list;
+		for(auto &val : in_filter.values) {
+			if (!in_list.empty()) {
+				in_list += ", ";
+			}
+			in_list += TransformConstant(val);
+		}
+		return column_name + " IN (" + in_list + ")";
+		}
 	default:
 		throw InternalException("Unsupported table filter type");
 	}

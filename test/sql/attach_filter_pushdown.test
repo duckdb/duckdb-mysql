@@ -63,7 +63,7 @@ SELECT COUNT(*) FROM s1.text_tbl WHERE v= '🦆'
 1
 
 # blob pushdown
-statement error
+query I
 SELECT COUNT(*) FROM s1.blob_tbl WHERE bl= BLOB '\x80'
 ----
-Unsupported
+1

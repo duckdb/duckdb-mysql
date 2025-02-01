@@ -111,7 +111,29 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 		if (!table_scan.table_filters) {
 			return string();
 		}
-		throw NotImplementedException("Pushed down table filters not supported currently");
+		string result;
+		for(auto &entry : table_scan.table_filters->filters) {
+			auto column_index = entry.first;
+			auto &filter = entry.second;
+			string column_name;
+			if (column_index < table_scan.names.size()) {
+				const auto col_id = table_scan.column_ids[column_index].GetPrimaryIndex();
+				if (col_id == COLUMN_IDENTIFIER_ROW_ID) {
+					column_name = "rowid";
+				} else {
+					column_name = table_scan.names[col_id];
+				}
+			}
+			BoundReferenceExpression bound_ref(std::move(column_name), LogicalTypeId::INVALID, 0);
+			auto filter_expr = filter->ToExpression(bound_ref);
+			auto filter_str = filter_expr->ToString();
+			if (result.empty()) {
+				result = std::move(filter_str);
+			} else {
+				result += " AND " + filter_str;
+			}
+		}
+		return result;
 	} else {
 		throw NotImplementedException("Unsupported operator type %s in %s statement - only simple deletes "
 		                              "(e.g. %s "

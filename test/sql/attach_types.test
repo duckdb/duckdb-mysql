@@ -78,4 +78,9 @@ SELECT ANY_VALUE(${column_name})=getvariable('minimum_value') FROM s.all_types W
 ----
 true
 
+query I
+SELECT ANY_VALUE(${column_name})=getvariable('minimum_value') FROM s.all_types WHERE ${column_name} IN (getvariable('minimum_value'), getvariable('minimum_value'))
+----
+true
+
 endloop
