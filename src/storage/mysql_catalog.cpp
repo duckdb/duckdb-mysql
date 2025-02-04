@@ -10,8 +10,10 @@
 
 namespace duckdb {
 
-MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, string attach_path_p, AccessMode access_mode)
-    : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)), access_mode(access_mode), schemas(*this) {
+MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, string attach_path_p,
+                           AccessMode access_mode)
+    : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
+      access_mode(access_mode), schemas(*this) {
 	default_schema = MySQLUtils::ParseConnectionParameters(connection_string).db;
 	// try to connect
 	auto connection = MySQLConnection::Open(connection_string);
