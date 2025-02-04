@@ -9,6 +9,10 @@ namespace duckdb {
 
 static unique_ptr<Catalog> MySQLAttach(StorageExtensionInfo *storage_info, ClientContext &context, AttachedDatabase &db,
                                        const string &name, AttachInfo &info, AccessMode access_mode) {
+	auto &config = DBConfig::GetConfig(context);
+	if (!config.options.enable_external_access) {
+		throw PermissionException("Attaching MySQL databases is disabled through configuration");
+	}
 	// check if we have a secret provided
 	string secret_name;
 	for (auto &entry : info.options) {
