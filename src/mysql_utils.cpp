@@ -100,25 +100,48 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			throw InvalidInputException("Invalid dsn \"%s\" - expected key=value pairs separated by spaces", dsn);
 		}
 		key = StringUtil::Lower(key);
+
+		// Handle duplicate options (except for aliased options like passwd/password which map to the same option)
 		if (key == "host") {
+			if (set_options.find("host") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'host' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("host");
 			result.host = value;
 		} else if (key == "user") {
+			if (set_options.find("user") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'user' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("user");
 			result.user = value;
 		} else if (key == "passwd" || key == "password") {
+			if (set_options.find("password") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'password' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("password");
 			result.passwd = value;
 		} else if (key == "db" || key == "database") {
+			if (set_options.find("database") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'database' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("database");
 			result.db = value;
 		} else if (key == "port") {
+			if (set_options.find("port") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'port' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("port");
 			result.port = ParsePort(value);
 		} else if (key == "socket" || key == "unix_socket") {
+			if (set_options.find("socket") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'socket' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("socket");
 			result.unix_socket = value;
 		} else if (key == "compress") {
+			if (set_options.find("compress") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'compress' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("compress");
 			if (ParseBoolValue(value)) {
 				result.client_flag |= CLIENT_COMPRESS;
@@ -126,6 +149,9 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 				result.client_flag &= ~CLIENT_COMPRESS;
 			}
 		} else if (key == "compression") {
+			if (set_options.find("compress") != set_options.end()) {
+				throw InvalidInputException("Cannot specify both 'compress' and 'compression' parameters in connection string.");
+			}
 			set_options.insert("compress");
 			auto val = StringUtil::Lower(value);
 			if (val == "required") {
@@ -139,6 +165,9 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 											value);
 			}
 		} else if (key == "ssl_mode") {
+			if (set_options.find("ssl_mode") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_mode' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_mode");
 			auto val = StringUtil::Lower(value);
 			if (val == "disabled") {
@@ -157,24 +186,45 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 				                            value);
 			}
 		} else if (key == "ssl_ca") {
+			if (set_options.find("ssl_ca") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_ca' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_ca");
 			result.ssl_ca = value;
 		} else if (key == "ssl_capath") {
+			if (set_options.find("ssl_capath") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_capath' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_capath");
 			result.ssl_ca_path = value;
 		} else if (key == "ssl_cert") {
+			if (set_options.find("ssl_cert") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_cert' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_cert");
 			result.ssl_cert = value;
 		} else if (key == "ssl_cipher") {
+			if (set_options.find("ssl_cipher") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_cipher' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_cipher");
 			result.ssl_cipher = value;
 		} else if (key == "ssl_crl") {
+			if (set_options.find("ssl_crl") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_crl' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_crl");
 			result.ssl_crl = value;
 		} else if (key == "ssl_crlpath") {
+			if (set_options.find("ssl_crlpath") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_crlpath' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_crlpath");
 			result.ssl_crl_path = value;
 		} else if (key == "ssl_key") {
+			if (set_options.find("ssl_key") != set_options.end()) {
+				throw InvalidInputException("Duplicate 'ssl_key' parameter in connection string. Each parameter should only be specified once.");
+			}
 			set_options.insert("ssl_key");
 			result.ssl_key = value;
 		} else {
@@ -229,13 +279,76 @@ void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value)
 	}
 }
 
+string MySQLUtils::SanitizeConnectionString(const string &dsn) {
+	unordered_map<string, string> params;
+	string result;
+	
+	idx_t pos = 0;
+	while (pos < dsn.size()) {
+		string key;
+		string value;
+		if (!ParseValue(dsn, pos, key)) {
+			break;
+		}
+		if (pos >= dsn.size() || dsn[pos] != '=') {
+			// Invalid format, return the original string
+			return dsn;
+		}
+		pos++;
+		if (!ParseValue(dsn, pos, value)) {
+			// Invalid format, return the original string
+			return dsn;
+		}
+		
+		key = StringUtil::Lower(key);
+		
+		if (key == "passwd") {
+			key = "password";
+		}
+		
+		if (params.find(key) != params.end()) {
+			// Skip duplicate
+		} else {
+			params[key] = value;
+		}
+	}
+
+	bool first = true;
+	for (const auto &param : params) {
+		if (!first) {
+			result += " ";
+		}
+		result += param.first;
+		result += "=";
+		
+		bool needs_quotes = param.second.find(' ') != string::npos || 
+		                    param.second.find('"') != string::npos ||
+		                    param.second.find('\\') != string::npos;
+		
+		if (needs_quotes) {
+			result += "\"" + MySQLUtils::EscapeQuotes(param.second, '"') + "\"";
+		} else {
+			result += param.second;
+		}
+		
+		first = false;
+	}
+	
+	return result;
+}
+
 MYSQL *MySQLUtils::Connect(const string &dsn) {
 	MYSQL *mysql = mysql_init(NULL);
 	if (!mysql) {
 		throw IOException("Failure in mysql_init");
 	}
 	MYSQL *result;
-	auto config = ParseConnectionParameters(dsn);
+	
+	// Sanitize the connection string to remove any duplicate parameters
+	string sanitized_dsn = SanitizeConnectionString(dsn);
+	
+	auto config = ParseConnectionParameters(sanitized_dsn);
+
 	// set SSL options (if any)
 	if (config.ssl_mode != SSL_MODE_PREFERRED) {
 		mysql_options(mysql, MYSQL_OPT_SSL_MODE, &config.ssl_mode);
@@ -256,16 +369,23 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 	const char *unix_socket = config.unix_socket.empty() ? nullptr : config.unix_socket.c_str();
 	result = mysql_real_connect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
 	if (!result) {
+		string original_error = mysql_error(mysql);
+		string attempted_host = host ? host : "nullptr (default)";
+		
 		if (config.host.empty() || config.host == "localhost") {
-			// retry
-			result =
-			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
-		}
-		if (!result) {
-			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s", dsn, mysql_error(mysql));
+			result = mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
+			
+			if (!result) {
+				throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. First attempted host: %s. "
+				                 "Retry with 127.0.0.1 also failed.", 
+				                 dsn, mysql_error(mysql), attempted_host.c_str());
+			}
+		} else {
+			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. Attempted host: %s", 
+			                 dsn, original_error.c_str(), attempted_host.c_str());
 		}
 	}
-	if (mysql_set_character_set(result, "utf8mb4") != 0) {
+	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {
 		throw IOException("Failed to set MySQL character set");
 	}
 	D_ASSERT(mysql == result);

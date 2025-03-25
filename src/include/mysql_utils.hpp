@@ -52,6 +52,7 @@ class MySQLUtils {
 public:
 	static MySQLConnectionParameters ParseConnectionParameters(const string &dsn);
 	static MYSQL *Connect(const string &dsn);
+	static string SanitizeConnectionString(const string &dsn);
 
 	static LogicalType ToMySQLType(const LogicalType &input);
 	static LogicalType TypeToLogicalType(ClientContext &context, const MySQLTypeData &input);
