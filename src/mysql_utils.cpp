@@ -279,75 +279,14 @@ void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value)
 	}
 }
 
-string MySQLUtils::SanitizeConnectionString(const string &dsn) {
-	unordered_map<string, string> params;
-	string result;
-	
-	idx_t pos = 0;
-	while (pos < dsn.size()) {
-		string key;
-		string value;
-		if (!ParseValue(dsn, pos, key)) {
-			break;
-		}
-		if (pos >= dsn.size() || dsn[pos] != '=') {
-			// Invalid format, return the original string
-			return dsn;
-		}
-		pos++;
-		if (!ParseValue(dsn, pos, value)) {
-			// Invalid format, return the original string
-			return dsn;
-		}
-		
-		key = StringUtil::Lower(key);
-		
-		if (key == "passwd") {
-			key = "password";
-		}
-		
-		if (params.find(key) != params.end()) {
-			// Skip duplicate
-		} else {
-			params[key] = value;
-		}
-	}
-
-	bool first = true;
-	for (const auto &param : params) {
-		if (!first) {
-			result += " ";
-		}
-		result += param.first;
-		result += "=";
-		
-		bool needs_quotes = param.second.find(' ') != string::npos || 
-		                    param.second.find('"') != string::npos ||
-		                    param.second.find('\\') != string::npos;
-		
-		if (needs_quotes) {
-			result += "\"" + MySQLUtils::EscapeQuotes(param.second, '"') + "\"";
-		} else {
-			result += param.second;
-		}
-		
-		first = false;
-	}
-	
-	return result;
-}
-
 MYSQL *MySQLUtils::Connect(const string &dsn) {
 	MYSQL *mysql = mysql_init(NULL);
 	if (!mysql) {
 		throw IOException("Failure in mysql_init");
 	}
 	MYSQL *result;
-	
-	// Sanitize the connection string to remove any duplicate parameters
-	string sanitized_dsn = SanitizeConnectionString(dsn);
-	
-	auto config = ParseConnectionParameters(sanitized_dsn);
+
+	auto config = ParseConnectionParameters(dsn);
 
 	// set SSL options (if any)
 	if (config.ssl_mode != SSL_MODE_PREFERRED) {

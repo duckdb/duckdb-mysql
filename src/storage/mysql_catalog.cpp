@@ -391,7 +391,7 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 			if (!original_params.user.empty()) existing_params.insert("user");
 			if (!original_params.passwd.empty()) existing_params.insert("password");
 			if (!original_params.db.empty()) existing_params.insert("database");
-			if (original_params.port != 0) existing_params.insert("port");
+			if (!original_params.port) existing_params.insert("port");
 			if (!original_params.unix_socket.empty()) existing_params.insert("socket");
 			if (!original_params.ssl_ca.empty()) existing_params.insert("ssl_ca");
 			if (!original_params.ssl_ca_path.empty()) existing_params.insert("ssl_capath");
@@ -415,8 +415,9 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 			if (existing_params.find("host") == existing_params.end()) 
 				new_connection_info += AddConnectionOption(kv_secret, "host");
 			
-			if (existing_params.find("port") == existing_params.end()) 
+			if (existing_params.find("port") == existing_params.end()) {
 				new_connection_info += AddConnectionOption(kv_secret, "port");
+			}
 			
 			if (existing_params.find("database") == existing_params.end()) 
 				new_connection_info += AddConnectionOption(kv_secret, "database");
