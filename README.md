@@ -8,7 +8,7 @@ The MySQL extension allows DuckDB to directly read and write data from a MySQL d
 To make a MySQL database accessible to DuckDB use the `ATTACH` command:
 
 ```sql
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS mysqlscanner (TYPE mysql_scanner)
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS mysqlscanner (TYPE mysql_scanner);
 USE mysqlscanner;
 ```
 
