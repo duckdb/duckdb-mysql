@@ -1,0 +1,15 @@
+# name: test/sql/attach_dynamic_filter.test
+# description: Test attaching with dynamic filters
+# group: [storage]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple (TYPE MYSQL_SCANNER)
+
+query IIIII
+SELECT * FROM simple.unsigned_integers ORDER BY i DESC LIMIT 1;
+----
+255	65535	16777215	4294967295	18446744073709551615

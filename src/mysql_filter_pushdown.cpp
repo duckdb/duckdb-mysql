@@ -83,6 +83,9 @@ string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &fi
 		auto &optional_filter = filter.Cast<OptionalFilter>();
 		return TransformFilter(column_name, *optional_filter.child_filter);
 	}
+	case TableFilterType::DYNAMIC_FILTER: {
+		return string();
+	}
 	case TableFilterType::IN_FILTER: {
 		auto &in_filter = filter.Cast<InFilter>();
 		string in_list;
@@ -93,7 +96,7 @@ string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &fi
 			in_list += TransformConstant(val);
 		}
 		return column_name + " IN (" + in_list + ")";
-		}
+	}
 	default:
 		throw InternalException("Unsupported table filter type");
 	}
