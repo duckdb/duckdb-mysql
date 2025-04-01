@@ -39,16 +39,16 @@ public:
 
 	optional_ptr<SchemaCatalogEntry> GetSchema(CatalogTransaction transaction, const string &schema_name,
 	                                           OnEntryNotFound if_not_found,
-	                                           QueryErrorContext error_context = QueryErrorContext());
+	                                           QueryErrorContext error_context = QueryErrorContext()) override;
 
 	unique_ptr<PhysicalOperator> PlanInsert(ClientContext &context, LogicalInsert &op,
-	                                        unique_ptr<PhysicalOperator> plan);
+	                                        unique_ptr<PhysicalOperator> plan) override;
 	unique_ptr<PhysicalOperator> PlanCreateTableAs(ClientContext &context, LogicalCreateTable &op,
-	                                               unique_ptr<PhysicalOperator> plan);
+	                                               unique_ptr<PhysicalOperator> plan) override;
 	unique_ptr<PhysicalOperator> PlanDelete(ClientContext &context, LogicalDelete &op,
-	                                        unique_ptr<PhysicalOperator> plan);
+	                                        unique_ptr<PhysicalOperator> plan) override;
 	unique_ptr<PhysicalOperator> PlanUpdate(ClientContext &context, LogicalUpdate &op,
-	                                        unique_ptr<PhysicalOperator> plan);
+	                                        unique_ptr<PhysicalOperator> plan) override;
 	unique_ptr<LogicalOperator> BindCreateIndex(Binder &binder, CreateStatement &stmt, TableCatalogEntry &table,
 	                                            unique_ptr<LogicalOperator> plan) override;
 
