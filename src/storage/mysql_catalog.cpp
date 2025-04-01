@@ -14,7 +14,10 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
                            AccessMode access_mode)
     : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
       access_mode(access_mode), schemas(*this) {
-	default_schema = MySQLUtils::ParseConnectionParameters(connection_string).db;
+	MySQLConnectionParameters connection_params;
+	unordered_set<string> unused;
+	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
+	default_schema = connection_params.db;
 	// try to connect
 	auto connection = MySQLConnection::Open(connection_string);
 }
@@ -36,7 +39,11 @@ string EscapeConnectionString(const string &input) {
 	return result;
 }
 
-string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name) {
+string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name, const unordered_set<string> &existing_params) {
+	if (existing_params.find(name) != existing_params.end()) {
+			// option already provided in connection string
+			return string();
+	}	
 	Value input_val = kv_secret.TryGetValue(name);
 	if (input_val.IsNull()) {
 		// not provided
@@ -361,102 +368,65 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 		// secret found - read data
 		const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
 
-		// If connection_string is empty, we can just use the parameters from the secret
-		if (connection_string.empty()) {
-			string new_connection_info;
+		// Parse the original connection string to find which parameters are already set
+		MySQLConnectionParameters unused;
+		unordered_set<string> existing_params;
+		std::tie(unused, existing_params) = MySQLUtils::ParseConnectionParameters(connection_string);
 
-			new_connection_info += AddConnectionOption(kv_secret, "user");
-			new_connection_info += AddConnectionOption(kv_secret, "password");
-			new_connection_info += AddConnectionOption(kv_secret, "host");
-			new_connection_info += AddConnectionOption(kv_secret, "port");
-			new_connection_info += AddConnectionOption(kv_secret, "database");
-			new_connection_info += AddConnectionOption(kv_secret, "socket");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_mode");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_ca");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_capath");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_cert");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_cipher");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_crl");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_crlpath");
-			new_connection_info += AddConnectionOption(kv_secret, "ssl_key");
+		// Build a new connection string with parameters from the secret that don't
+		// already exist in the original connection string
+		string new_connection_info;
+		
+		if (existing_params.find("user") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "user", existing_params);
+		
+		if (existing_params.find("password") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "password", existing_params);
+		
+		if (existing_params.find("host") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "host", existing_params);
+		
+		if (existing_params.find("port") == existing_params.end()) {
+			new_connection_info += AddConnectionOption(kv_secret, "port", existing_params);
+		}
+		
+		if (existing_params.find("database") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "database", existing_params);
+		
+		if (existing_params.find("socket") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "socket", existing_params);
+		
+		if (existing_params.find("ssl_mode") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_mode", existing_params);
+		
+		if (existing_params.find("ssl_ca") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_ca", existing_params);
+		
+		if (existing_params.find("ssl_capath") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_capath", existing_params);
+		
+		if (existing_params.find("ssl_cert") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_cert", existing_params);
+		
+		if (existing_params.find("ssl_cipher") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_cipher", existing_params);
+		
+		if (existing_params.find("ssl_crl") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_crl", existing_params);
+		
+		if (existing_params.find("ssl_crlpath") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_crlpath", existing_params);
+		
+		if (existing_params.find("ssl_key") == existing_params.end()) 
+			new_connection_info += AddConnectionOption(kv_secret, "ssl_key", existing_params);
 
-			connection_string = new_connection_info;
-		} else {
-			// Parse the original connection string to find which parameters are already set
-			auto original_params = MySQLUtils::ParseConnectionParameters(connection_string);
-			unordered_set<string> existing_params;
-
-			// Track which parameters already exist in the connection string
-			if (!original_params.host.empty()) existing_params.insert("host");
-			if (!original_params.user.empty()) existing_params.insert("user");
-			if (!original_params.passwd.empty()) existing_params.insert("password");
-			if (!original_params.db.empty()) existing_params.insert("database");
-			if (!original_params.port) existing_params.insert("port");
-			if (!original_params.unix_socket.empty()) existing_params.insert("socket");
-			if (!original_params.ssl_ca.empty()) existing_params.insert("ssl_ca");
-			if (!original_params.ssl_ca_path.empty()) existing_params.insert("ssl_capath");
-			if (!original_params.ssl_cert.empty()) existing_params.insert("ssl_cert");
-			if (!original_params.ssl_cipher.empty()) existing_params.insert("ssl_cipher");
-			if (!original_params.ssl_crl.empty()) existing_params.insert("ssl_crl");
-			if (!original_params.ssl_crl_path.empty()) existing_params.insert("ssl_crlpath");
-			if (!original_params.ssl_key.empty()) existing_params.insert("ssl_key");
-			if (original_params.ssl_mode != SSL_MODE_DISABLED) existing_params.insert("ssl_mode");
-
-			// Build a new connection string with parameters from the secret that don't
-			// already exist in the original connection string
-			string new_connection_info;
-			
-			if (existing_params.find("user") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "user");
-			
-			if (existing_params.find("password") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "password");
-			
-			if (existing_params.find("host") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "host");
-			
-			if (existing_params.find("port") == existing_params.end()) {
-				new_connection_info += AddConnectionOption(kv_secret, "port");
-			}
-			
-			if (existing_params.find("database") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "database");
-			
-			if (existing_params.find("socket") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "socket");
-			
-			if (existing_params.find("ssl_mode") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_mode");
-			
-			if (existing_params.find("ssl_ca") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_ca");
-			
-			if (existing_params.find("ssl_capath") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_capath");
-			
-			if (existing_params.find("ssl_cert") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_cert");
-			
-			if (existing_params.find("ssl_cipher") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_cipher");
-			
-			if (existing_params.find("ssl_crl") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_crl");
-			
-			if (existing_params.find("ssl_crlpath") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_crlpath");
-			
-			if (existing_params.find("ssl_key") == existing_params.end()) 
-				new_connection_info += AddConnectionOption(kv_secret, "ssl_key");
-
-			// Combine the parameters, putting secret parameters first
-			if (!new_connection_info.empty()) {
-				if (!connection_string.empty()) {
-					// Only add a space if both parts are non-empty
-					connection_string = new_connection_info + " " + connection_string;
-				} else {
-					connection_string = new_connection_info;
-				}
+		// Combine the parameters, putting secret parameters first
+		if (!new_connection_info.empty()) {
+			if (!connection_string.empty()) {
+				// Only add a space if both parts are non-empty
+				connection_string = new_connection_info + " " + connection_string;
+			} else {
+				connection_string = new_connection_info;
 			}
 		}
 	} else if (explicit_secret) {

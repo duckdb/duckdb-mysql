@@ -1,3 +1,4 @@
+#include <tuple>
 #include "mysql_utils.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "mysql_com.h"
@@ -80,7 +81,7 @@ uint32_t ParsePort(const string &value) {
 	return uint32_t(port_val);
 }
 
-MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &dsn) {
+std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseConnectionParameters(const string &dsn) {
 	MySQLConnectionParameters result;
 
 	unordered_set<string> set_options;
@@ -101,47 +102,30 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 		}
 		key = StringUtil::Lower(key);
 
+		if (set_options.find(key) != set_options.end()) {
+			throw InvalidInputException("Duplicate '%s' parameter in connection string. Each parameter should only be specified once.", key);
+		}
+
 		// Handle duplicate options (except for aliased options like passwd/password which map to the same option)
 		if (key == "host") {
-			if (set_options.find("host") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'host' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("host");
 			result.host = value;
 		} else if (key == "user") {
-			if (set_options.find("user") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'user' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("user");
 			result.user = value;
 		} else if (key == "passwd" || key == "password") {
-			if (set_options.find("password") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'password' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("password");
 			result.passwd = value;
 		} else if (key == "db" || key == "database") {
-			if (set_options.find("database") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'database' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("database");
 			result.db = value;
 		} else if (key == "port") {
-			if (set_options.find("port") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'port' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("port");
 			result.port = ParsePort(value);
 		} else if (key == "socket" || key == "unix_socket") {
-			if (set_options.find("socket") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'socket' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("socket");
 			result.unix_socket = value;
 		} else if (key == "compress") {
-			if (set_options.find("compress") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'compress' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("compress");
 			if (ParseBoolValue(value)) {
 				result.client_flag |= CLIENT_COMPRESS;
@@ -149,9 +133,6 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 				result.client_flag &= ~CLIENT_COMPRESS;
 			}
 		} else if (key == "compression") {
-			if (set_options.find("compress") != set_options.end()) {
-				throw InvalidInputException("Cannot specify both 'compress' and 'compression' parameters in connection string.");
-			}
 			set_options.insert("compress");
 			auto val = StringUtil::Lower(value);
 			if (val == "required") {
@@ -165,9 +146,6 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 											value);
 			}
 		} else if (key == "ssl_mode") {
-			if (set_options.find("ssl_mode") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_mode' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_mode");
 			auto val = StringUtil::Lower(value);
 			if (val == "disabled") {
@@ -186,45 +164,24 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 				                            value);
 			}
 		} else if (key == "ssl_ca") {
-			if (set_options.find("ssl_ca") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_ca' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_ca");
 			result.ssl_ca = value;
 		} else if (key == "ssl_capath") {
-			if (set_options.find("ssl_capath") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_capath' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_capath");
 			result.ssl_ca_path = value;
 		} else if (key == "ssl_cert") {
-			if (set_options.find("ssl_cert") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_cert' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_cert");
 			result.ssl_cert = value;
 		} else if (key == "ssl_cipher") {
-			if (set_options.find("ssl_cipher") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_cipher' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_cipher");
 			result.ssl_cipher = value;
 		} else if (key == "ssl_crl") {
-			if (set_options.find("ssl_crl") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_crl' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_crl");
 			result.ssl_crl = value;
 		} else if (key == "ssl_crlpath") {
-			if (set_options.find("ssl_crlpath") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_crlpath' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_crlpath");
 			result.ssl_crl_path = value;
 		} else if (key == "ssl_key") {
-			if (set_options.find("ssl_key") != set_options.end()) {
-				throw InvalidInputException("Duplicate 'ssl_key' parameter in connection string. Each parameter should only be specified once.");
-			}
 			set_options.insert("ssl_key");
 			result.ssl_key = value;
 		} else {
@@ -266,7 +223,7 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			}
 		}
 	}
-	return result;
+	return std::make_tuple(result, set_options);
 }
 
 void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value) {
@@ -286,7 +243,9 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 	}
 	MYSQL *result;
 
-	auto config = ParseConnectionParameters(dsn);
+	MySQLConnectionParameters config;
+	unordered_set<string> unused;
+	std::tie(config, unused) = ParseConnectionParameters(dsn);
 
 	// set SSL options (if any)
 	if (config.ssl_mode != SSL_MODE_PREFERRED) {

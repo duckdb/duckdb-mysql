@@ -50,7 +50,7 @@ struct MySQLConnectionParameters {
 
 class MySQLUtils {
 public:
-	static MySQLConnectionParameters ParseConnectionParameters(const string &dsn);
+	static std::tuple<MySQLConnectionParameters, unordered_set<string>> ParseConnectionParameters(const string &dsn);
 	static MYSQL *Connect(const string &dsn);
 
 	static LogicalType ToMySQLType(const LogicalType &input);
