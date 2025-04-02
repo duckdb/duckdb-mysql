@@ -14,7 +14,10 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
                            AccessMode access_mode)
     : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
       access_mode(access_mode), schemas(*this) {
-	default_schema = MySQLUtils::ParseConnectionParameters(connection_string).db;
+	MySQLConnectionParameters connection_params;
+	unordered_set<string> unused;
+	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
+	default_schema = connection_params.db;
 	// try to connect
 	auto connection = MySQLConnection::Open(connection_string);
 }
@@ -36,7 +39,11 @@ string EscapeConnectionString(const string &input) {
 	return result;
 }
 
-string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name) {
+string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name, const unordered_set<string> &existing_params) {
+	if (existing_params.find(name) != existing_params.end()) {
+			// option already provided in connection string
+			return string();
+	}	
 	Value input_val = kv_secret.TryGetValue(name);
 	if (input_val.IsNull()) {
 		// not provided
@@ -251,9 +258,16 @@ void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vect
 vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens, ErrorData &error) {
 	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
 	vector<URIValue> result;
+
 	if (tokens.empty()) {
 		return result;
 	}
+	
+	// If we only have one empty token with no delimiter, don't treat it as a host
+	if (tokens.size() == 1 && tokens[0].value.empty() && tokens[0].delimiter == '\0') {
+		return result;
+	}
+	
 	// figure out how many "non-attribute" tokens we have
 	idx_t attribute_start = tokens.size();
 	for(idx_t i = 0; i < tokens.size(); i++) {
@@ -280,7 +294,17 @@ bool TryConvertURIInternal(const string &dsn, idx_t start_pos, string &connectio
 	if (error.HasError()) {
 		return false;
 	}
+
+	unordered_set<string> added_params;
+	
 	for(auto &val : values) {
+		// Skip duplicate parameters
+		if (added_params.find(val.name) != added_params.end()) {
+			continue;
+		}
+
+		added_params.insert(val.name);
+
 		if (!connection_string.empty()) {
 			connection_string += " ";
 		}
@@ -288,10 +312,16 @@ bool TryConvertURIInternal(const string &dsn, idx_t start_pos, string &connectio
 		connection_string += "=";
 		connection_string += EscapeConnectionString(val.value);
 	}
+
 	return true;
 }
 
 void TryConvertURI(string &dsn) {
+	// Skip empty strings
+	if (dsn.empty()) {
+		return;
+	}
+	
 	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
 	idx_t start_pos = 0;
 	// skip the past the scheme (either mysql:// or mysqlx://)
@@ -309,6 +339,7 @@ void TryConvertURI(string &dsn) {
 		dsn = std::move(connection_string);
 		return;
 	}
+
 	// not a URI
 	if (start_pos > 0) {
 		// but it started with mysql:// or mysqlx:// - throw an error
@@ -325,8 +356,10 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 		// provided
 		secret_name = "__default_mysql";
 	}
+
 	auto secret_entry = GetSecret(context, secret_name);
-	auto connection_string = attach_path;
+	string connection_string = attach_path;
+	StringUtil::Trim(connection_string);
 
 	// if the connection string is a URI, try and convert it
 	TryConvertURI(connection_string);
@@ -334,23 +367,40 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 	if (secret_entry) {
 		// secret found - read data
 		const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
-		string new_connection_info;
 
-		new_connection_info += AddConnectionOption(kv_secret, "user");
-		new_connection_info += AddConnectionOption(kv_secret, "password");
-		new_connection_info += AddConnectionOption(kv_secret, "host");
-		new_connection_info += AddConnectionOption(kv_secret, "port");
-		new_connection_info += AddConnectionOption(kv_secret, "database");
-		new_connection_info += AddConnectionOption(kv_secret, "socket");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_mode");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_ca");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_capath");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_cert");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_cipher");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_crl");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_crlpath");
-		new_connection_info += AddConnectionOption(kv_secret, "ssl_key");
-		connection_string = new_connection_info + connection_string;
+		// Parse the original connection string to find which parameters are already set
+		MySQLConnectionParameters unused;
+		unordered_set<string> existing_params;
+		std::tie(unused, existing_params) = MySQLUtils::ParseConnectionParameters(connection_string);
+
+		// Build a new connection string with parameters from the secret that don't
+		// already exist in the original connection string
+		string new_connection_info;
+		
+		new_connection_info += AddConnectionOption(kv_secret, "user", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "password", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "host", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "port", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "database", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "socket", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_mode", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_ca", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_capath", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_cert", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_cipher", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_crl", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_crlpath", existing_params);
+		new_connection_info += AddConnectionOption(kv_secret, "ssl_key", existing_params);
+
+		// Combine the parameters, putting secret parameters first
+		if (!new_connection_info.empty()) {
+			if (!connection_string.empty()) {
+				// Only add a space if both parts are non-empty
+				connection_string = new_connection_info + " " + connection_string;
+			} else {
+				connection_string = new_connection_info;
+			}
+		}
 	} else if (explicit_secret) {
 		// secret not found and one was explicitly provided - throw an error
 		throw BinderException("Secret with name \"%s\" not found", secret_name);

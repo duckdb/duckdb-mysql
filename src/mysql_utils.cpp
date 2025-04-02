@@ -1,3 +1,4 @@
+#include <tuple>
 #include "mysql_utils.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "mysql_com.h"
@@ -80,7 +81,7 @@ uint32_t ParsePort(const string &value) {
 	return uint32_t(port_val);
 }
 
-MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &dsn) {
+std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseConnectionParameters(const string &dsn) {
 	MySQLConnectionParameters result;
 
 	unordered_set<string> set_options;
@@ -100,6 +101,12 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			throw InvalidInputException("Invalid dsn \"%s\" - expected key=value pairs separated by spaces", dsn);
 		}
 		key = StringUtil::Lower(key);
+
+		if (set_options.find(key) != set_options.end()) {
+			throw InvalidInputException("Duplicate '%s' parameter in connection string. Each parameter should only be specified once.", key);
+		}
+
+		// Handle duplicate options (except for aliased options like passwd/password which map to the same option)
 		if (key == "host") {
 			set_options.insert("host");
 			result.host = value;
@@ -216,7 +223,7 @@ MySQLConnectionParameters MySQLUtils::ParseConnectionParameters(const string &ds
 			}
 		}
 	}
-	return result;
+	return std::make_tuple(result, set_options);
 }
 
 void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value) {
@@ -235,7 +242,11 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 		throw IOException("Failure in mysql_init");
 	}
 	MYSQL *result;
-	auto config = ParseConnectionParameters(dsn);
+
+	MySQLConnectionParameters config;
+	unordered_set<string> unused;
+	std::tie(config, unused) = ParseConnectionParameters(dsn);
+
 	// set SSL options (if any)
 	if (config.ssl_mode != SSL_MODE_PREFERRED) {
 		mysql_options(mysql, MYSQL_OPT_SSL_MODE, &config.ssl_mode);
@@ -256,16 +267,23 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 	const char *unix_socket = config.unix_socket.empty() ? nullptr : config.unix_socket.c_str();
 	result = mysql_real_connect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
 	if (!result) {
+		string original_error = mysql_error(mysql);
+		string attempted_host = host ? host : "nullptr (default)";
+		
 		if (config.host.empty() || config.host == "localhost") {
-			// retry
-			result =
-			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
-		}
-		if (!result) {
-			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s", dsn, mysql_error(mysql));
+			result = mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
+			
+			if (!result) {
+				throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. First attempted host: %s. "
+				                 "Retry with 127.0.0.1 also failed.", 
+				                 dsn, mysql_error(mysql), attempted_host.c_str());
+			}
+		} else {
+			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. Attempted host: %s", 
+			                 dsn, original_error.c_str(), attempted_host.c_str());
 		}
 	}
-	if (mysql_set_character_set(result, "utf8mb4") != 0) {
+	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {
 		throw IOException("Failed to set MySQL character set");
 	}
 	D_ASSERT(mysql == result);
