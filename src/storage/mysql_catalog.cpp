@@ -39,11 +39,12 @@ string EscapeConnectionString(const string &input) {
 	return result;
 }
 
-string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name, const unordered_set<string> &existing_params) {
+string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name,
+                           const unordered_set<string> &existing_params) {
 	if (existing_params.find(name) != existing_params.end()) {
-			// option already provided in connection string
-			return string();
-	}	
+		// option already provided in connection string
+		return string();
+	}
 	Value input_val = kv_secret.TryGetValue(name);
 	if (input_val.IsNull()) {
 		// not provided
@@ -83,13 +84,13 @@ string UnescapePercentage(const string &input, idx_t start, idx_t end) {
 	auto url_escapes = "20 3C<3E>23#25%2B+7B{7D}7C|5C\\5E^7E~5B[5D]60`3B;2F/3F?3A;40@3D=26&24$";
 
 	string result;
-	for(idx_t i = start; i < end; i++) {
+	for (idx_t i = start; i < end; i++) {
 		if (i + 2 < end && input[i] == '%') {
 			// find the escape code
 			char first_char = StringUtil::CharacterToUpper(input[i + 1]);
 			char second_char = StringUtil::CharacterToUpper(input[i + 2]);
 			char escape_result = '\0';
-			for(idx_t esc_pos = 0; url_escapes[esc_pos]; esc_pos += 3) {
+			for (idx_t esc_pos = 0; url_escapes[esc_pos]; esc_pos += 3) {
 				if (first_char == url_escapes[esc_pos] && second_char == url_escapes[esc_pos + 1]) {
 					// found the correct escape
 					escape_result = url_escapes[esc_pos + 2];
@@ -111,25 +112,25 @@ string UnescapePercentage(const string &input, idx_t start, idx_t end) {
 
 vector<URIToken> ParseURITokens(const string &dsn, idx_t start) {
 	vector<URIToken> result;
-	for(idx_t pos = start; pos < dsn.size(); pos++) {
-		switch(dsn[pos]) {
-			case ':':
-			case '@':
-			case '/':
-			case '?':
-			case '=':
-			case '&': {
-				// found a delimiter
-				URIToken token;
-				token.value = UnescapePercentage(dsn, start, pos);
-				token.delimiter = dsn[pos];
-				start = pos + 1;
-				result.push_back(std::move(token));
-				break;
-			}
-			default:
-				// include in token
-				break;
+	for (idx_t pos = start; pos < dsn.size(); pos++) {
+		switch (dsn[pos]) {
+		case ':':
+		case '@':
+		case '/':
+		case '?':
+		case '=':
+		case '&': {
+			// found a delimiter
+			URIToken token;
+			token.value = UnescapePercentage(dsn, start, pos);
+			token.delimiter = dsn[pos];
+			start = pos + 1;
+			result.push_back(std::move(token));
+			break;
+		}
+		default:
+			// include in token
+			break;
 		}
 	}
 	URIToken token;
@@ -140,7 +141,8 @@ vector<URIToken> ParseURITokens(const string &dsn, idx_t start) {
 }
 
 struct URIValue {
-	URIValue(string name_p, string value_p) : name(std::move(name_p)), value(std::move(value_p)) {}
+	URIValue(string name_p, string value_p) : name(std::move(name_p)), value(std::move(value_p)) {
+	}
 
 	string name;
 	string value;
@@ -207,13 +209,14 @@ vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_cou
 	return result;
 }
 
-void ParseMainAttributes(const vector<URIToken> &tokens, idx_t token_count, vector<URIValue> &result, ErrorData &error) {
+void ParseMainAttributes(const vector<URIToken> &tokens, idx_t token_count, vector<URIValue> &result,
+                         ErrorData &error) {
 	auto attribute_names = GetAttributeNames(tokens, token_count, error);
 	if (error.HasError()) {
 		return;
 	}
 	D_ASSERT(attribute_names.size() == token_count);
-	for(idx_t i = 0; i < token_count; i++) {
+	for (idx_t i = 0; i < token_count; i++) {
 		result.emplace_back(attribute_names[i], tokens[i].value);
 	}
 }
@@ -232,7 +235,7 @@ void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vect
 	uri_attribute_map["ssl-key"] = "ssl_key";
 
 	// parse key=value attributes
-	for(idx_t i = attribute_start; i < tokens.size(); i += 2) {
+	for (idx_t i = attribute_start; i < tokens.size(); i += 2) {
 		// check if the format is correct
 		if (i + 1 >= tokens.size() || tokens[i].delimiter != '=') {
 			throw ParserException("Invalid URI string - expected attribute=value pairs after ?");
@@ -243,13 +246,14 @@ void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vect
 		auto entry = uri_attribute_map.find(tokens[i].value);
 		if (entry == uri_attribute_map.end()) {
 			string supported_options;
-			for(auto &entry : uri_attribute_map) {
+			for (auto &entry : uri_attribute_map) {
 				if (!supported_options.empty()) {
 					supported_options += ", ";
 				}
 				supported_options += entry.first;
 			}
-			throw ParserException("Invalid URI string - unsupported attribute \"%s\"\nSupported options: %s", tokens[i].value, supported_options);
+			throw ParserException("Invalid URI string - unsupported attribute \"%s\"\nSupported options: %s",
+			                      tokens[i].value, supported_options);
 		}
 		result.emplace_back(entry->second, tokens[i + 1].value);
 	}
@@ -262,15 +266,15 @@ vector<URIValue> ExtractURIValues(const vector<URIToken> &tokens, ErrorData &err
 	if (tokens.empty()) {
 		return result;
 	}
-	
+
 	// If we only have one empty token with no delimiter, don't treat it as a host
 	if (tokens.size() == 1 && tokens[0].value.empty() && tokens[0].delimiter == '\0') {
 		return result;
 	}
-	
+
 	// figure out how many "non-attribute" tokens we have
 	idx_t attribute_start = tokens.size();
-	for(idx_t i = 0; i < tokens.size(); i++) {
+	for (idx_t i = 0; i < tokens.size(); i++) {
 		if (tokens[i].delimiter == '?') {
 			// found a question-mark - this is a token
 			attribute_start = i + 1;
@@ -296,8 +300,8 @@ bool TryConvertURIInternal(const string &dsn, idx_t start_pos, string &connectio
 	}
 
 	unordered_set<string> added_params;
-	
-	for(auto &val : values) {
+
+	for (auto &val : values) {
 		// Skip duplicate parameters
 		if (added_params.find(val.name) != added_params.end()) {
 			continue;
@@ -321,7 +325,7 @@ void TryConvertURI(string &dsn) {
 	if (dsn.empty()) {
 		return;
 	}
-	
+
 	// [scheme://][user[:[password]]@]host[:port][/schema][?attribute1=value1&attribute2=value2...
 	idx_t start_pos = 0;
 	// skip the past the scheme (either mysql:// or mysqlx://)
@@ -376,7 +380,7 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 		// Build a new connection string with parameters from the secret that don't
 		// already exist in the original connection string
 		string new_connection_info;
-		
+
 		new_connection_info += AddConnectionOption(kv_secret, "user", existing_params);
 		new_connection_info += AddConnectionOption(kv_secret, "password", existing_params);
 		new_connection_info += AddConnectionOption(kv_secret, "host", existing_params);
@@ -431,15 +435,16 @@ void MySQLCatalog::ScanSchemas(ClientContext &context, std::function<void(Schema
 	schemas.Scan(context, [&](CatalogEntry &schema) { callback(schema.Cast<MySQLSchemaEntry>()); });
 }
 
-optional_ptr<SchemaCatalogEntry> MySQLCatalog::GetSchema(CatalogTransaction transaction, const string &schema_name,
-                                                         OnEntryNotFound if_not_found,
-                                                         QueryErrorContext error_context) {
+optional_ptr<SchemaCatalogEntry> MySQLCatalog::LookupSchema(CatalogTransaction transaction,
+                                                            const EntryLookupInfo &schema_lookup,
+                                                            OnEntryNotFound if_not_found) {
+	auto schema_name = schema_lookup.GetEntryName();
 	if (schema_name == DEFAULT_SCHEMA) {
 		if (default_schema.empty()) {
 			throw InvalidInputException("Attempting to fetch the default schema - but no database was "
 			                            "provided in the connection string");
 		}
-		return GetSchema(transaction, default_schema, if_not_found, error_context);
+		schema_name = default_schema;
 	}
 	auto entry = schemas.GetEntry(transaction.GetContext(), schema_name);
 	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {
