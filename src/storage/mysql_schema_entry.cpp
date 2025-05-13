@@ -197,12 +197,13 @@ void MySQLSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 	GetCatalogSet(info.type).DropEntry(context, info);
 }
 
-optional_ptr<CatalogEntry> MySQLSchemaEntry::GetEntry(CatalogTransaction transaction, CatalogType type,
-                                                      const string &name) {
-	if (!CatalogTypeIsSupported(type)) {
+optional_ptr<CatalogEntry> MySQLSchemaEntry::LookupEntry(CatalogTransaction transaction,
+                                                         const EntryLookupInfo &lookup_info) {
+	auto lookup_type = lookup_info.GetCatalogType();
+	if (!CatalogTypeIsSupported(lookup_type)) {
 		return nullptr;
 	}
-	return GetCatalogSet(type).GetEntry(transaction.GetContext(), name);
+	return GetCatalogSet(lookup_type).GetEntry(transaction.GetContext(), lookup_info.GetEntryName());
 }
 
 MySQLCatalogSet &MySQLSchemaEntry::GetCatalogSet(CatalogType type) {

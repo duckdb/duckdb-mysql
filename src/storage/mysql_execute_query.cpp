@@ -85,7 +85,7 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 	// in the planning process to convert this into a SQL statement
 	if (child.type == PhysicalOperatorType::FILTER) {
 		auto &filter = child.Cast<PhysicalFilter>();
-		auto result = ExtractFilters(*child.children[0], statement);
+		auto result = ExtractFilters(child.children[0], statement);
 		auto filter_str = filter.expression->ToString();
 		if (result.empty()) {
 			return filter_str;
@@ -105,14 +105,14 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 				                              "are supported in the MySQL connector");
 			}
 		}
-		return ExtractFilters(*child.children[0], statement);
+		return ExtractFilters(child.children[0], statement);
 	} else if (child.type == PhysicalOperatorType::TABLE_SCAN) {
 		auto &table_scan = child.Cast<PhysicalTableScan>();
 		if (!table_scan.table_filters) {
 			return string();
 		}
 		string result;
-		for(auto &entry : table_scan.table_filters->filters) {
+		for (auto &entry : table_scan.table_filters->filters) {
 			auto column_index = entry.first;
 			auto &filter = entry.second;
 			string column_name;
@@ -154,15 +154,15 @@ string ConstructDeleteStatement(LogicalDelete &op, PhysicalOperator &child) {
 	return result;
 }
 
-unique_ptr<PhysicalOperator> MySQLCatalog::PlanDelete(ClientContext &context, LogicalDelete &op,
-                                                      unique_ptr<PhysicalOperator> plan) {
+PhysicalOperator &MySQLCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
+                                           PhysicalOperator &plan) {
 	if (op.return_chunk) {
 		throw BinderException("RETURNING clause not yet supported for deletion of a MySQL table");
 	}
 
-	auto result = make_uniq<MySQLExecuteQuery>(op, "DELETE", op.table, ConstructDeleteStatement(op, *plan));
-	result->children.push_back(std::move(plan));
-	return std::move(result);
+	auto &execute = planner.Make<MySQLExecuteQuery>(op, "DELETE", op.table, ConstructDeleteStatement(op, plan));
+	execute.children.push_back(plan);
+	return execute;
 }
 
 string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
@@ -196,21 +196,22 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 		result += proj.select_list[ref.index]->ToString();
 	}
 	result += " ";
-	auto filters = ExtractFilters(*child.children[0], "UPDATE");
+	auto filters = ExtractFilters(child.children[0], "UPDATE");
 	if (!filters.empty()) {
 		result += " WHERE " + filters;
 	}
 	return result;
 }
 
-unique_ptr<PhysicalOperator> MySQLCatalog::PlanUpdate(ClientContext &context, LogicalUpdate &op,
-                                                      unique_ptr<PhysicalOperator> plan) {
+PhysicalOperator &MySQLCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,
+                                           PhysicalOperator &plan) {
 	if (op.return_chunk) {
 		throw BinderException("RETURNING clause not yet supported for updates of a MySQL table");
 	}
-	auto result = make_uniq<MySQLExecuteQuery>(op, "UPDATE", op.table, ConstructUpdateStatement(op, *plan));
-	result->children.push_back(std::move(plan));
-	return std::move(result);
+
+	auto &execute = planner.Make<MySQLExecuteQuery>(op, "UPDATE", op.table, ConstructUpdateStatement(op, plan));
+	execute.children.push_back(plan);
+	return execute;
 }
 
 } // namespace duckdb

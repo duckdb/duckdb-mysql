@@ -103,7 +103,8 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 		key = StringUtil::Lower(key);
 
 		if (set_options.find(key) != set_options.end()) {
-			throw InvalidInputException("Duplicate '%s' parameter in connection string. Each parameter should only be specified once.", key);
+			throw InvalidInputException(
+			    "Duplicate '%s' parameter in connection string. Each parameter should only be specified once.", key);
 		}
 
 		// Handle duplicate options (except for aliased options like passwd/password which map to the same option)
@@ -142,8 +143,8 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 			} else if (val == "preferred") {
 				// nop
 			} else {
-				throw InvalidInputException("Invalid dsn - compression mode must be either disabled/required/preferred - got %s",
-											value);
+				throw InvalidInputException(
+				    "Invalid dsn - compression mode must be either disabled/required/preferred - got %s", value);
 			}
 		} else if (key == "ssl_mode") {
 			set_options.insert("ssl_mode");
@@ -269,18 +270,20 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 	if (!result) {
 		string original_error = mysql_error(mysql);
 		string attempted_host = host ? host : "nullptr (default)";
-		
+
 		if (config.host.empty() || config.host == "localhost") {
-			result = mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
-			
+			result =
+			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
+
 			if (!result) {
-				throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. First attempted host: %s. "
-				                 "Retry with 127.0.0.1 also failed.", 
-				                 dsn, mysql_error(mysql), attempted_host.c_str());
+				throw IOException(
+				    "Failed to connect to MySQL database with parameters \"%s\": %s. First attempted host: %s. "
+				    "Retry with 127.0.0.1 also failed.",
+				    dsn, mysql_error(mysql), attempted_host.c_str());
 			}
 		} else {
-			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. Attempted host: %s", 
-			                 dsn, original_error.c_str(), attempted_host.c_str());
+			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. Attempted host: %s", dsn,
+			                  original_error.c_str(), attempted_host.c_str());
 		}
 	}
 	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {
