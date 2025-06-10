@@ -29,6 +29,11 @@ public:
 	}
 	~MySQLResult() {
 		if (res) {
+			if (streaming) {
+				// need to exhaust result if we are streaming
+				while (mysql_fetch_row(res) != NULL)
+					;
+			}
 			mysql_free_result(res);
 			res = nullptr;
 		}
