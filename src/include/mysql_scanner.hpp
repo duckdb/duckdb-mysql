@@ -25,6 +25,26 @@ struct MySQLBindData : public FunctionData {
 	vector<string> names;
 	vector<LogicalType> types;
 	string limit;
+	MySQLResultStreaming streaming = MySQLResultStreaming::UNINITIALIZED;
+
+public:
+	unique_ptr<FunctionData> Copy() const override {
+		throw NotImplementedException("MySQLBindData copy not supported");
+	}
+	bool Equals(const FunctionData &other_p) const override {
+		return false;
+	}
+};
+
+struct MySQLQueryBindData : public FunctionData {
+	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLResult> result_p, string query_p)
+		: catalog(catalog), result(std::move(result_p)), query(std::move(query_p)) {
+	}
+
+	Catalog &catalog;
+	unique_ptr<MySQLResult> result;
+	string query;
+	MySQLResultStreaming streaming = MySQLResultStreaming::UNINITIALIZED;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {

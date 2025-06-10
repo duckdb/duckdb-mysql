@@ -60,6 +60,10 @@ public:
 
 	void ClearCache();
 
+	static void MaterializeMySQLScans(PhysicalOperator &op);
+	static bool IsMySQLScan(const string &name);
+	static bool IsMySQLQuery(const string &name);
+
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
 

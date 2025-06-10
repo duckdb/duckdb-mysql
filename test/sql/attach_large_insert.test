@@ -37,3 +37,14 @@ query I
 SELECT COUNT(*) FROM s.tbl
 ----
 400000
+
+query I
+SELECT COUNT(*) FROM s.tbl JOIN s.tbl USING (i)
+----
+1600000
+
+# mix of mysql_query and table scans
+query I
+SELECT COUNT(*) FROM s.tbl JOIN mysql_query('s', 'SELECT * FROM tbl') USING (i)
+----
+1600000

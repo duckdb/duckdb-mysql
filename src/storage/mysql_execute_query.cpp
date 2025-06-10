@@ -47,7 +47,7 @@ SinkFinalizeType MySQLExecuteQuery::Finalize(Pipeline &pipeline, Event &event, C
 	auto &gstate = input.global_state.Cast<MySQLExecuteQueryGlobalState>();
 	auto &transaction = MySQLTransaction::Get(context, table.catalog);
 	auto &connection = transaction.GetConnection();
-	auto result = connection.Query(query);
+	auto result = connection.Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	gstate.affected_rows = result->AffectedRows();
 	return SinkFinalizeType::READY;
 }
@@ -159,6 +159,7 @@ PhysicalOperator &MySQLCatalog::PlanDelete(ClientContext &context, PhysicalPlanG
 	if (op.return_chunk) {
 		throw BinderException("RETURNING clause not yet supported for deletion of a MySQL table");
 	}
+	MySQLCatalog::MaterializeMySQLScans(plan);
 
 	auto &execute = planner.Make<MySQLExecuteQuery>(op, "DELETE", op.table, ConstructDeleteStatement(op, plan));
 	execute.children.push_back(plan);
@@ -208,6 +209,7 @@ PhysicalOperator &MySQLCatalog::PlanUpdate(ClientContext &context, PhysicalPlanG
 	if (op.return_chunk) {
 		throw BinderException("RETURNING clause not yet supported for updates of a MySQL table");
 	}
+	MySQLCatalog::MaterializeMySQLScans(plan);
 
 	auto &execute = planner.Make<MySQLExecuteQuery>(op, "UPDATE", op.table, ConstructUpdateStatement(op, plan));
 	execute.children.push_back(plan);

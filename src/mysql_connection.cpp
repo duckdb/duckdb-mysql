@@ -33,7 +33,7 @@ MySQLConnection MySQLConnection::Open(const string &connection_string) {
 	return result;
 }
 
-MYSQL_RES *MySQLConnection::MySQLExecute(const string &query) {
+MYSQL_RES *MySQLConnection::MySQLExecute(const string &query, bool streaming) {
 	if (MySQLConnection::DebugPrintQueries()) {
 		Printer::Print(query + "\n");
 	}
@@ -43,12 +43,16 @@ MYSQL_RES *MySQLConnection::MySQLExecute(const string &query) {
 	if (res != 0) {
 		throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
 	}
-	return mysql_store_result(con);
+	if (streaming) {
+		Printer::PrintF("Streaming");
+	}
+	return streaming ? mysql_use_result(con) : mysql_store_result(con);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, optional_ptr<ClientContext> context) {
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming, optional_ptr<ClientContext> context) {
 	auto con = GetConn();
-	auto result = MySQLExecute(query);
+	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
+	auto result = MySQLExecute(query, result_streaming);
 	auto field_count = mysql_field_count(con);
 	if (!result) {
 		// no result set
@@ -63,7 +67,7 @@ unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, optional_ptr
 	} else {
 		// result set
 		if (!context) {
-			return make_uniq<MySQLResult>(result, field_count);
+			return make_uniq<MySQLResult>(result, field_count, result_streaming);
 		}
 		vector<MySQLField> fields;
 		for (idx_t i = 0; i < field_count; i++) {
@@ -76,12 +80,20 @@ unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, optional_ptr
 			fields.push_back(std::move(mysql_field));
 		}
 
-		return make_uniq<MySQLResult>(result, std::move(fields));
+		return make_uniq<MySQLResult>(result, std::move(fields), result_streaming);
 	}
 }
 
+unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
+	return QueryInternal(query, streaming, nullptr);
+}
+
+unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming, ClientContext &context) {
+	return QueryInternal(query, streaming, context);
+}
+
 void MySQLConnection::Execute(const string &query) {
-	Query(query);
+	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION, nullptr);
 }
 
 bool MySQLConnection::IsOpen() {

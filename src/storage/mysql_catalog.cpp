@@ -7,6 +7,8 @@
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/execution/operator/scan/physical_table_scan.hpp"
+#include "mysql_scanner.hpp"
 
 namespace duckdb {
 
@@ -459,6 +461,31 @@ bool MySQLCatalog::InMemory() {
 
 string MySQLCatalog::GetDBPath() {
 	return attach_path;
+}
+
+bool MySQLCatalog::IsMySQLScan(const string &name) {
+	return name == "mysql_scan";
+}
+
+bool MySQLCatalog::IsMySQLQuery(const string &name) {
+	return name == "mysql_query";
+}
+
+void MySQLCatalog::MaterializeMySQLScans(PhysicalOperator &op) {
+	if (op.type == PhysicalOperatorType::TABLE_SCAN) {
+		auto &table_scan = op.Cast<PhysicalTableScan>();
+		if (MySQLCatalog::IsMySQLScan(table_scan.function.name)) {
+			auto &bind_data = table_scan.bind_data->Cast<MySQLBindData>();
+			bind_data.streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+		}
+		if (MySQLCatalog::IsMySQLQuery(table_scan.function.name)) {
+			auto &bind_data = table_scan.bind_data->Cast<MySQLQueryBindData>();
+			bind_data.streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+		}
+	}
+	for (auto &child : op.children) {
+		MaterializeMySQLScans(child);
+	}
 }
 
 DatabaseSize MySQLCatalog::GetDatabaseSize(ClientContext &context) {
