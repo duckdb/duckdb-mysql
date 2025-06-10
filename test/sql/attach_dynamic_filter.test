@@ -1,6 +1,6 @@
 # name: test/sql/attach_dynamic_filter.test
 # description: Test attaching with dynamic filters
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

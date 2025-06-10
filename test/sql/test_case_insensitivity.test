@@ -1,6 +1,6 @@
 # name: test/sql/test_case_insensitivity.test
 # description: Test for case insensitivity
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

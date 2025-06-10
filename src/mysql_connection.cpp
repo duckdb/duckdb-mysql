@@ -43,13 +43,11 @@ MYSQL_RES *MySQLConnection::MySQLExecute(const string &query, bool streaming) {
 	if (res != 0) {
 		throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
 	}
-	if (streaming) {
-		Printer::PrintF("Streaming");
-	}
 	return streaming ? mysql_use_result(con) : mysql_store_result(con);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming, optional_ptr<ClientContext> context) {
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming,
+                                                       optional_ptr<ClientContext> context) {
 	auto con = GetConn();
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	auto result = MySQLExecute(query, result_streaming);
@@ -88,7 +86,8 @@ unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultS
 	return QueryInternal(query, streaming, nullptr);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming, ClientContext &context) {
+unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming,
+                                               ClientContext &context) {
 	return QueryInternal(query, streaming, context);
 }
 

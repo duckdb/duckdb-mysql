@@ -38,7 +38,7 @@ public:
 
 struct MySQLQueryBindData : public FunctionData {
 	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLResult> result_p, string query_p)
-		: catalog(catalog), result(std::move(result_p)), query(std::move(query_p)) {
+	    : catalog(catalog), result(std::move(result_p)), query(std::move(query_p)) {
 	}
 
 	Catalog &catalog;

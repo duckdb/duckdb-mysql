@@ -77,7 +77,8 @@ public:
 	static bool DebugPrintQueries();
 
 private:
-	unique_ptr<MySQLResult> QueryInternal(const string &query, MySQLResultStreaming streaming, optional_ptr<ClientContext> context);
+	unique_ptr<MySQLResult> QueryInternal(const string &query, MySQLResultStreaming streaming,
+	                                      optional_ptr<ClientContext> context);
 	MYSQL_RES *MySQLExecute(const string &query, bool streaming);
 
 	mutex query_lock;

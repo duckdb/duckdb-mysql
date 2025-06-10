@@ -1,6 +1,6 @@
 # name: test/sql/attach_types_blob.test
 # description: Test inserting/querying blobs
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

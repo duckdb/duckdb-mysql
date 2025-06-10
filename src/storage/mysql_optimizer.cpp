@@ -82,24 +82,26 @@ void OptimizeMySQLScan(unique_ptr<LogicalOperator> &op) {
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	MySQLOperators operators;
 	GatherMySQLScans(*plan, operators);
-	for(auto &entry : operators.scans) {
+	for (auto &entry : operators.scans) {
 		MySQLResultStreaming result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 		if (entry.second.size() == 1) {
 			// if we have exactly one scan for a given catalog we can stream it
 			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
 		}
-		for(auto &logical_get : entry.second) {
+		for (auto &logical_get : entry.second) {
 			auto &get = logical_get.get();
 			if (MySQLCatalog::IsMySQLScan(get.function.name)) {
 				// mysql table scan - add to the catalog
 				auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED || result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
+				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
+				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
 					bind_data.streaming = result_streaming;
 				}
 			}
 			if (MySQLCatalog::IsMySQLQuery(get.function.name)) {
 				auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
-				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED || result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
+				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
+				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
 					bind_data.streaming = result_streaming;
 				}
 			}

@@ -1,4 +1,4 @@
-# name: test/sql/attach_insert_from_scan_large.test
+# name: test/sql/attach_large_insert.test
 # description: Test self-referential inserts (inserting from the same table)
 # group: [sql]
 
@@ -48,3 +48,15 @@ query I
 SELECT COUNT(*) FROM s.tbl JOIN mysql_query('s', 'SELECT * FROM tbl') USING (i)
 ----
 1600000
+
+# error while streaming
+statement error
+SELECT CASE WHEN i > 5000 THEN error('eek') ELSE i END FROM s.tbl
+----
+eek
+
+# verify this has been correctly cleaned up
+query I
+SELECT COUNT(*) FROM s.tbl
+----
+400000

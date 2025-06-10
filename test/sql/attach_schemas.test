@@ -1,6 +1,6 @@
 # name: test/sql/attach_schemas.test
 # description: Test schema creation/dropping/multi-schema support
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

@@ -1,6 +1,6 @@
 # name: test/sql/attach_external_access.test
 # description: Test that we cannot attach new databases if external access is disabled
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 
