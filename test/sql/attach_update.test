@@ -1,4 +1,4 @@
-# name: test/sql/storage/attach_update.test
+# name: test/sql/attach_update.test
 # description: Test UPDATE statement
 # group: [sql]
 

@@ -18,7 +18,7 @@ jobs:
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.3.0
     with:
       extension_name: mysql_scanner
-      duckdb_version: main
+      duckdb_version: v1.3.0
       ci_tools_version: v1.3.0
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools;windows_amd64_mingw;linux_amd64_musl'
       build_duckdb_shell: false
@@ -29,7 +29,7 @@ jobs:
     uses: duckdb/extension-ci-tools/.github/workflows/_extension_deploy.yml@v1.3.0
     secrets: inherit
     with:
-      duckdb_version: main
+      duckdb_version: v1.3.0
       ci_tools_version: v1.3.0
       extension_name: mysql_scanner
       exclude_archs: 'wasm_mvp;wasm_eh;wasm_threads;windows_amd64_rtools;windows_amd64_mingw;linux_amd64_musl'

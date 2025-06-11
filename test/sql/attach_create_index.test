@@ -1,6 +1,6 @@
 # name: test/sql/attach_create_index.test
 # description: Test CREATE INDEX
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

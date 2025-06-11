@@ -19,16 +19,23 @@ struct MySQLField {
 
 class MySQLResult {
 public:
-	MySQLResult(MYSQL_RES *res_p, idx_t field_count) : res(res_p), field_count(field_count) {
+	MySQLResult(MYSQL_RES *res_p, idx_t field_count, bool streaming_p)
+	    : res(res_p), field_count(field_count), streaming(streaming_p) {
 	}
-	MySQLResult(MYSQL_RES *res_p, vector<MySQLField> fields_p)
-	    : res(res_p), field_count(fields_p.size()), fields(std::move(fields_p)) {
+	MySQLResult(MYSQL_RES *res_p, vector<MySQLField> fields_p, bool streaming_p)
+	    : res(res_p), field_count(fields_p.size()), fields(std::move(fields_p)), streaming(streaming_p) {
 	}
 	MySQLResult(idx_t affected_rows) : affected_rows(affected_rows) {
 	}
 	~MySQLResult() {
 		if (res) {
+			if (streaming) {
+				// need to exhaust result if we are streaming
+				while (mysql_fetch_row(res) != NULL)
+					;
+			}
 			mysql_free_result(res);
+			res = nullptr;
 		}
 	}
 
@@ -82,6 +89,7 @@ private:
 	unsigned long *lengths = nullptr;
 	idx_t field_count = 0;
 	vector<MySQLField> fields;
+	bool streaming = false;
 
 	char *GetNonNullValue(idx_t col) {
 		auto val = GetValueInternal(col);

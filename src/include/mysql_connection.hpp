@@ -51,7 +51,8 @@ public:
 public:
 	static MySQLConnection Open(const string &connection_string);
 	void Execute(const string &query);
-	unique_ptr<MySQLResult> Query(const string &query, optional_ptr<ClientContext> context = nullptr);
+	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming, ClientContext &context);
 
 	vector<IndexInfo> GetIndexInfo(const string &table_name);
 
@@ -76,7 +77,9 @@ public:
 	static bool DebugPrintQueries();
 
 private:
-	MYSQL_RES *MySQLExecute(const string &query);
+	unique_ptr<MySQLResult> QueryInternal(const string &query, MySQLResultStreaming streaming,
+	                                      optional_ptr<ClientContext> context);
+	MYSQL_RES *MySQLExecute(const string &query, bool streaming);
 
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;

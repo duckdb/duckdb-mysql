@@ -1,6 +1,6 @@
-# name: test/sql/storage/attach_database_size.test
+# name: test/sql/attach_database_size.test
 # description: Test fetching the database size
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

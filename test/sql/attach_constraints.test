@@ -1,6 +1,6 @@
 # name: test/sql/attach_constraints.test
 # description: Test create table with constraints and use describe
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

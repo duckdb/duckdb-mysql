@@ -1,6 +1,6 @@
 # name: test/sql/attach_alter.test
 # description: Test ALTER TABLE statements
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

@@ -49,10 +49,10 @@ unique_ptr<MySQLResult> MySQLTransaction::Query(const string &query) {
 		if (access_mode == AccessMode::READ_ONLY) {
 			transaction_start += " READ ONLY";
 		}
-		connection.Query(transaction_start);
-		return connection.Query(query);
+		connection.Execute(transaction_start);
+		return connection.Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	}
-	return connection.Query(query);
+	return connection.Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 }
 
 MySQLTransaction &MySQLTransaction::Get(ClientContext &context, Catalog &catalog) {

@@ -1,6 +1,6 @@
 # name: test/sql/attach_uri.test
 # description: Test attaching using a URI
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

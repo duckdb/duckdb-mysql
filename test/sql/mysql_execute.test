@@ -1,6 +1,6 @@
 # name: test/sql/mysql_execute.test
 # description: Test mysql_execute
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 

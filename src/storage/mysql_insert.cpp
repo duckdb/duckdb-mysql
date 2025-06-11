@@ -214,7 +214,7 @@ SinkResultType MySQLInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 		gstate.insert_values += ")";
 		if (gstate.insert_values.size() >= INSERT_FLUSH_SIZE) {
 			// perform the actual insert
-			con.Query(gstate.base_insert_query + gstate.insert_values);
+			con.Execute(gstate.base_insert_query + gstate.insert_values);
 			// reset the to-be-inserted values
 			gstate.insert_values = string();
 		}
@@ -233,7 +233,7 @@ SinkFinalizeType MySQLInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 		// perform the final insert
 		auto &transaction = MySQLTransaction::Get(context, gstate.table.catalog);
 		auto &con = transaction.GetConnection();
-		con.Query(gstate.base_insert_query + gstate.insert_values);
+		con.Execute(gstate.base_insert_query + gstate.insert_values);
 	}
 	return SinkFinalizeType::READY;
 }
@@ -310,6 +310,7 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 	if (op.action_type != OnConflictAction::THROW) {
 		throw BinderException("ON CONFLICT clause not yet supported for insertion into MySQL table");
 	}
+	MySQLCatalog::MaterializeMySQLScans(*plan);
 
 	D_ASSERT(plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
@@ -320,9 +321,10 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 
 PhysicalOperator &MySQLCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                   LogicalCreateTable &op, PhysicalOperator &plan) {
+	MySQLCatalog::MaterializeMySQLScans(plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, plan);
 	auto &insert = planner.Make<MySQLInsert>(op, op.schema, std::move(op.info));
-	insert.children.push_back(plan);
+	insert.children.push_back(inner_plan);
 	return insert;
 }
 

@@ -65,7 +65,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	// run the query
 	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
 	auto &con = transaction.GetConnection();
-	auto query_result = con.Query(select);
+	auto query_result = con.Query(select, bind_data.streaming);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
 
 	// generate the varchar chunk
@@ -199,24 +199,6 @@ MySQLScanFunction::MySQLScanFunction()
 //===--------------------------------------------------------------------===//
 // MySQL Query
 //===--------------------------------------------------------------------===//
-struct MySQLQueryBindData : public FunctionData {
-	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLResult> result_p, string query_p)
-	    : catalog(catalog), result(std::move(result_p)), query(std::move(query_p)) {
-	}
-
-	Catalog &catalog;
-	unique_ptr<MySQLResult> result;
-	string query;
-
-public:
-	unique_ptr<FunctionData> Copy() const override {
-		throw NotImplementedException("MySQLBindData copy not supported");
-	}
-	bool Equals(const FunctionData &other_p) const override {
-		return false;
-	}
-};
-
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -236,10 +218,13 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	}
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto sql = input.inputs[1].GetValue<string>();
-	auto result = transaction.GetConnection().Query(sql, &context);
+	auto result = transaction.GetConnection().Query(sql, MySQLResultStreaming::FORCE_MATERIALIZATION, context);
 	for (auto &field : result->Fields()) {
 		names.push_back(field.name);
 		return_types.push_back(field.type);
+	}
+	if (return_types.empty()) {
+		throw InvalidInputException("Failed to fetch return types for query '%s'", sql);
 	}
 	return make_uniq<MySQLQueryBindData>(catalog, std::move(result), std::move(sql));
 }
@@ -252,7 +237,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 		mysql_result = std::move(bind_data.result);
 	} else {
 		auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
-		mysql_result = transaction.GetConnection().Query(bind_data.query, &context);
+		mysql_result =
+		    transaction.GetConnection().Query(bind_data.query, MySQLResultStreaming::FORCE_MATERIALIZATION, context);
 	}
 	auto column_count = mysql_result->ColumnCount();
 

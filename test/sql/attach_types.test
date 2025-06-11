@@ -1,6 +1,6 @@
 # name: test/sql/attach_types.test
 # description: Test attaching with "test_all_types"
-# group: [storage]
+# group: [sql]
 
 require mysql_scanner
 
