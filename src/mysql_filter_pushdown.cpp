@@ -8,7 +8,14 @@ namespace duckdb {
 string MySQLFilterPushdown::CreateExpression(string &column_name, vector<unique_ptr<TableFilter>> &filters, string op) {
 	vector<string> filter_entries;
 	for (auto &filter : filters) {
-		filter_entries.push_back(TransformFilter(column_name, *filter));
+		auto new_filter = TransformFilter(column_name, *filter);
+		if (new_filter.empty()) {
+			continue;
+		}
+		filter_entries.push_back(std::move(new_filter));
+	}
+	if (filter_entries.empty()) {
+		return string();
 	}
 	return "(" + StringUtil::Join(filter_entries, " " + op + " ") + ")";
 }
@@ -109,12 +116,16 @@ string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
 	}
 	string result;
 	for (auto &entry : filters->filters) {
+		auto column_name = MySQLUtils::WriteIdentifier(names[column_ids[entry.first]]);
+		auto &filter = *entry.second;
+		auto new_filter = TransformFilter(column_name, filter);
+		if (new_filter.empty()) {
+			continue;
+		}
 		if (!result.empty()) {
 			result += " AND ";
 		}
-		auto column_name = MySQLUtils::WriteIdentifier(names[column_ids[entry.first]]);
-		auto &filter = *entry.second;
-		result += TransformFilter(column_name, filter);
+		result += new_filter;
 	}
 	return result;
 }
