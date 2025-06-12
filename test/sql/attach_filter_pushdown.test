@@ -34,6 +34,20 @@ SELECT * FROM s1.filter_pushdown_string WHERE i='52525'
 ----
 52525
 
+query I
+select * from s1.filter_pushdown_string where i > '10' order by i limit 10
+----
+100
+1000
+10000
+10001
+10002
+10003
+10004
+10005
+10006
+10007
+
 # timestamp pushdown
 query I
 SELECT COUNT(*) FROM s1.datetime_tbl WHERE d >= DATE '2000-01-01'
