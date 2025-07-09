@@ -65,7 +65,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 	} else {
 		// result set
 		if (!context) {
-			return make_uniq<MySQLResult>(result, field_count, result_streaming);
+			return make_uniq<MySQLResult>(result, field_count, result_streaming, *this);
 		}
 		vector<MySQLField> fields;
 		for (idx_t i = 0; i < field_count; i++) {
@@ -78,7 +78,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 			fields.push_back(std::move(mysql_field));
 		}
 
-		return make_uniq<MySQLResult>(result, std::move(fields), result_streaming);
+		return make_uniq<MySQLResult>(result, std::move(fields), result_streaming, *this);
 	}
 }
 

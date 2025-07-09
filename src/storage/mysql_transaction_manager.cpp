@@ -26,7 +26,10 @@ ErrorData MySQLTransactionManager::CommitTransaction(ClientContext &context, Tra
 
 void MySQLTransactionManager::RollbackTransaction(Transaction &transaction) {
 	auto &mysql_transaction = transaction.Cast<MySQLTransaction>();
-	mysql_transaction.Rollback();
+	try {
+		mysql_transaction.Rollback();
+	} catch (...) {
+	}
 	lock_guard<mutex> l(transaction_lock);
 	transactions.erase(transaction);
 }
