@@ -389,7 +389,8 @@ LogicalType MySQLUtils::TypeToLogicalType(ClientContext &context, const MySQLTyp
 			}
 		}
 		return LogicalType::BLOB;
-	} else if (type_info.type_name == "blob" || type_info.type_name == "binary" || type_info.type_name == "varbinary" ||
+	} else if (type_info.type_name == "blob" || type_info.type_name == "tinyblob" || type_info.type_name == "mediumblob" ||
+	           type_info.type_name == "longblob" || type_info.type_name == "binary" || type_info.type_name == "varbinary" ||
 	           type_info.type_name == "geometry" || type_info.type_name == "point" ||
 	           type_info.type_name == "linestring" || type_info.type_name == "polygon" ||
 	           type_info.type_name == "multipoint" || type_info.type_name == "multilinestring" ||
