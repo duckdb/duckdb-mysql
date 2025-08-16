@@ -170,7 +170,7 @@ PhysicalOperator &MySQLCatalog::PlanDelete(ClientContext &context, PhysicalPlanG
 string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 	// FIXME - all of this is pretty gnarly, we should provide a hook earlier on
 	// in the planning process to convert this into a SQL statement
-	string result = "UPDATE";
+	string result = "UPDATE ";
 	result += MySQLUtils::WriteIdentifier(op.table.schema.name);
 	result += ".";
 	result += MySQLUtils::WriteIdentifier(op.table.name);

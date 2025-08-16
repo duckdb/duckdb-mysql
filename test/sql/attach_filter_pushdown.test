@@ -66,7 +66,7 @@ SELECT COUNT(*) FROM s1.datetime_tbl WHERE ts >= TIMESTAMP '2000-01-01'
 
 # boolean pushdown
 query I
-SELECT COUNT(*) FROM s1.booleans WHERE b = true
+SELECT * FROM s1.booleans WHERE b = true
 ----
 1
 
