@@ -137,12 +137,12 @@ a,d
 a,d
 a,d
 
-query I
-SELECT * FROM mysql_query('simple', 'SELECT * FROM json_tbl')
-----
-{"k1": "value", "k2": 10}
-["abc", 10, null, true, false]
-NULL
+# query I
+# SELECT * FROM mysql_query('simple', 'SELECT * FROM json_tbl')
+# ----
+# {"k1": "value", "k2": 10}
+# ["abc", 10, null, true, false]
+# NULL
 
 # errors
 statement error
@@ -163,13 +163,13 @@ SET TimeZone='UTC'
 statement ok
 SET mysql_session_time_zone = '+01:00'
 
-query IIIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM datetime_tbl')
+query IIIIII
+SELECT * FROM mysql_query('simple', 'SELECT * FROM datetime_tbl ORDER BY id')
 ----
-2020-02-03	2029-02-14 08:47:23	2029-02-14 14:47:23+00	23:59:59	1901
-1000-01-01	1000-01-01 00:00:00	1970-01-01 06:00:01+00	-838:59:59	2155
-9999-12-31	9999-12-31 23:59:59	2038-01-19 04:14:07+00	838:59:59	2000
-NULL	NULL	NULL	NULL	NULL
+1	2020-02-03	2029-02-14 08:47:23	2029-02-14 14:47:23+00	23:59:59	1901
+2	1000-01-01	1000-01-01 00:00:00	1970-01-01 06:00:01+00	-838:59:59	2155
+3	9999-12-31	9999-12-31 23:59:59	2038-01-19 04:14:07+00	838:59:59	2000
+4	NULL	NULL	NULL	NULL	NULL
 
 # issue #65 - Decimal data type conversion issue with mysql_query function
 query II

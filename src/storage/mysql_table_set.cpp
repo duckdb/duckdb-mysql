@@ -198,10 +198,10 @@ string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_ptr<Cons
 	return ss.str();
 }
 
-string GetMySQLCreateTable(CreateTableInfo &info) {
+string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
 	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
 		auto &col = info.columns.GetColumnMutable(LogicalIndex(i));
-		col.SetType(MySQLUtils::ToMySQLType(col.GetType()));
+		col.SetType(MySQLUtils::ToMySQLType(context, col.GetType()));
 	}
 
 	std::stringstream ss;
@@ -221,7 +221,7 @@ string GetMySQLCreateTable(CreateTableInfo &info) {
 
 optional_ptr<CatalogEntry> MySQLTableSet::CreateTable(ClientContext &context, BoundCreateTableInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	auto create_sql = GetMySQLCreateTable(info.Base());
+	auto create_sql = GetMySQLCreateTable(context, info.Base());
 	transaction.Query(create_sql);
 	auto tbl_entry = make_uniq<MySQLTableEntry>(catalog, schema, info.Base());
 	return CreateEntry(std::move(tbl_entry));

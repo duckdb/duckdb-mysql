@@ -18,6 +18,6 @@ DROP TABLE IF EXISTS datetime_tbl_2
 statement ok
 CREATE TABLE datetime_tbl_2 AS SELECT * FROM datetime_tbl
 
-query IIIII
+query IIIIII
 SELECT * FROM datetime_tbl_2 EXCEPT SELECT * FROM datetime_tbl
 ----

@@ -20,18 +20,18 @@ SET TimeZone='UTC'
 statement ok
 SET mysql_session_time_zone = '+01:00'
 
-query IIIII
-SELECT * FROM datetime_tbl
+query IIIIII
+SELECT * FROM datetime_tbl ORDER BY id
 ----
-2020-02-03	2029-02-14 08:47:23	2029-02-14 14:47:23+00	23:59:59	1901
-1000-01-01	1000-01-01 00:00:00	1970-01-01 06:00:01+00	-838:59:59	2155
-9999-12-31	9999-12-31 23:59:59	2038-01-19 04:14:07+00	838:59:59	2000
-NULL	NULL	NULL	NULL	NULL
+1	2020-02-03	2029-02-14 08:47:23	2029-02-14 14:47:23+00	23:59:59	1901
+2	1000-01-01	1000-01-01 00:00:00	1970-01-01 06:00:01+00	-838:59:59	2155
+3	9999-12-31	9999-12-31 23:59:59	2038-01-19 04:14:07+00	838:59:59	2000
+4	NULL	NULL	NULL	NULL	NULL
 
-query IIIII
+query IIIIII
 SELECT typeof(COLUMNS(*)) FROM datetime_tbl LIMIT 1
 ----
-DATE	TIMESTAMP	TIMESTAMP WITH TIME ZONE	VARCHAR	INTEGER
+INTEGER	DATE	TIMESTAMP	TIMESTAMP WITH TIME ZONE	VARCHAR	INTEGER
 
 statement ok
 CREATE OR REPLACE TABLE scan_datetime_1(col1 INTEGER, col2 DATE);
@@ -51,3 +51,98 @@ query II
 SELECT * FROM scan_datetime_1 ORDER BY col1
 ----
 1	2020-12-31
+
+# enable TIME type
+statement ok
+SET mysql_time_as_time = TRUE
+
+query I
+SELECT typeof(t) FROM datetime_tbl LIMIT 1
+----
+TIME
+
+query I
+SELECT t FROM datetime_tbl WHERE y = '1901'
+----
+23:59:59
+
+statement error
+SELECT t FROM datetime_tbl WHERE y = '2000'
+----
+Binder Error: time field value out of range: "838:59:59", expected format is ([YYYY-MM-DD ]HH:MM:SS[.MS])
+
+statement ok
+CREATE OR REPLACE TABLE scan_datetime_2(col1 INTEGER, col2 TIME);
+
+query I
+SELECT column_type FROM (
+  DESCRIBE SELECT * FROM scan_datetime_2
+)
+----
+INTEGER
+TIME
+
+statement ok
+INSERT INTO scan_datetime_2 VALUES (1, '12:43:56'::TIME), (2, '12:43:57')
+
+query II
+SELECT * FROM scan_datetime_2 ORDER BY col1
+----
+1	12:43:56
+2	12:43:57
+
+statement ok
+UPDATE scan_datetime_2 SET col2 = '12:43:58' WHERE col1 = 1
+
+statement ok
+UPDATE scan_datetime_2 SET col2 = '12:43:59'::TIME WHERE col1 = 2
+
+query II
+SELECT * FROM scan_datetime_2 ORDER BY col1
+----
+1	12:43:58
+2	12:43:59
+
+query I
+SELECT typeof(col2) FROM scan_datetime_2
+----
+TIME
+TIME
+
+# disable TIME type
+statement ok
+SET mysql_time_as_time = FALSE
+
+query I
+SELECT typeof(t) FROM datetime_tbl LIMIT 1
+----
+VARCHAR
+
+statement ok
+CREATE OR REPLACE TABLE scan_datetime_3(col1 INTEGER, col2 TIME);
+
+query I
+SELECT column_type FROM (
+  DESCRIBE SELECT * FROM scan_datetime_3
+)
+----
+INTEGER
+VARCHAR
+
+statement ok
+INSERT INTO scan_datetime_3 VALUES (1, '12:43:56'::TIME), (2, '12:43:57')
+
+query II
+SELECT * FROM scan_datetime_3 ORDER BY col1
+----
+1	12:43:56
+2	12:43:57
+
+query I
+SELECT typeof(col2) FROM scan_datetime_3
+----
+VARCHAR
+VARCHAR
+
+statement ok
+DROP TABLE IF EXISTS scan_datetime_3

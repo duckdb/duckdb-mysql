@@ -55,7 +55,7 @@ public:
 	static std::tuple<MySQLConnectionParameters, unordered_set<string>> ParseConnectionParameters(const string &dsn);
 	static MYSQL *Connect(const string &dsn);
 
-	static LogicalType ToMySQLType(const LogicalType &input);
+	static LogicalType ToMySQLType(ClientContext &context, const LogicalType &input);
 	static LogicalType TypeToLogicalType(ClientContext &context, const MySQLTypeData &input);
 	static LogicalType FieldToLogicalType(ClientContext &context, MYSQL_FIELD *field);
 	static string TypeToString(const LogicalType &input);
