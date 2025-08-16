@@ -569,7 +569,7 @@ static string TransformBlobToMySQL(const string &val) {
 }
 
 string MySQLUtils::TransformConstant(const Value& val) {
-	if (val.type().IsNumeric()) {
+	if (val.type().IsNumeric() || val.type().id() == LogicalTypeId::BOOLEAN) {
 		return val.ToSQLString();
 	}
 	if (val.type().id() == LogicalTypeId::BLOB) {
