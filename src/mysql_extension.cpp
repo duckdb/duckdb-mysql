@@ -120,6 +120,8 @@ static void LoadInternal(DatabaseInstance &db) {
 	config.AddExtensionOption("mysql_session_time_zone", "Value to use as a session time zone for newly opened"
 	                          " connections to MySQL server", LogicalType::VARCHAR, Value(""),
 	                          MySQLClearCacheFunction::ClearCacheOnSetting);
+	config.AddExtensionOption("mysql_time_as_time", "Whether or not to convert MySQL's TIME columns to DuckDB's TIME",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), MySQLClearCacheFunction::ClearCacheOnSetting);
 
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;

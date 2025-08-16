@@ -354,8 +354,14 @@ LogicalType MySQLUtils::TypeToLogicalType(ClientContext &context, const MySQLTyp
 	} else if (type_info.type_name == "date") {
 		return LogicalType::DATE;
 	} else if (type_info.type_name == "time") {
-		// we need to convert time to VARCHAR because TIME in MySQL is more like an
+		// we convert time to VARCHAR by default because TIME in MySQL is more like an
 		// interval and can store ranges between -838:00:00 to 838:00:00
+		Value time_as_time;
+		if (context.TryGetCurrentSetting("mysql_time_as_time", time_as_time)) {
+			if (BooleanValue::Get(time_as_time)) {
+				return LogicalType::TIME;
+			}
+		}
 		return LogicalType::VARCHAR;
 	} else if (type_info.type_name == "timestamp") {
 		// in MySQL, "timestamp" columns are timezone aware while "datetime" columns
@@ -488,7 +494,7 @@ LogicalType MySQLUtils::FieldToLogicalType(ClientContext &context, MYSQL_FIELD *
 	return MySQLUtils::TypeToLogicalType(context, type_data);
 }
 
-LogicalType MySQLUtils::ToMySQLType(const LogicalType &input) {
+LogicalType MySQLUtils::ToMySQLType(ClientContext &context, const LogicalType &input) {
 	switch (input.id()) {
 	case LogicalTypeId::BOOLEAN:
 	case LogicalTypeId::SMALLINT:
@@ -508,6 +514,15 @@ LogicalType MySQLUtils::ToMySQLType(const LogicalType &input) {
 	case LogicalTypeId::TIMESTAMP_TZ:
 	case LogicalTypeId::VARCHAR:
 		return input;
+	case LogicalTypeId::TIME: {
+		Value time_as_time;
+		if (context.TryGetCurrentSetting("mysql_time_as_time", time_as_time)) {
+			if (BooleanValue::Get(time_as_time)) {
+				return LogicalType::TIME;
+			}
+		}
+		return LogicalType::VARCHAR;
+	}
 	case LogicalTypeId::LIST:
 		throw NotImplementedException("MySQL does not support arrays - unsupported type \"%s\"", input.ToString());
 	case LogicalTypeId::STRUCT:

@@ -270,7 +270,7 @@ PhysicalOperator &AddCastToMySQLTypes(ClientContext &context, PhysicalPlanGenera
 	bool require_cast = false;
 	auto &child_types = plan.GetTypes();
 	for (auto &type : child_types) {
-		auto mysql_type = MySQLUtils::ToMySQLType(type);
+		auto mysql_type = MySQLUtils::ToMySQLType(context, type);
 		if (mysql_type != type) {
 			require_cast = true;
 			break;
@@ -287,7 +287,7 @@ PhysicalOperator &AddCastToMySQLTypes(ClientContext &context, PhysicalPlanGenera
 		unique_ptr<Expression> expr;
 		expr = make_uniq<BoundReferenceExpression>(type, i);
 
-		auto mysql_type = MySQLUtils::ToMySQLType(type);
+		auto mysql_type = MySQLUtils::ToMySQLType(context, type);
 		if (mysql_type != type) {
 			// add a cast
 			expr = BoundCastExpression::AddCastToType(context, std::move(expr), mysql_type);

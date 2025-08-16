@@ -113,6 +113,21 @@ void CastBoolFromMySQL(ClientContext &context, Vector &input, Vector &result, id
 	}
 }
 
+static bool IsZeroDate(LogicalTypeId type_id, string_t res_str) {
+	const char* cstr = res_str.GetData();
+	switch(type_id) {
+		case LogicalTypeId::DATE:
+			return std::strcmp("0000-00-00", cstr) == 0;
+		case LogicalTypeId::TIME:
+			return std::strcmp("00:00:00", cstr) == 0;
+		case LogicalTypeId::TIMESTAMP:
+		case LogicalTypeId::TIMESTAMP_TZ:
+			return std::strcmp("0000-00-00 00:00:00", cstr) == 0;
+		default:
+			return false;
+	}
+}
+
 static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	idx_t r;
@@ -127,8 +142,14 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			if (gstate.result->IsNull(c)) {
 				FlatVector::SetNull(vec, r, true);
 			} else {
-				auto string_data = FlatVector::GetData<string_t>(vec);
-				string_data[r] = StringVector::AddStringOrBlob(vec, gstate.result->GetStringT(c));
+				LogicalTypeId type_id = output.data[c].GetType().id();
+				string_t res_str = gstate.result->GetStringT(c);
+				if (!IsZeroDate(type_id, res_str)) {
+					auto string_data = FlatVector::GetData<string_t>(vec);
+					string_data[r] = StringVector::AddStringOrBlob(vec, std::move(res_str));
+				} else {
+					FlatVector::SetNull(vec, r, true);
+				}
 			}
 		}
 	}
@@ -137,6 +158,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 		return;
 	}
 	D_ASSERT(output.ColumnCount() == gstate.varchar_chunk.ColumnCount());
+	string error;
 	for (idx_t c = 0; c < output.ColumnCount(); c++) {
 		switch (output.data[c].GetType().id()) {
 		case LogicalTypeId::BLOB:
@@ -148,16 +170,22 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			// '\1')
 			CastBoolFromMySQL(context, gstate.varchar_chunk.data[c], output.data[c], r);
 			break;
+		case LogicalTypeId::TIME: {
+			VectorOperations::DefaultTryCast(gstate.varchar_chunk.data[c], output.data[c], r, &error);
+			break;
+		}
 		case LogicalTypeId::TIMESTAMP_TZ: {
-			string error;
 			VectorOperations::DefaultTryCast(gstate.varchar_chunk.data[c], output.data[c], r, &error);
 			break;
 		}
 		default: {
-			string error;
 			VectorOperations::TryCast(context, gstate.varchar_chunk.data[c], output.data[c], r, &error);
 			break;
 		}
+		}
+		// throw an error in case of TryCast fails
+		if (!error.empty()) {
+			throw BinderException(error);
 		}
 	}
 	output.SetCardinality(r);
