@@ -10,6 +10,18 @@ namespace duckdb {
 MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context)
     : Transaction(manager, context), access_mode(mysql_catalog.access_mode) {
 	connection = MySQLConnection::Open(mysql_catalog.connection_string);
+
+	string time_zone;
+	{
+		auto ctx = this->context.lock();
+		Value mysql_session_time_zone;
+		if (ctx && ctx->TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
+			time_zone = mysql_session_time_zone.ToString();
+		}
+	}
+	if (!time_zone.empty()) {
+		connection.Execute("SET TIME_ZONE = '" + time_zone + "'");
+	}
 }
 
 MySQLTransaction::~MySQLTransaction() = default;
