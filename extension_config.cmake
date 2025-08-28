@@ -6,3 +6,5 @@ duckdb_extension_load(mysql_scanner
     LOAD_TESTS
     DONT_LINK
 )
+
+duckdb_extension_load(icu)
