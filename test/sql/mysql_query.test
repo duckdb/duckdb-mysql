@@ -160,6 +160,9 @@ require icu
 statement ok
 SET TimeZone='UTC'
 
+statement ok
+SET mysql_session_time_zone = '+01:00'
+
 query IIIII
 SELECT * FROM mysql_query('simple', 'SELECT * FROM datetime_tbl')
 ----
