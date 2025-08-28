@@ -23,7 +23,6 @@ private:
 	static string TransformFilter(string &column_name, TableFilter &filter);
 	static string TransformComparison(ExpressionType type);
 	static string CreateExpression(string &column_name, vector<unique_ptr<TableFilter>> &filters, string op);
-	static string TransformConstant(const Value &val);
 };
 
 } // namespace duckdb

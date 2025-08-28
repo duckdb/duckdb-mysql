@@ -7,6 +7,7 @@
 #include "duckdb/planner/operator/logical_update.hpp"
 #include "duckdb/execution/operator/filter/physical_filter.hpp"
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "duckdb/execution/operator/projection/physical_projection.hpp"
 
@@ -194,7 +195,13 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 			throw NotImplementedException("MySQL Update not supported - Expected a bound reference expression");
 		}
 		auto &ref = op.expressions[c]->Cast<BoundReferenceExpression>();
-		result += proj.select_list[ref.index]->ToString();
+		auto &expr = proj.select_list[ref.index];
+		if (expr->GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
+			auto &bound_const_expr = expr->Cast<BoundConstantExpression>();
+			result += MySQLUtils::TransformConstant(bound_const_expr.value);
+		} else {
+			result += expr->ToString();
+		}
 	}
 	result += " ";
 	auto filters = ExtractFilters(child.children[0], "UPDATE");

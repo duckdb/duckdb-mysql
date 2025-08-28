@@ -555,4 +555,30 @@ string MySQLUtils::WriteLiteral(const string &identifier) {
 	return MySQLUtils::WriteQuoted(identifier, '\'');
 }
 
+static string TransformBlobToMySQL(const string &val) {
+	char const HEX_DIGITS[] = "0123456789ABCDEF";
+
+	string result = "x'";
+	for (idx_t i = 0; i < val.size(); i++) {
+		uint8_t byte_val = static_cast<uint8_t>(val[i]);
+		result += HEX_DIGITS[(byte_val >> 4) & 0xf];
+		result += HEX_DIGITS[byte_val & 0xf];
+	}
+	result += "'";
+	return result;
+}
+
+string MySQLUtils::TransformConstant(const Value& val) {
+	if (val.type().IsNumeric()) {
+		return val.ToSQLString();
+	}
+	if (val.type().id() == LogicalTypeId::BLOB) {
+		return TransformBlobToMySQL(StringValue::Get(val));
+	}
+	if (val.type().id() == LogicalTypeId::TIMESTAMP_TZ) {
+		return val.DefaultCastAs(LogicalType::TIMESTAMP).DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
+	}
+	return val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
+}
+
 } // namespace duckdb
