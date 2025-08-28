@@ -174,6 +174,7 @@ SELECT * FROM mysql_db.tmp;
 | mysql_tinyint1_as_boolean          | Whether or not to convert TINYINT(1) columns to BOOLEAN        | true    |
 | mysql_debug_show_queries           | DEBUG SETTING: print all queries sent to MySQL to stdout       | false   |
 | mysql_bit1_as_boolean              | Whether or not to convert BIT(1) columns to BOOLEAN            | true    |
+| mysql_session_time_zone            | Value to use as a session time zone for newly opened connections to MySQL server | ''    |
 
 ## Schema Cache
 
