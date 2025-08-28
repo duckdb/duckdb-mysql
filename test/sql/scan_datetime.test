@@ -29,3 +29,22 @@ query IIIII
 SELECT typeof(COLUMNS(*)) FROM datetime_tbl LIMIT 1
 ----
 DATE	TIMESTAMP	TIMESTAMP WITH TIME ZONE	VARCHAR	INTEGER
+
+statement ok
+CREATE OR REPLACE TABLE scan_datetime_1(col1 INTEGER, col2 DATE);
+
+statement ok
+INSERT INTO scan_datetime_1 VALUES (1, '2020-12-30'::DATE)
+
+query II
+SELECT * FROM scan_datetime_1 ORDER BY col1
+----
+1	2020-12-30
+
+statement ok
+UPDATE scan_datetime_1 SET col2 = '2020-12-31' WHERE col1 = 1
+
+query II
+SELECT * FROM scan_datetime_1 ORDER BY col1
+----
+1	2020-12-31

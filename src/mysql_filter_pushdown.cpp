@@ -39,32 +39,6 @@ string MySQLFilterPushdown::TransformComparison(ExpressionType type) {
 	}
 }
 
-static string TransformBlobToMySQL(const string &val) {
-	char const HEX_DIGITS[] = "0123456789ABCDEF";
-
-	string result = "x'";
-	for (idx_t i = 0; i < val.size(); i++) {
-		uint8_t byte_val = static_cast<uint8_t>(val[i]);
-		result += HEX_DIGITS[(byte_val >> 4) & 0xf];
-		result += HEX_DIGITS[byte_val & 0xf];
-	}
-	result += "'";
-	return result;
-}
-
-string MySQLFilterPushdown::TransformConstant(const Value &val) {
-	if (val.type().IsNumeric()) {
-		return val.ToSQLString();
-	}
-	if (val.type().id() == LogicalTypeId::BLOB) {
-		return TransformBlobToMySQL(StringValue::Get(val));
-	}
-	if (val.type().id() == LogicalTypeId::TIMESTAMP_TZ) {
-		return val.DefaultCastAs(LogicalType::TIMESTAMP).DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
-	}
-	return val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
-}
-
 string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &filter) {
 	switch (filter.filter_type) {
 	case TableFilterType::IS_NULL:
@@ -81,7 +55,7 @@ string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &fi
 	}
 	case TableFilterType::CONSTANT_COMPARISON: {
 		auto &constant_filter = filter.Cast<ConstantFilter>();
-		auto constant_string = TransformConstant(constant_filter.constant);
+		auto constant_string = MySQLUtils::TransformConstant(constant_filter.constant);
 		auto operator_string = TransformComparison(constant_filter.comparison_type);
 		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
 	}
@@ -99,7 +73,7 @@ string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &fi
 			if (!in_list.empty()) {
 				in_list += ", ";
 			}
-			in_list += TransformConstant(val);
+			in_list += MySQLUtils::TransformConstant(val);
 		}
 		return column_name + " IN (" + in_list + ")";
 	}
