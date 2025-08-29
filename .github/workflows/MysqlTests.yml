@@ -25,7 +25,7 @@ jobs:
     env:
       VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
       OSX_BUILD_ARCH: ${{ matrix.osx_build_arch }}
-      GEN: Ninja
+      GEN: ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
 
     steps:
@@ -36,11 +36,9 @@ jobs:
 
       - name: Install
         run: |
-          brew install ninja
           brew install autoconf
           brew install automake
           brew install autoconf-archive
-          brew install libevent
           brew install jemalloc
           brew install mysql
           brew services start mysql
