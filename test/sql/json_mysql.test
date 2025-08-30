@@ -1,0 +1,19 @@
+# name: test/sql/json_mysql.test
+# description: Test JSON type
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple (TYPE MYSQL_SCANNER)
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT * FROM json_tbl')
+----
+{"k1": "value", "k2": 10}
+["abc", 10, null, true, false]
+NULL

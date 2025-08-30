@@ -61,7 +61,7 @@ SELECT * FROM v1
 statement error
 DROP TABLE v1
 ----
-Unknown table
+<REGEX>:.*(Unknown table|is a view).*
 
 statement ok
 DROP VIEW v1

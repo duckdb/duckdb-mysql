@@ -74,7 +74,7 @@ ALTER TABLE IF EXISTS s1.bla ADD COLUMN j INTEGER
 statement error
 ALTER TABLE s1.test2 DROP COLUMN z
 ----
-check that column/key exists
+<REGEX>:.*check that [a-z/]+ exists.*
 
 statement error
 ALTER TABLE s1.test2 DROP COLUMN IF EXISTS z

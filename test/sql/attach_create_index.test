@@ -71,4 +71,4 @@ INSERT INTO s.test VALUES ('HELLO'), ('hello')
 statement error
 CREATE UNIQUE INDEX i_index ON s.test(LOWER(s))
 ----
-that returns a BLOB or TEXT
+<REGEX>:.*(that returns a BLOB or TEXT|MariaDB).*
