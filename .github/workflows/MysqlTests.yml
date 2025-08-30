@@ -9,7 +9,7 @@ defaults:
 
 jobs:
   macos:
-    name: MySQL tests (${{ matrix.osx_build_arch }})
+    name: MacOS (${{ matrix.osx_build_arch }})
     runs-on: macos-latest
     strategy:
       matrix:
@@ -27,6 +27,7 @@ jobs:
       OSX_BUILD_ARCH: ${{ matrix.osx_build_arch }}
       GEN: ninja
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      ORACLE_MYSQL_SERVER: 1
 
     steps:
       - uses: actions/checkout@v3
@@ -84,3 +85,54 @@ jobs:
         run: |
           cat /Users/runner/work/duckdb_mysql/duckdb_mysql/vcpkg/buildtrees/libmysql/*.log
           cat /Users/runner/work/duckdb_mysql/duckdb_mysql/build/release/*.log
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    env:
+      VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
+      GEN: ninja
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      MYSQL_PWD: root
+      MYSQL_TEST_DATABASE_AVAILABLE: 1
+      MARIADB_SERVER: 1
+
+    steps:
+    - name: Install required ubuntu packages
+      run: |
+        sudo apt-get update -y -q -o=Dpkg::Use-Pty=0
+        sudo apt-get install -y -q -o=Dpkg::Use-Pty=0 \
+          build-essential \
+          cmake \
+          mariadb-server \
+          ninja-build \
+          pkg-config \
+          zip
+
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        submodules: 'true'
+
+    - name: Setup MariaDB
+      run: |
+        sudo mariadb -e "select @@version"
+        sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
+        echo "[client]" >> ~/.my.cnf 
+        echo "default-character-set = utf8mb4" >> ~/.my.cnf
+        mysql -u root < test/test_data.sql 
+        mysql -u root -e "SELECT 42"
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11.1
+      with:
+        vcpkgGitCommitId: a42af01b72c28a8e1d7b48107b33e4f286a55ef6
+
+    - name: Build extension
+      run: |
+        make release
+
+    - name: Test extension
+      run: |
+        make test

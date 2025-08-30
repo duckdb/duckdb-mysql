@@ -6,6 +6,8 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require-env ORACLE_MYSQL_SERVER
+
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
