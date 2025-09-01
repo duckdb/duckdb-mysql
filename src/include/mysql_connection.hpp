@@ -10,8 +10,10 @@
 
 #include "duckdb/common/shared_ptr.hpp"
 #include "duckdb/common/mutex.hpp"
-#include "mysql_utils.hpp"
+
 #include "mysql_result.hpp"
+#include "mysql_types.hpp"
+#include "mysql_utils.hpp"
 
 namespace duckdb {
 class MySQLBinaryWriter;
@@ -39,7 +41,8 @@ struct OwnedMySQLConnection {
 
 class MySQLConnection {
 public:
-	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection = nullptr);
+	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, const std::string &dsn_p,
+	                         MySQLTypeConfig type_config_p);
 	~MySQLConnection();
 	// disable copy constructors
 	MySQLConnection(const MySQLConnection &other) = delete;
@@ -49,10 +52,9 @@ public:
 	MySQLConnection &operator=(MySQLConnection &&) noexcept;
 
 public:
-	static MySQLConnection Open(const string &connection_string);
+	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string);
 	void Execute(const string &query);
 	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
-	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming, ClientContext &context);
 
 	vector<IndexInfo> GetIndexInfo(const string &table_name);
 
@@ -77,13 +79,13 @@ public:
 	static bool DebugPrintQueries();
 
 private:
-	unique_ptr<MySQLResult> QueryInternal(const string &query, MySQLResultStreaming streaming,
-	                                      optional_ptr<ClientContext> context);
+	unique_ptr<MySQLResult> QueryInternal(const string &query, MySQLResultStreaming streaming);
 	MYSQL_RES *MySQLExecute(const string &query, bool streaming);
 
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;
 	string dsn;
+	MySQLTypeConfig type_config;
 };
 
 } // namespace duckdb

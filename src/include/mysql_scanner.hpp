@@ -9,8 +9,10 @@
 #pragma once
 
 #include "duckdb.hpp"
-#include "mysql_utils.hpp"
+
 #include "mysql_connection.hpp"
+#include "mysql_types.hpp"
+#include "mysql_utils.hpp"
 
 namespace duckdb {
 class MySQLTableEntry;

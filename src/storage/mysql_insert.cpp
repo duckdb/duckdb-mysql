@@ -1,16 +1,20 @@
 #include "storage/mysql_insert.hpp"
-#include "storage/mysql_catalog.hpp"
-#include "storage/mysql_transaction.hpp"
+
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/operator/logical_create_table.hpp"
-#include "storage/mysql_table_entry.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/execution/operator/projection/physical_projection.hpp"
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+
 #include "mysql_connection.hpp"
 #include "mysql_scanner.hpp"
+#include "mysql_types.hpp"
+
+#include "storage/mysql_catalog.hpp"
+#include "storage/mysql_transaction.hpp"
+#include "storage/mysql_table_entry.hpp"
 
 namespace duckdb {
 
@@ -269,9 +273,10 @@ InsertionOrderPreservingMap<string> MySQLInsert::ParamsToString() const {
 PhysicalOperator &AddCastToMySQLTypes(ClientContext &context, PhysicalPlanGenerator &planner, PhysicalOperator &plan) {
 	// check if we need to cast anything
 	bool require_cast = false;
+	MySQLTypeConfig type_config(context);
 	auto &child_types = plan.GetTypes();
 	for (auto &type : child_types) {
-		auto mysql_type = MySQLUtils::ToMySQLType(context, type);
+		auto mysql_type = MySQLTypes::ToMySQLType(type_config, type);
 		if (mysql_type != type) {
 			require_cast = true;
 			break;
@@ -288,7 +293,7 @@ PhysicalOperator &AddCastToMySQLTypes(ClientContext &context, PhysicalPlanGenera
 		unique_ptr<Expression> expr;
 		expr = make_uniq<BoundReferenceExpression>(type, i);
 
-		auto mysql_type = MySQLUtils::ToMySQLType(context, type);
+		auto mysql_type = MySQLTypes::ToMySQLType(type_config, type);
 		if (mysql_type != type) {
 			// add a cast
 			expr = BoundCastExpression::AddCastToType(context, std::move(expr), mysql_type);

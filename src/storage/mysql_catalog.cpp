@@ -1,14 +1,17 @@
 #include "storage/mysql_catalog.hpp"
-#include "storage/mysql_schema_entry.hpp"
-#include "storage/mysql_transaction.hpp"
-#include "mysql_connection.hpp"
-#include "duckdb/storage/database_size.hpp"
-#include "duckdb/parser/parsed_data/drop_info.hpp"
-#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+
+#include "duckdb/execution/operator/scan/physical_table_scan.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
-#include "duckdb/execution/operator/scan/physical_table_scan.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+#include "duckdb/storage/database_size.hpp"
+
+#include "mysql_connection.hpp"
 #include "mysql_scanner.hpp"
+#include "mysql_types.hpp"
+#include "storage/mysql_schema_entry.hpp"
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 
@@ -21,7 +24,8 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
 	default_schema = connection_params.db;
 	// try to connect
-	auto connection = MySQLConnection::Open(connection_string);
+	MySQLTypeConfig type_config;
+	auto connection = MySQLConnection::Open(type_config, connection_string);
 }
 
 MySQLCatalog::~MySQLCatalog() = default;

@@ -1,5 +1,5 @@
 #include "storage/mysql_table_set.hpp"
-#include "storage/mysql_transaction.hpp"
+
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/parser/constraints/unique_constraint.hpp"
@@ -8,8 +8,12 @@
 #include "duckdb/catalog/dependency_list.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/constraints/list.hpp"
-#include "storage/mysql_schema_entry.hpp"
 #include "duckdb/parser/parser.hpp"
+
+#include "storage/mysql_transaction.hpp"
+#include "storage/mysql_schema_entry.hpp"
+
+#include "mysql_types.hpp"
 
 namespace duckdb {
 
@@ -28,7 +32,7 @@ void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQL
 	type_info.precision = result.IsNull(column_index + 5) ? -1 : result.GetInt64(column_index + 5);
 	type_info.scale = result.IsNull(column_index + 6) ? -1 : result.GetInt64(column_index + 6);
 
-	auto column_type = MySQLUtils::TypeToLogicalType(context, type_info);
+	auto column_type = MySQLTypes::TypeToLogicalType({context}, type_info);
 	ColumnDefinition column(std::move(column_name), std::move(column_type));
 	if (!default_value.empty()) {
 		auto expressions = Parser::ParseExpressionList(default_value);
@@ -165,7 +169,7 @@ string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_ptr<Cons
 			ss << ", ";
 		}
 		ss << MySQLUtils::WriteIdentifier(column.Name()) << " ";
-		ss << MySQLUtils::TypeToString(column.Type());
+		ss << MySQLTypes::TypeToString(column.Type());
 		bool not_null = not_null_columns.find(column.Logical()) != not_null_columns.end();
 		bool is_single_key_pk = pk_columns.find(column.Logical()) != pk_columns.end();
 		bool is_multi_key_pk = multi_key_pks.find(column.Name()) != multi_key_pks.end();
@@ -199,9 +203,10 @@ string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_ptr<Cons
 }
 
 string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
+	MySQLTypeConfig type_config(context);
 	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
 		auto &col = info.columns.GetColumnMutable(LogicalIndex(i));
-		col.SetType(MySQLUtils::ToMySQLType(context, col.GetType()));
+		col.SetType(MySQLTypes::ToMySQLType(type_config, col.GetType()));
 	}
 
 	std::stringstream ss;

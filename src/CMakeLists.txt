@@ -8,8 +8,10 @@ add_library(
   mysql_execute.cpp
   mysql_extension.cpp
   mysql_filter_pushdown.cpp
+  mysql_result.cpp
   mysql_scanner.cpp
   mysql_storage.cpp
+  mysql_types.cpp
   mysql_utils.cpp)
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:mysql_ext_library>

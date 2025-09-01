@@ -1,21 +1,23 @@
 #include "storage/mysql_transaction.hpp"
-#include "storage/mysql_catalog.hpp"
+
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/catalog/catalog_entry/index_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/view_catalog_entry.hpp"
+
 #include "mysql_result.hpp"
+#include "mysql_types.hpp"
+#include "storage/mysql_catalog.hpp"
 
 namespace duckdb {
 
 MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context)
-    : Transaction(manager, context), access_mode(mysql_catalog.access_mode) {
-	connection = MySQLConnection::Open(mysql_catalog.connection_string);
-
+    : Transaction(manager, context),
+      connection(MySQLConnection::Open(MySQLTypeConfig(context), mysql_catalog.connection_string)),
+      access_mode(mysql_catalog.access_mode) {
 	string time_zone;
 	{
-		auto ctx = this->context.lock();
 		Value mysql_session_time_zone;
-		if (ctx && ctx->TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
+		if (context.TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
 			time_zone = mysql_session_time_zone.ToString();
 		}
 	}
