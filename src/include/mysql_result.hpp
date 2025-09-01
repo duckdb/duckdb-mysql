@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 
 namespace duckdb {
@@ -21,7 +22,6 @@ struct MySQLField {
 
 class MySQLResult {
 public:
-	MySQLResult(MYSQL_RES *res_p, idx_t field_count, bool streaming_p, MySQLConnection &con);
 	MySQLResult(MYSQL_RES *res_p, vector<MySQLField> fields_p, bool streaming_p, MySQLConnection &con);
 	MySQLResult(idx_t affected_rows);
 	~MySQLResult();

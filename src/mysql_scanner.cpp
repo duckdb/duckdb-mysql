@@ -248,7 +248,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	}
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto sql = input.inputs[1].GetValue<string>();
-	auto result = transaction.GetConnection().Query(sql, MySQLResultStreaming::FORCE_MATERIALIZATION, context);
+	auto result = transaction.GetConnection().Query(sql, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	for (auto &field : result->Fields()) {
 		names.push_back(field.name);
 		return_types.push_back(field.type);
@@ -267,8 +267,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 		mysql_result = std::move(bind_data.result);
 	} else {
 		auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
-		mysql_result =
-		    transaction.GetConnection().Query(bind_data.query, MySQLResultStreaming::FORCE_MATERIALIZATION, context);
+		mysql_result = transaction.GetConnection().Query(bind_data.query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	}
 	auto column_count = mysql_result->ColumnCount();
 

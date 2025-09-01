@@ -1,14 +1,19 @@
-#include "duckdb/storage/table_storage_info.hpp"
+#include "mysql_connection.hpp"
+
+#include "duckdb/common/types/uuid.hpp"
 #include "duckdb/parser/column_list.hpp"
 #include "duckdb/parser/parser.hpp"
-#include "mysql_connection.hpp"
-#include "duckdb/common/types/uuid.hpp"
+#include "duckdb/storage/table_storage_info.hpp"
+
+#include "mysql_types.hpp"
 
 namespace duckdb {
 
 static bool debug_mysql_print_queries = false;
 
-MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p) : connection(std::move(connection_p)) {
+MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p, const std::string &dsn_p,
+                                 MySQLTypeConfig type_config_p)
+    : connection(std::move(connection_p)), dsn(std::move(dsn_p)), type_config(std::move(type_config_p)) {
 }
 
 MySQLConnection::~MySQLConnection() {
@@ -18,19 +23,19 @@ MySQLConnection::~MySQLConnection() {
 MySQLConnection::MySQLConnection(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
 	std::swap(dsn, other.dsn);
+	std::swap(type_config, other.type_config);
 }
 
 MySQLConnection &MySQLConnection::operator=(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
 	std::swap(dsn, other.dsn);
+	std::swap(type_config, other.type_config);
 	return *this;
 }
 
-MySQLConnection MySQLConnection::Open(const string &connection_string) {
-	MySQLConnection result;
-	result.connection = make_shared_ptr<OwnedMySQLConnection>(MySQLUtils::Connect(connection_string));
-	result.dsn = connection_string;
-	return result;
+MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string &connection_string) {
+	auto connection = make_shared_ptr<OwnedMySQLConnection>(MySQLUtils::Connect(connection_string));
+	return MySQLConnection(std::move(connection), connection_string, std::move(type_config));
 }
 
 MYSQL_RES *MySQLConnection::MySQLExecute(const string &query, bool streaming) {
@@ -46,8 +51,7 @@ MYSQL_RES *MySQLConnection::MySQLExecute(const string &query, bool streaming) {
 	return streaming ? mysql_use_result(con) : mysql_store_result(con);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming,
-                                                       optional_ptr<ClientContext> context) {
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming) {
 	auto con = GetConn();
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	auto result = MySQLExecute(query, result_streaming);
@@ -63,10 +67,6 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 		// get the affected rows
 		return make_uniq<MySQLResult>(mysql_affected_rows(con));
 	} else {
-		// result set
-		if (!context) {
-			return make_uniq<MySQLResult>(result, field_count, result_streaming, *this);
-		}
 		vector<MySQLField> fields;
 		for (idx_t i = 0; i < field_count; i++) {
 			auto field = mysql_fetch_field_direct(result, i);
@@ -74,7 +74,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 			if (field->name && field->name_length > 0) {
 				mysql_field.name = string(field->name, field->name_length);
 			}
-			mysql_field.type = MySQLUtils::FieldToLogicalType(*context, field);
+			mysql_field.type = MySQLTypes::FieldToLogicalType(type_config, field);
 			fields.push_back(std::move(mysql_field));
 		}
 
@@ -83,16 +83,11 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
-	return QueryInternal(query, streaming, nullptr);
-}
-
-unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming,
-                                               ClientContext &context) {
-	return QueryInternal(query, streaming, context);
+	return QueryInternal(query, streaming);
 }
 
 void MySQLConnection::Execute(const string &query) {
-	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION, nullptr);
+	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 }
 
 bool MySQLConnection::IsOpen() {

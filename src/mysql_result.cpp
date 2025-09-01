@@ -2,13 +2,6 @@
 #include "mysql_connection.hpp"
 namespace duckdb {
 
-MySQLResult::MySQLResult(MYSQL_RES *res_p, idx_t field_count, bool streaming_p, MySQLConnection &con)
-    : res(res_p), field_count(field_count), streaming(streaming_p) {
-	if (streaming) {
-		dsn = con.GetDSN();
-		connection = con.GetConnection();
-	}
-}
 MySQLResult::MySQLResult(MYSQL_RES *res_p, vector<MySQLField> fields_p, bool streaming_p, MySQLConnection &con)
     : res(res_p), field_count(fields_p.size()), fields(std::move(fields_p)), streaming(streaming_p) {
 	if (streaming) {
@@ -46,7 +39,8 @@ bool MySQLResult::TryCancelQuery() {
 		auto connection_id = mysql_thread_id(connection->connection);
 
 		// open a new connection
-		auto con = MySQLConnection::Open(dsn);
+		MySQLTypeConfig type_config;
+		auto con = MySQLConnection::Open(type_config, dsn);
 
 		// execute KILL QUERY [connection_id] to kill the running query
 		string kill_query = "KILL " + to_string(connection_id);
