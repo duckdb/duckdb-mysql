@@ -16,7 +16,7 @@ namespace duckdb {
 //! PhysicalCreateSequence represents a CREATE SEQUENCE command
 class MySQLCreateIndex : public PhysicalOperator {
 public:
-	explicit MySQLCreateIndex(unique_ptr<CreateIndexInfo> info, TableCatalogEntry &table);
+	MySQLCreateIndex(PhysicalPlan &physical_plan, unique_ptr<CreateIndexInfo> info, TableCatalogEntry &table);
 
 	unique_ptr<CreateIndexInfo> info;
 	TableCatalogEntry &table;

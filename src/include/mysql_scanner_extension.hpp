@@ -13,11 +13,9 @@ public:
 	std::string Name() override {
 		return "mysql_scanner";
 	}
-	void Load(DuckDB &db) override;
+	void Load(ExtensionLoader &loader) override;
 };
 
 extern "C" {
-DUCKDB_EXTENSION_API void mysql_scanner_init(duckdb::DatabaseInstance &db);
-DUCKDB_EXTENSION_API const char *mysql_scanner_version();
-DUCKDB_EXTENSION_API void mysql_scanner_storage_init(DBConfig &config);
+DUCKDB_CPP_EXTENSION_ENTRY(mysql_scanner, loader);
 }

@@ -7,19 +7,18 @@
 
 namespace duckdb {
 
-static unique_ptr<Catalog> MySQLAttach(StorageExtensionInfo *storage_info, ClientContext &context, AttachedDatabase &db,
-                                       const string &name, AttachInfo &info, AccessMode access_mode) {
+static unique_ptr<Catalog> MySQLAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
+                                       AttachedDatabase &db, const string &name, AttachInfo &info,
+                                       AttachOptions &attach_options) {
 	auto &config = DBConfig::GetConfig(context);
 	if (!config.options.enable_external_access) {
 		throw PermissionException("Attaching MySQL databases is disabled through configuration");
 	}
 	// check if we have a secret provided
 	string secret_name;
-	for (auto &entry : info.options) {
+	for (auto &entry : attach_options.options) {
 		auto lower_name = StringUtil::Lower(entry.first);
-		if (lower_name == "type" || lower_name == "read_only") {
-			// already handled
-		} else if (lower_name == "secret") {
+		if (lower_name == "secret") {
 			secret_name = entry.second.ToString();
 		} else {
 			throw BinderException("Unrecognized option for MySQL attach: %s", entry.first);
@@ -28,10 +27,11 @@ static unique_ptr<Catalog> MySQLAttach(StorageExtensionInfo *storage_info, Clien
 
 	string attach_path = info.path;
 	auto connection_string = MySQLCatalog::GetConnectionString(context, attach_path, secret_name);
-	return make_uniq<MySQLCatalog>(db, std::move(connection_string), std::move(attach_path), access_mode);
+	return make_uniq<MySQLCatalog>(db, std::move(connection_string), std::move(attach_path),
+	                               attach_options.access_mode);
 }
 
-static unique_ptr<TransactionManager> MySQLCreateTransactionManager(StorageExtensionInfo *storage_info,
+static unique_ptr<TransactionManager> MySQLCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
                                                                     AttachedDatabase &db, Catalog &catalog) {
 	auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
 	return make_uniq<MySQLTransactionManager>(db, mysql_catalog);

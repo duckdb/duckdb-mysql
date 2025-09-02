@@ -1,6 +1,6 @@
 #include "duckdb.hpp"
 
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "mysql_scanner.hpp"
 #include "mysql_result.hpp"
@@ -114,17 +114,17 @@ void CastBoolFromMySQL(ClientContext &context, Vector &input, Vector &result, id
 }
 
 static bool IsZeroDate(LogicalTypeId type_id, string_t res_str) {
-	const char* cstr = res_str.GetData();
-	switch(type_id) {
-		case LogicalTypeId::DATE:
-			return std::strcmp("0000-00-00", cstr) == 0;
-		case LogicalTypeId::TIME:
-			return std::strcmp("00:00:00", cstr) == 0;
-		case LogicalTypeId::TIMESTAMP:
-		case LogicalTypeId::TIMESTAMP_TZ:
-			return std::strcmp("0000-00-00 00:00:00", cstr) == 0;
-		default:
-			return false;
+	const char *cstr = res_str.GetData();
+	switch (type_id) {
+	case LogicalTypeId::DATE:
+		return std::strcmp("0000-00-00", cstr) == 0;
+	case LogicalTypeId::TIME:
+		return std::strcmp("00:00:00", cstr) == 0;
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_TZ:
+		return std::strcmp("0000-00-00 00:00:00", cstr) == 0;
+	default:
+		return false;
 	}
 }
 

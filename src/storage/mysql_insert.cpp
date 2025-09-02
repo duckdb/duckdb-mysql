@@ -14,14 +14,15 @@
 
 namespace duckdb {
 
-MySQLInsert::MySQLInsert(LogicalOperator &op, TableCatalogEntry &table,
+MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
                          physical_index_vector_t<idx_t> column_index_map_p)
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
       column_index_map(std::move(column_index_map_p)) {
 }
 
-MySQLInsert::MySQLInsert(LogicalOperator &op, SchemaCatalogEntry &schema, unique_ptr<BoundCreateTableInfo> info)
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, op.types, 1), table(nullptr), schema(&schema),
+MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
+                         unique_ptr<BoundCreateTableInfo> info)
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(nullptr), schema(&schema),
       info(std::move(info)) {
 }
 
@@ -307,7 +308,7 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 	if (op.return_chunk) {
 		throw BinderException("RETURNING clause not yet supported for insertion into MySQL table");
 	}
-	if (op.action_type != OnConflictAction::THROW) {
+	if (op.on_conflict_info.action_type != OnConflictAction::THROW) {
 		throw BinderException("ON CONFLICT clause not yet supported for insertion into MySQL table");
 	}
 	MySQLCatalog::MaterializeMySQLScans(*plan);
