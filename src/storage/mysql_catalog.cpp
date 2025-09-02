@@ -206,7 +206,8 @@ vector<string> GetAttributeNames(const vector<URIToken> &tokens, idx_t token_cou
 		error = ParserException("Invalid URI string - expected host:port or host/schema");
 	}
 	if (current_pos + 1 != token_count) {
-		error = ParserException("Invalid URI string - expected ? after [user[:[password]]@]host[:port][/schema]");
+		error = ParserException("Invalid URI string - expected ? after "
+		                        "[user[:[password]]@]host[:port][/schema]");
 	}
 	return result;
 }
@@ -254,7 +255,8 @@ void ParseAttributes(const vector<URIToken> &tokens, idx_t attribute_start, vect
 				}
 				supported_options += entry.first;
 			}
-			throw ParserException("Invalid URI string - unsupported attribute \"%s\"\nSupported options: %s",
+			throw ParserException("Invalid URI string - unsupported attribute "
+			                      "\"%s\"\nSupported options: %s",
 			                      tokens[i].value, supported_options);
 		}
 		result.emplace_back(entry->second, tokens[i + 1].value);
@@ -374,7 +376,8 @@ string MySQLCatalog::GetConnectionString(ClientContext &context, const string &a
 		// secret found - read data
 		const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
 
-		// Parse the original connection string to find which parameters are already set
+		// Parse the original connection string to find which parameters are already
+		// set
 		MySQLConnectionParameters unused;
 		unordered_set<string> existing_params;
 		std::tie(unused, existing_params) = MySQLUtils::ParseConnectionParameters(connection_string);

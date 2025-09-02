@@ -55,7 +55,8 @@ bool MySQLResult::TryCancelQuery() {
 		// swap connections
 		std::swap(con.GetConnection()->connection, connection->connection);
 
-		// we cancelled the query and replaced the connection with a new one - we're done
+		// we cancelled the query and replaced the connection with a new one - we're
+		// done
 		return true;
 	} catch (...) {
 		return false;
