@@ -7,7 +7,7 @@
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/main/extension_util.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "storage/mysql_catalog.hpp"
@@ -83,27 +83,29 @@ void SetMySQLSecretParameters(CreateSecretFunction &function) {
 	function.named_parameters["ssl_key"] = LogicalType::VARCHAR;
 }
 
-static void LoadInternal(DatabaseInstance &db) {
+static void LoadInternal(ExtensionLoader &loader) {
 	mysql_library_init(0, NULL, NULL);
 	MySQLClearCacheFunction clear_cache_func;
-	ExtensionUtil::RegisterFunction(db, clear_cache_func);
+	loader.RegisterFunction(clear_cache_func);
 
 	MySQLExecuteFunction execute_function;
-	ExtensionUtil::RegisterFunction(db, execute_function);
+	loader.RegisterFunction(execute_function);
 
 	MySQLQueryFunction query_function;
-	ExtensionUtil::RegisterFunction(db, query_function);
+	loader.RegisterFunction(query_function);
 
 	SecretType secret_type;
 	secret_type.name = "mysql";
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
 	secret_type.default_provider = "config";
 
-	ExtensionUtil::RegisterSecretType(db, secret_type);
+	loader.RegisterSecretType(secret_type);
 
 	CreateSecretFunction mysql_secret_function = {"mysql", "config", CreateMySQLSecretFunction};
 	SetMySQLSecretParameters(mysql_secret_function);
-	ExtensionUtil::RegisterFunction(db, mysql_secret_function);
+	loader.RegisterFunction(mysql_secret_function);
+
+	auto &db = loader.GetDatabaseInstance();
 
 	auto &config = DBConfig::GetConfig(db);
 	config.storage_extensions["mysql_scanner"] = make_uniq<MySQLStorageExtension>();
@@ -117,33 +119,26 @@ static void LoadInternal(DatabaseInstance &db) {
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), MySQLClearCacheFunction::ClearCacheOnSetting);
 	config.AddExtensionOption("mysql_bit1_as_boolean", "Whether or not to convert BIT(1) columns to BOOLEAN",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), MySQLClearCacheFunction::ClearCacheOnSetting);
-	config.AddExtensionOption("mysql_session_time_zone", "Value to use as a session time zone for newly opened"
-	                          " connections to MySQL server", LogicalType::VARCHAR, Value(""),
-	                          MySQLClearCacheFunction::ClearCacheOnSetting);
+	config.AddExtensionOption("mysql_session_time_zone",
+	                          "Value to use as a session time zone for newly opened"
+	                          " connections to MySQL server",
+	                          LogicalType::VARCHAR, Value(""), MySQLClearCacheFunction::ClearCacheOnSetting);
 	config.AddExtensionOption("mysql_time_as_time", "Whether or not to convert MySQL's TIME columns to DuckDB's TIME",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), MySQLClearCacheFunction::ClearCacheOnSetting);
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false),
+	                          MySQLClearCacheFunction::ClearCacheOnSetting);
 
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	config.optimizer_extensions.push_back(std::move(mysql_optimizer));
 }
 
-void MysqlScannerExtension::Load(DuckDB &db) {
-	LoadInternal(*db.instance);
+void MysqlScannerExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
 }
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void mysql_scanner_init(duckdb::DatabaseInstance &db) {
-	LoadInternal(db);
-}
-
-DUCKDB_EXTENSION_API const char *mysql_scanner_version() {
-	return DuckDB::LibraryVersion();
-}
-
-DUCKDB_EXTENSION_API void mysql_scanner_storage_init(DBConfig &config) {
-	mysql_library_init(0, NULL, NULL);
-	config.storage_extensions["mysql_scanner"] = make_uniq<MySQLStorageExtension>();
+DUCKDB_CPP_EXTENSION_ENTRY(mysql_scanner, loader) {
+	LoadInternal(loader);
 }
 }

@@ -13,9 +13,10 @@
 
 namespace duckdb {
 
-MySQLExecuteQuery::MySQLExecuteQuery(LogicalOperator &op, string op_name_p, TableCatalogEntry &table, string query_p)
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, op.types, 1), op_name(std::move(op_name_p)), table(table),
-      query(std::move(query_p)) {
+MySQLExecuteQuery::MySQLExecuteQuery(PhysicalPlan &physical_plan, LogicalOperator &op, string op_name_p,
+                                     TableCatalogEntry &table, string query_p)
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), op_name(std::move(op_name_p)),
+      table(table), query(std::move(query_p)) {
 }
 
 //===--------------------------------------------------------------------===//

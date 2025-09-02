@@ -1,4 +1,4 @@
-# name: test/sql/attach_mysql_geometry.test
+# name: test/sql/attach_mariadb_geometry.test
 # description: Test reading geometry data
 # group: [sql]
 
