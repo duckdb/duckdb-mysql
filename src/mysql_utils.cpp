@@ -103,11 +103,13 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 		key = StringUtil::Lower(key);
 
 		if (set_options.find(key) != set_options.end()) {
-			throw InvalidInputException(
-			    "Duplicate '%s' parameter in connection string. Each parameter should only be specified once.", key);
+			throw InvalidInputException("Duplicate '%s' parameter in connection string. Each parameter "
+			                            "should only be specified once.",
+			                            key);
 		}
 
-		// Handle duplicate options (except for aliased options like passwd/password which map to the same option)
+		// Handle duplicate options (except for aliased options like passwd/password
+		// which map to the same option)
 		if (key == "host") {
 			set_options.insert("host");
 			result.host = value;
@@ -143,8 +145,9 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 			} else if (val == "preferred") {
 				// nop
 			} else {
-				throw InvalidInputException(
-				    "Invalid dsn - compression mode must be either disabled/required/preferred - got %s", value);
+				throw InvalidInputException("Invalid dsn - compression mode must be either "
+				                            "disabled/required/preferred - got %s",
+				                            value);
 			}
 		} else if (key == "ssl_mode") {
 			set_options.insert("ssl_mode");
@@ -160,7 +163,8 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 			} else if (val == "preferred") {
 				result.ssl_mode = SSL_MODE_PREFERRED;
 			} else {
-				throw InvalidInputException("Invalid dsn - ssl mode must be either disabled, required, verify_ca, "
+				throw InvalidInputException("Invalid dsn - ssl mode must be either "
+				                            "disabled, required, verify_ca, "
 				                            "verify_identity or preferred - got %s",
 				                            value);
 			}
@@ -276,14 +280,15 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
 
 			if (!result) {
-				throw IOException(
-				    "Failed to connect to MySQL database with parameters \"%s\": %s. First attempted host: %s. "
-				    "Retry with 127.0.0.1 also failed.",
-				    dsn, mysql_error(mysql), attempted_host.c_str());
+				throw IOException("Failed to connect to MySQL database with parameters "
+				                  "\"%s\": %s. First attempted host: %s. "
+				                  "Retry with 127.0.0.1 also failed.",
+				                  dsn, mysql_error(mysql), attempted_host.c_str());
 			}
 		} else {
-			throw IOException("Failed to connect to MySQL database with parameters \"%s\": %s. Attempted host: %s", dsn,
-			                  original_error.c_str(), attempted_host.c_str());
+			throw IOException("Failed to connect to MySQL database with parameters "
+			                  "\"%s\": %s. Attempted host: %s",
+			                  dsn, original_error.c_str(), attempted_host.c_str());
 		}
 	}
 	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {
@@ -354,8 +359,8 @@ LogicalType MySQLUtils::TypeToLogicalType(ClientContext &context, const MySQLTyp
 	} else if (type_info.type_name == "date") {
 		return LogicalType::DATE;
 	} else if (type_info.type_name == "time") {
-		// we convert time to VARCHAR by default because TIME in MySQL is more like an
-		// interval and can store ranges between -838:00:00 to 838:00:00
+		// we convert time to VARCHAR by default because TIME in MySQL is more like
+		// an interval and can store ranges between -838:00:00 to 838:00:00
 		Value time_as_time;
 		if (context.TryGetCurrentSetting("mysql_time_as_time", time_as_time)) {
 			if (BooleanValue::Get(time_as_time)) {

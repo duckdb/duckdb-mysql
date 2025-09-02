@@ -8,9 +8,50 @@ defaults:
     shell: bash
 
 jobs:
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-22.04
+    env:
+      CC: gcc-10
+      CXX: g++-10
+      GEN: ninja
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+
+      - name: Install
+        shell: bash
+        run: |
+          sudo apt-get update -y -q -o=Dpkg::Use-Pty=0
+          sudo apt-get install -y -q -o=Dpkg::Use-Pty=0 \
+            ninja-build \
+            clang-format-11
+          sudo pip3 install \
+            cmake-format \
+            'black==24.*' \
+            cxxheaderparser \
+            pcpp \
+            clang_format==11.0.1
+
+      - name: List Installed Packages
+        shell: bash
+        run: pip3 freeze
+
+      - name: Format Check
+        shell: bash
+        run: |
+          clang-format --version
+          clang-format --dump-config
+          black --version
+          make format-check
+
   macos:
     name: MacOS (${{ matrix.osx_build_arch }})
     runs-on: macos-latest
+    needs: format-check
     strategy:
       matrix:
         # Add commits/tags to build against other DuckDB versions
@@ -23,14 +64,14 @@ jobs:
             duckdb_arch: 'osx_amd64'
 
     env:
-      VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
-      OSX_BUILD_ARCH: ${{ matrix.osx_build_arch }}
       GEN: ninja
+      OSX_BUILD_ARCH: ${{ matrix.osx_build_arch }}
+      VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       ORACLE_MYSQL_SERVER: 1
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: 'true'
@@ -89,9 +130,10 @@ jobs:
   linux:
     name: Linux
     runs-on: ubuntu-latest
+    needs: format-check
     env:
-      VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
       GEN: ninja
+      VCPKG_TARGET_TRIPLET: ${{ matrix.vcpkg_triplet }}
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       MYSQL_PWD: root
       MYSQL_TEST_DATABASE_AVAILABLE: 1
@@ -110,7 +152,7 @@ jobs:
           zip
 
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
         submodules: 'true'

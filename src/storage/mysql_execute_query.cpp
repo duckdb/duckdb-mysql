@@ -103,7 +103,8 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 			case ExpressionType::VALUE_CONSTANT:
 				break;
 			default:
-				throw NotImplementedException("Unsupported expression type in projection - only simple deletes/updates "
+				throw NotImplementedException("Unsupported expression type in projection - only simple "
+				                              "deletes/updates "
 				                              "are supported in the MySQL connector");
 			}
 		}
