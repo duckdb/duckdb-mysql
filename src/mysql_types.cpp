@@ -175,8 +175,8 @@ LogicalType MySQLTypes::FieldToLogicalType(const MySQLTypeConfig &type_config, M
 		break;
 	}
 	type_data.column_type = type_data.type_name;
-	if (field->max_length != 0) {
-		type_data.column_type += "(" + std::to_string(field->max_length) + ")";
+	if (field->length != 0) {
+		type_data.column_type += "(" + std::to_string(field->length) + ")";
 	}
 	if (field->flags & UNSIGNED_FLAG && field->flags & NUM_FLAG) {
 		type_data.column_type += " unsigned";
