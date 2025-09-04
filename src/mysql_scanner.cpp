@@ -21,7 +21,6 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 	}
 
 	unique_ptr<MySQLResult> result;
-	DataChunk varchar_chunk;
 
 	idx_t MaxThreads() const override {
 		return 1;
@@ -68,12 +67,6 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	auto query_result = con.Query(select, bind_data.streaming);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
 
-	// generate the varchar chunk
-	vector<LogicalType> varchar_types;
-	for (idx_t c = 0; c < input.column_ids.size(); c++) {
-		varchar_types.push_back(LogicalType::VARCHAR);
-	}
-	result->varchar_chunk.Initialize(Allocator::DefaultAllocator(), varchar_types);
 	return std::move(result);
 }
 
@@ -82,106 +75,42 @@ static unique_ptr<LocalTableFunctionState> MySQLInitLocalState(ExecutionContext 
 	return make_uniq<MySQLLocalState>();
 }
 
-void CastBoolFromMySQL(ClientContext &context, Vector &input, Vector &result, idx_t size) {
-	auto input_data = FlatVector::GetData<string_t>(input);
-	auto result_data = FlatVector::GetData<bool>(result);
-	for (idx_t r = 0; r < size; r++) {
-		if (FlatVector::IsNull(input, r)) {
-			FlatVector::SetNull(result, r, true);
-			continue;
-		}
-		auto str_data = input_data[r].GetData();
-		auto str_size = input_data[r].GetSize();
-		if (str_size == 0) {
-			throw BinderException("Failed to cast MySQL boolean - expected 1 byte "
-			                      "element but got element of size %d\n* SET "
-			                      "mysql_tinyint1_as_boolean=false to disable "
-			                      "loading TINYINT(1) columns as booleans\n* SET "
-			                      "mysql_bit1_as_boolean=false to disable loading "
-			                      "BIT(1) columns as booleans",
-			                      str_size);
-		}
-		// booleans are EITHER binary "1" or "0" (BIT(1))
-		// OR a number
-		// in both cases we can figure out what value it is from the first
-		// character: \0 -> zero byte, false
-		// - -> negative number, false
-		// 0 -> zero number, false
-		if (*str_data == '\0' || *str_data == '0' || *str_data == '-') {
-			result_data[r] = false;
-		} else {
-			result_data[r] = true;
-		}
-	}
-}
-
-static bool IsZeroDate(LogicalTypeId type_id, string_t res_str) {
-	const char *cstr = res_str.GetData();
-	switch (type_id) {
-	case LogicalTypeId::DATE:
-		return std::strcmp("0000-00-00", cstr) == 0;
-	case LogicalTypeId::TIME:
-		return std::strcmp("00:00:00", cstr) == 0;
-	case LogicalTypeId::TIMESTAMP:
-	case LogicalTypeId::TIMESTAMP_TZ:
-		return std::strcmp("0000-00-00 00:00:00", cstr) == 0;
-	default:
-		return false;
-	}
-}
-
 static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
-	idx_t r;
-	gstate.varchar_chunk.Reset();
-	for (r = 0; r < STANDARD_VECTOR_SIZE; r++) {
-		if (!gstate.result->Next()) {
-			// exhausted result
-			break;
-		}
-		for (idx_t c = 0; c < output.ColumnCount(); c++) {
-			auto &vec = gstate.varchar_chunk.data[c];
-			if (gstate.result->IsNull(c)) {
-				FlatVector::SetNull(vec, r, true);
-			} else {
-				LogicalTypeId type_id = output.data[c].GetType().id();
-				string_t res_str = gstate.result->GetStringT(c);
-				if (!IsZeroDate(type_id, res_str)) {
-					auto string_data = FlatVector::GetData<string_t>(vec);
-					string_data[r] = StringVector::AddStringOrBlob(vec, std::move(res_str));
-				} else {
-					FlatVector::SetNull(vec, r, true);
-				}
-			}
-		}
-	}
-	if (r == 0) {
-		// done
-		return;
-	}
-	D_ASSERT(output.ColumnCount() == gstate.varchar_chunk.ColumnCount());
+	DataChunk &res_chunk = gstate.result->NextChunk();
+	D_ASSERT(output.ColumnCount() == res_chunk.ColumnCount());
 	string error;
 	for (idx_t c = 0; c < output.ColumnCount(); c++) {
-		switch (output.data[c].GetType().id()) {
-		case LogicalTypeId::BLOB:
-			// blobs are sent over the wire as-is
-			output.data[c].Reinterpret(gstate.varchar_chunk.data[c]);
-			break;
+		Vector &output_vec = output.data[c];
+		Vector &res_vec = res_chunk.data[c];
+		switch (output_vec.GetType().id()) {
 		case LogicalTypeId::BOOLEAN:
-			// booleans can be sent either as numbers ('0' or '1') or as bits ('\0' or
-			// '\1')
-			CastBoolFromMySQL(context, gstate.varchar_chunk.data[c], output.data[c], r);
-			break;
-		case LogicalTypeId::TIME: {
-			VectorOperations::DefaultTryCast(gstate.varchar_chunk.data[c], output.data[c], r, &error);
-			break;
-		}
+		case LogicalTypeId::TINYINT:
+		case LogicalTypeId::UTINYINT:
+		case LogicalTypeId::SMALLINT:
+		case LogicalTypeId::USMALLINT:
+		case LogicalTypeId::INTEGER:
+		case LogicalTypeId::UINTEGER:
+		case LogicalTypeId::BIGINT:
+		case LogicalTypeId::UBIGINT:
+		case LogicalTypeId::FLOAT:
+		case LogicalTypeId::DOUBLE:
+		case LogicalTypeId::BLOB:
+		case LogicalTypeId::DATE:
+		case LogicalTypeId::TIME:
+		case LogicalTypeId::TIMESTAMP:
 		case LogicalTypeId::TIMESTAMP_TZ: {
-			VectorOperations::DefaultTryCast(gstate.varchar_chunk.data[c], output.data[c], r, &error);
+			if (output_vec.GetType().id() == res_vec.GetType().id() ||
+			    (output_vec.GetType().id() == LogicalTypeId::BLOB &&
+			     res_vec.GetType().id() == LogicalTypeId::VARCHAR)) {
+				output_vec.Reinterpret(res_vec);
+			} else {
+				VectorOperations::TryCast(context, res_vec, output_vec, res_chunk.size(), &error);
+			}
 			break;
 		}
 		default: {
-			VectorOperations::TryCast(context, gstate.varchar_chunk.data[c], output.data[c], r, &error);
+			VectorOperations::TryCast(context, res_vec, output_vec, res_chunk.size(), &error);
 			break;
 		}
 		}
@@ -190,7 +119,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			throw BinderException(error);
 		}
 	}
-	output.SetCardinality(r);
+	output.SetCardinality(res_chunk.size());
 }
 
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
@@ -251,7 +180,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	auto result = transaction.GetConnection().Query(sql, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	for (auto &field : result->Fields()) {
 		names.push_back(field.name);
-		return_types.push_back(field.type);
+		return_types.push_back(field.duckdb_type);
 	}
 	if (return_types.empty()) {
 		throw InvalidInputException("Failed to fetch return types for query '%s'", sql);
@@ -269,17 +198,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 		auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
 		mysql_result = transaction.GetConnection().Query(bind_data.query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	}
-	auto column_count = mysql_result->ColumnCount();
 
-	auto result = make_uniq<MySQLGlobalState>(std::move(mysql_result));
-
-	// generate the varchar chunk
-	vector<LogicalType> varchar_types;
-	for (idx_t c = 0; c < column_count; c++) {
-		varchar_types.push_back(LogicalType::VARCHAR);
-	}
-	result->varchar_chunk.Initialize(Allocator::DefaultAllocator(), varchar_types);
-	return std::move(result);
+	return make_uniq<MySQLGlobalState>(std::move(mysql_result));
 }
 
 MySQLQueryFunction::MySQLQueryFunction()
@@ -287,6 +207,7 @@ MySQLQueryFunction::MySQLQueryFunction()
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
+	// named_parameters["params"] = LogicalType::ANY;
 }
 
 } // namespace duckdb
