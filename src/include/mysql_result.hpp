@@ -17,88 +17,57 @@ struct OwnedMySQLConnection;
 
 struct MySQLField {
 	string name;
-	LogicalType type;
+	enum_field_types mysql_type;
+	LogicalType duckdb_type;
+
+	vector<char> bind_buffer;
+	unsigned long bind_length = 0;
+	bool bind_is_null = false;
+	bool bind_error = false;
+
+	MySQLField(MYSQL_FIELD *mf, LogicalType duckdb_type_p, const MySQLTypeConfig &type_config);
+
+	void ResetBind();
+};
+
+struct MySQLBind {
+
+	MySQLBind(const LogicalType &ltype);
 };
 
 class MySQLResult {
 public:
-	MySQLResult(MYSQL_RES *res_p, vector<MySQLField> fields_p, bool streaming_p, MySQLConnection &con);
-	MySQLResult(idx_t affected_rows);
-	~MySQLResult();
+	MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
+	            idx_t affected_rows_p);
 
-public:
-	string GetString(idx_t col) {
-		D_ASSERT(res);
-		return string(GetNonNullValue(col), lengths[col]);
-	}
-	string_t GetStringT(idx_t col) {
-		D_ASSERT(res);
-		return string_t(GetNonNullValue(col), lengths[col]);
-	}
-	int32_t GetInt32(idx_t col) {
-		return atoi(GetNonNullValue(col));
-	}
-	int64_t GetInt64(idx_t col) {
-		return atoll(GetNonNullValue(col));
-	}
-	bool GetBool(idx_t col) {
-		return strcmp(GetNonNullValue(col), "t");
-	}
-	bool IsNull(idx_t col) {
-		return !GetValueInternal(col);
-	}
-	bool Next() {
-		if (!res) {
-			throw InternalException("MySQLResult::Next called without result");
-		}
-		mysql_row = mysql_fetch_row(res);
-		lengths = mysql_fetch_lengths(res);
-		return mysql_row;
-	}
-	idx_t AffectedRows() {
-		if (affected_rows == idx_t(-1)) {
-			throw InternalException("MySQLResult::AffectedRows called for result "
-			                        "that didn't affect any rows");
-		}
-		return affected_rows;
-	}
-	idx_t ColumnCount() {
-		return field_count;
-	}
-	const vector<MySQLField> &Fields() {
-		return fields;
-	}
+	string GetString(idx_t col);
+	int32_t GetInt32(idx_t col);
+	int64_t GetInt64(idx_t col);
+	bool IsNull(idx_t col);
+
+	DataChunk &NextChunk();
+	bool Next();
+	idx_t AffectedRows();
+	const vector<MySQLField> &Fields();
 
 private:
-	MYSQL_RES *res = nullptr;
-	idx_t affected_rows = idx_t(-1);
-	MYSQL_ROW mysql_row = nullptr;
-	unsigned long *lengths = nullptr;
-	idx_t field_count = 0;
+	string query;
+	MySQLStatementPtr stmt;
+	MySQLTypeConfig type_config;
+	idx_t affected_rows = static_cast<idx_t>(-1);
+
 	vector<MySQLField> fields;
-	bool streaming = false;
-	string dsn;
-	shared_ptr<OwnedMySQLConnection> connection;
+	vector<MYSQL_BIND> binds;
 
-	bool TryCancelQuery();
+	DataChunk data_chunk;
+	idx_t row_idx = static_cast<idx_t>(-1);
 
-	char *GetNonNullValue(idx_t col) {
-		auto val = GetValueInternal(col);
-		if (!val) {
-			throw InternalException("MySQLResult::GetNonNullValue called for a NULL value");
-		}
-		return val;
-	}
-
-	char *GetValueInternal(idx_t col) {
-		if (!mysql_row) {
-			throw InternalException("MySQLResult::GetValueInternal called without row");
-		}
-		if (col >= field_count) {
-			throw InternalException("MySQLResult::GetValueInternal row out of range of field count");
-		}
-		return mysql_row[col];
-	}
+	bool FetchNext();
+	void HandleTruncatedData();
+	void WriteToChunk(idx_t row);
+	void CheckColumnIdx(idx_t col);
+	void CheckNotNull(idx_t col);
+	void CheckType(idx_t col, LogicalTypeId type_id);
 };
 
 } // namespace duckdb

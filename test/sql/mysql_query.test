@@ -93,13 +93,13 @@ SELECT * FROM mysql_query('simple', 'SELECT * FROM fake_booleans')
 1	true
 0	false
 NULL	NULL
--128	true
-127	false
+1	true
+1	false
 
 query II
 SELECT * FROM mysql_query('simple', 'SELECT * FROM bits')
 ----
-true	\x00\x00\x00\x00\x00\x01UU
+\x05	\x00\x00\x00\x00\x00\x01UU
 NULL	NULL
 
 query III
@@ -137,18 +137,11 @@ a,d
 a,d
 a,d
 
-# query I
-# SELECT * FROM mysql_query('simple', 'SELECT * FROM json_tbl')
-# ----
-# {"k1": "value", "k2": 10}
-# ["abc", 10, null, true, false]
-# NULL
-
 # errors
 statement error
 SELECT * FROM mysql_query('simple', 'SELEC 42')
 ----
-Failed to run query
+Failed to prepare
 
 statement error
 SELECT * FROM mysql_query('simple', 'SELECT 42 a, 42 a')

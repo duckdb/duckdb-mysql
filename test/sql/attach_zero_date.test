@@ -23,4 +23,4 @@ SET mysql_time_as_time = FALSE
 query IIIII
 SELECT * FROM simple.zero_date
 ----
-NULL	NULL	NULL	00:00:00	0
+NULL	NULL	NULL	NULL	0

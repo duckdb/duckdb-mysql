@@ -38,56 +38,80 @@ MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string 
 	return MySQLConnection(std::move(connection), connection_string, std::move(type_config));
 }
 
-MYSQL_RES *MySQLConnection::MySQLExecute(const string &query, bool streaming) {
+idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, bool streaming) {
 	if (MySQLConnection::DebugPrintQueries()) {
 		Printer::Print(query + "\n");
 	}
-	auto con = GetConn();
+
 	lock_guard<mutex> l(query_lock);
-	int res = mysql_real_query(con, query.c_str(), query.size());
-	if (res != 0) {
-		throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
+
+	if (!stmt) { // basic interface
+		auto con = GetConn();
+		int res_query = mysql_real_query(con, query.c_str(), query.size());
+		if (res_query != 0) {
+			throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
+		}
+		auto result = MySQLResultPtr(mysql_store_result(con), MySQLResultDelete);
+		return 0;
 	}
-	return streaming ? mysql_use_result(con) : mysql_store_result(con);
+
+	// prepared statement interface
+
+	int res_prepare = mysql_stmt_prepare(stmt, query.c_str(), query.size());
+	if (res_prepare != 0) {
+		throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+	}
+
+	int res_exec = mysql_stmt_execute(stmt);
+	if (res_exec != 0) {
+		throw IOException("Failed to execute MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+	}
+
+	idx_t affected_rows = mysql_stmt_affected_rows(stmt);
+
+	if (!streaming && affected_rows == static_cast<idx_t>(-1)) {
+		bool btrue = true;
+		auto res_attr = mysql_stmt_attr_set(stmt, STMT_ATTR_UPDATE_MAX_LENGTH, &btrue);
+		if (res_attr != 0) {
+			throw IOException("Failed to set STMT_ATTR_UPDATE_MAX_LENGTH for MySQL query \"%s\": %s\n", query.c_str(),
+			                  mysql_stmt_error(stmt));
+		}
+
+		int res_store = mysql_stmt_store_result(stmt);
+		if (res_store != 0) {
+			throw IOException("Failed to store result for MySQL query \"%s\": %s\n", query.c_str(),
+			                  mysql_stmt_error(stmt));
+		}
+	}
+
+	return affected_rows;
 }
 
-unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming) {
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming,
+                                                       MySQLConnectorInterface con_interface) {
 	auto con = GetConn();
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
-	auto result = MySQLExecute(query, result_streaming);
-	auto field_count = mysql_field_count(con);
-	if (!result) {
-		// no result set
-		// this can happen in case of a statement like CREATE TABLE, INSERT, etc
-		// check if this is the case with mysql_field_count
-		if (field_count != 0) {
-			// no result but we expected a result
-			throw IOException("Failed to fetch result for query \"%s\": %s\n", query.c_str(), mysql_error(con));
-		}
-		// get the affected rows
-		return make_uniq<MySQLResult>(mysql_affected_rows(con));
-	} else {
-		vector<MySQLField> fields;
-		for (idx_t i = 0; i < field_count; i++) {
-			auto field = mysql_fetch_field_direct(result, i);
-			MySQLField mysql_field;
-			if (field->name && field->name_length > 0) {
-				mysql_field.name = string(field->name, field->name_length);
-			}
-			mysql_field.type = MySQLTypes::FieldToLogicalType(type_config, field);
-			fields.push_back(std::move(mysql_field));
-		}
+	bool basic_interface = con_interface == MySQLConnectorInterface::BASIC;
 
-		return make_uniq<MySQLResult>(result, std::move(fields), result_streaming, *this);
+	if (basic_interface) {
+		MySQLExecute(nullptr, query, result_streaming);
+		return unique_ptr<MySQLResult>(nullptr);
 	}
+
+	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
+	if (!stmt) {
+		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+	}
+	idx_t affected_rows = MySQLExecute(stmt.get(), query, result_streaming);
+	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, affected_rows);
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
-	return QueryInternal(query, streaming);
+	return QueryInternal(query, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
 }
 
-void MySQLConnection::Execute(const string &query) {
-	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
+void MySQLConnection::Execute(const string &query, MySQLConnectorInterface con_interface) {
+	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION, con_interface);
 }
 
 bool MySQLConnection::IsOpen() {

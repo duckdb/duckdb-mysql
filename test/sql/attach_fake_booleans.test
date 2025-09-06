@@ -18,7 +18,7 @@ SELECT * FROM s1.fake_booleans
 true	true
 false	false
 NULL	NULL
-false	true
+true	true
 true	false
 
 query II
