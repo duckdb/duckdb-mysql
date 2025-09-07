@@ -5,6 +5,7 @@
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/storage/table_storage_info.hpp"
 
+#include "mysql_parameter.hpp"
 #include "mysql_types.hpp"
 
 namespace duckdb {
@@ -38,7 +39,7 @@ MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string 
 	return MySQLConnection(std::move(connection), connection_string, std::move(type_config));
 }
 
-idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, bool streaming) {
+idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vector<Value> params, bool streaming) {
 	if (MySQLConnection::DebugPrintQueries()) {
 		Printer::Print(query + "\n");
 	}
@@ -60,6 +61,30 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, bool 
 	int res_prepare = mysql_stmt_prepare(stmt, query.c_str(), query.size());
 	if (res_prepare != 0) {
 		throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+	}
+
+	vector<MySQLParameter> mysql_params;
+	vector<MYSQL_BIND> binds;
+	if (params.size() > 0) {
+		size_t expected_count = mysql_stmt_param_count(stmt);
+		if (expected_count != params.size()) {
+			throw IOException(
+			    "Incorrect query parameters count specified, expected: %zu, actual: %zu, MySQL query \"%s\": %s\n",
+			    expected_count, params.size(), query.c_str(), mysql_stmt_error(stmt));
+		}
+		mysql_params.reserve(params.size());
+		binds.reserve(params.size());
+		for (Value &dp : params) {
+			MySQLParameter mp(query, std::move(dp));
+			mysql_params.emplace_back(std::move(mp));
+			MySQLParameter &mp_ref = mysql_params.back();
+			binds.push_back(mp_ref.CreateBind());
+		}
+		auto res_bind = mysql_stmt_bind_param(stmt, binds.data());
+		if (res_bind != 0) {
+			throw IOException("Failed to bind parameters, count: %zu, MySQL query \"%s\": %s\n", binds.size(),
+			                  query.c_str(), mysql_stmt_error(stmt));
+		}
 	}
 
 	int res_exec = mysql_stmt_execute(stmt);
@@ -87,14 +112,15 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, bool 
 	return affected_rows;
 }
 
-unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQLResultStreaming streaming,
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, vector<Value> params,
+                                                       MySQLResultStreaming streaming,
                                                        MySQLConnectorInterface con_interface) {
 	auto con = GetConn();
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	bool basic_interface = con_interface == MySQLConnectorInterface::BASIC;
 
 	if (basic_interface) {
-		MySQLExecute(nullptr, query, result_streaming);
+		MySQLExecute(nullptr, query, params, result_streaming);
 		return unique_ptr<MySQLResult>(nullptr);
 	}
 
@@ -102,16 +128,27 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, MySQ
 	if (!stmt) {
 		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
 	}
-	idx_t affected_rows = MySQLExecute(stmt.get(), query, result_streaming);
+	idx_t affected_rows = MySQLExecute(stmt.get(), query, params, result_streaming);
 	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, affected_rows);
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
-	return QueryInternal(query, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
+	return Query(query, vector<Value>(), streaming);
 }
 
-void MySQLConnection::Execute(const string &query, MySQLConnectorInterface con_interface) {
-	QueryInternal(query, MySQLResultStreaming::FORCE_MATERIALIZATION, con_interface);
+unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, vector<Value> params,
+                                               MySQLResultStreaming streaming) {
+	return QueryInternal(query, params, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
+}
+
+void MySQLConnection::Execute(const string &query) {
+	Execute(query, vector<Value>());
+}
+
+void MySQLConnection::Execute(const string &query, vector<Value> params) {
+	MySQLConnectorInterface con_interface =
+	    params.size() > 0 ? MySQLConnectorInterface::PREPARED_STATEMENT : MySQLConnectorInterface::BASIC;
+	QueryInternal(query, std::move(params), MySQLResultStreaming::FORCE_MATERIALIZATION, con_interface);
 }
 
 bool MySQLConnection::IsOpen() {

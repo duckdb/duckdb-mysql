@@ -8,6 +8,7 @@ add_library(
   mysql_execute.cpp
   mysql_extension.cpp
   mysql_filter_pushdown.cpp
+  mysql_parameter.cpp
   mysql_result.cpp
   mysql_scanner.cpp
   mysql_storage.cpp

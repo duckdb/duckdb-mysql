@@ -1,0 +1,48 @@
+# name: test/sql/execute_params.test
+# description: Test mysql_execute with parameters
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS tab1')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE tab1(col1 INTEGER, col2 DOUBLE, col3 DATETIME)')
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO tab1 VALUES (?, ?, ?)', params=row(42, 42.123::DOUBLE, '2020-12-31 12:34:45'))
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO tab1 VALUES (?, ?, ?)', params=row(43, 43.123::DOUBLE, '2020-12-31 12:35:45'))
+
+statement ok
+CALL mysql_execute('s', 'UPDATE tab1 SET col2 = ?, col3 = ? WHERE col1 = ?', params=row(44.123::DOUBLE, '2020-12-31 12:36:45', 42))
+
+query III
+SELECT * FROM mysql_query('s', 'SELECT * FROM tab1 WHERE col1 = ?', params=row(42))
+----
+42	44.123	2020-12-31 12:36:45
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE tab1')
+
+statement error
+CALL mysql_execute('s', 'SELECT ? col1',  params=NULL)
+----
+Binder Error: Parameters to mysql_execute cannot be NULL
+
+statement error
+CALL mysql_execute('s', 'SELECT ? col1',  params=42)
+----
+Query parameters must be specified in a STRUCT
+
+statement error
+CALL mysql_execute('s', 'SELECT ? col1',  params=row('2020-12-31 12:34:56'::TIMESTAMP_NS))
+----
+IO Error: Unsupported parameters type: "TIMESTAMP_NS", MySQL query "SELECT ? col1"
