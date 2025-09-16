@@ -15,7 +15,7 @@ concurrency:
 jobs:
   duckdb-stable-build:
     name: Build extension binaries
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.3.2
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4.0
     with:
       extension_name: mysql_scanner
       duckdb_version: main
@@ -26,7 +26,7 @@ jobs:
   duckdb-stable-deploy:
     name: Deploy extension binaries
     needs: duckdb-stable-build
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_deploy.yml@v1.3.2
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_deploy.yml@v1.4.0
     secrets: inherit
     with:
       duckdb_version: main
