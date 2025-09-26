@@ -177,7 +177,22 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	}
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto sql = input.inputs[1].GetValue<string>();
-	auto result = transaction.GetConnection().Query(sql, MySQLResultStreaming::FORCE_MATERIALIZATION);
+
+	vector<Value> params;
+	auto params_it = input.named_parameters.find("params");
+	if (params_it != input.named_parameters.end()) {
+		Value &struct_val = params_it->second;
+		if (struct_val.IsNull()) {
+			throw BinderException("Parameters to mysql_query cannot be NULL");
+		}
+		if (struct_val.type().id() != LogicalTypeId::STRUCT) {
+			throw BinderException("Query parameters must be specified in a STRUCT");
+		}
+		params = StructValue::GetChildren(struct_val);
+	}
+
+	auto result =
+	    transaction.GetConnection().Query(sql, std::move(params), MySQLResultStreaming::FORCE_MATERIALIZATION);
 	for (auto &field : result->Fields()) {
 		names.push_back(field.name);
 		return_types.push_back(field.duckdb_type);
@@ -207,7 +222,7 @@ MySQLQueryFunction::MySQLQueryFunction()
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
-	// named_parameters["params"] = LogicalType::ANY;
+	named_parameters["params"] = LogicalType::ANY;
 }
 
 } // namespace duckdb
