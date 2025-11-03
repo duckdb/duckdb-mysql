@@ -59,8 +59,19 @@ LogicalType MySQLTypes::TypeToLogicalType(const MySQLTypeConfig &type_config, co
 		return type_config.time_as_time ? LogicalType::TIME : LogicalType::VARCHAR;
 	} else if (type_info.type_name == "timestamp") {
 		// in MySQL, "timestamp" columns are timezone aware while "datetime" columns
-		// are not
-		return LogicalType::TIMESTAMP_TZ;
+		// are not, citing the docs:
+		//
+		// > If a column uses the TIMESTAMP data type, then any inserted values are
+		// > converted from the session's time zone to Coordinated Universal Time (UTC)
+		// > when stored, and converted back to the session's time zone when retrieved.
+		//
+		// Thus Incoming MySQL TIMESTAMP values have time zone offset already applied, and
+		// this offset is not available to us ('time_zone_displacement' field of MYSQL_TIME
+		// is always zero). So we cannot obtain the UTC (+00) timestamp from it, thus
+		// cannot use it to initialize the TIMESTAMP_TZ value which expects the UTC (+00)
+		// timestamp, so we are treating it as a 'local' (to server session time zone)
+		// timestamp.
+		return LogicalType::TIMESTAMP;
 	} else if (type_info.type_name == "year") {
 		return LogicalType::INTEGER;
 	} else if (type_info.type_name == "datetime") {
@@ -201,7 +212,6 @@ LogicalType MySQLTypes::ToMySQLType(const MySQLTypeConfig &type_config, const Lo
 	case LogicalTypeId::DATE:
 	case LogicalTypeId::DECIMAL:
 	case LogicalTypeId::TIMESTAMP:
-	case LogicalTypeId::TIMESTAMP_TZ:
 	case LogicalTypeId::VARCHAR:
 		return input;
 	case LogicalTypeId::TIME:
@@ -216,6 +226,7 @@ LogicalType MySQLTypes::ToMySQLType(const MySQLTypeConfig &type_config, const Lo
 	case LogicalTypeId::TIMESTAMP_SEC:
 	case LogicalTypeId::TIMESTAMP_MS:
 	case LogicalTypeId::TIMESTAMP_NS:
+	case LogicalTypeId::TIMESTAMP_TZ:
 		return LogicalType::TIMESTAMP;
 	case LogicalTypeId::HUGEINT:
 		return LogicalType::DOUBLE;

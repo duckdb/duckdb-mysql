@@ -110,7 +110,6 @@ static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const My
 		case LogicalTypeId::FLOAT:
 		case LogicalTypeId::DATE:
 		case LogicalTypeId::TIMESTAMP:
-		case LogicalTypeId::TIMESTAMP_TZ:
 			ltypes.push_back(lt);
 			break;
 		case LogicalTypeId::DOUBLE: {
@@ -426,16 +425,6 @@ static void WriteDateTime(MySQLField &f, Vector &vec, idx_t row) {
 		dtime_t tm = Time::FromTime(mt->hour, mt->minute, mt->second, mt->second_part);
 		timestamp_t val = Timestamp::FromDatetime(dt, tm);
 		timestamp_t *data = FlatVector::GetData<timestamp_t>(vec);
-		data[row] = val;
-		break;
-	}
-	case LogicalTypeId::TIMESTAMP_TZ: {
-		date_t dt = Date::FromDate(mt->year, mt->month, mt->day);
-		dtime_t tm = Time::FromTime(mt->hour, mt->minute, mt->second, mt->second_part);
-		timestamp_t ts = Timestamp::FromDatetime(dt, tm);
-		int64_t offset_us = static_cast<int64_t>(mt->time_zone_displacement) * 1000000;
-		timestamp_tz_t val(ts.value + offset_us);
-		timestamp_tz_t *data = FlatVector::GetData<timestamp_tz_t>(vec);
 		data[row] = val;
 		break;
 	}

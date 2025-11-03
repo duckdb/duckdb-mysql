@@ -98,8 +98,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 		case LogicalTypeId::BLOB:
 		case LogicalTypeId::DATE:
 		case LogicalTypeId::TIME:
-		case LogicalTypeId::TIMESTAMP:
-		case LogicalTypeId::TIMESTAMP_TZ: {
+		case LogicalTypeId::TIMESTAMP: {
 			if (output_vec.GetType().id() == res_vec.GetType().id() ||
 			    (output_vec.GetType().id() == LogicalTypeId::BLOB &&
 			     res_vec.GetType().id() == LogicalTypeId::VARCHAR)) {
