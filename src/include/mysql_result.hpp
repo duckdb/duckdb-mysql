@@ -21,6 +21,7 @@ struct MySQLField {
 	LogicalType duckdb_type;
 
 	vector<char> bind_buffer;
+	vector<char> varlen_buffer;
 	unsigned long bind_length = 0;
 	bool bind_is_null = false;
 	bool bind_error = false;
@@ -28,6 +29,8 @@ struct MySQLField {
 	MySQLField(MYSQL_FIELD *mf, LogicalType duckdb_type_p, const MySQLTypeConfig &type_config);
 
 	void ResetBind();
+
+	MYSQL_BIND CreateBindStruct();
 };
 
 struct MySQLBind {
@@ -57,7 +60,6 @@ private:
 	idx_t affected_rows = static_cast<idx_t>(-1);
 
 	vector<MySQLField> fields;
-	vector<MYSQL_BIND> binds;
 
 	DataChunk data_chunk;
 	idx_t row_idx = static_cast<idx_t>(-1);

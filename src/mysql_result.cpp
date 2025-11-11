@@ -43,6 +43,19 @@ void MySQLField::ResetBind() {
 	this->bind_is_null = false;
 	this->bind_length = 0;
 	this->bind_error = false;
+	this->varlen_buffer.resize(0);
+}
+
+MYSQL_BIND MySQLField::CreateBindStruct() {
+	MYSQL_BIND b;
+	std::memset(&b, '\0', sizeof(MYSQL_BIND));
+	b.buffer_type = mysql_type;
+	b.buffer = bind_buffer.data();
+	b.buffer_length = static_cast<unsigned long>(bind_buffer.size());
+	b.is_null = &bind_is_null;
+	b.length = &bind_length;
+	b.error = &bind_error;
+	return b;
 }
 
 static vector<MySQLField> ReadFields(const std::string &query, MYSQL_STMT *stmt, const MySQLTypeConfig &type_config) {
@@ -72,24 +85,6 @@ static vector<MySQLField> ReadFields(const std::string &query, MYSQL_STMT *stmt,
 	}
 
 	return fields;
-}
-
-static vector<MYSQL_BIND> InitBinds(vector<MySQLField> &fields) {
-	vector<MYSQL_BIND> binds;
-
-	for (auto &f : fields) {
-		MYSQL_BIND b;
-		std::memset(&b, '\0', sizeof(MYSQL_BIND));
-		b.buffer_type = f.mysql_type;
-		b.buffer = f.bind_buffer.data();
-		b.buffer_length = static_cast<unsigned long>(f.bind_buffer.size());
-		b.is_null = &f.bind_is_null;
-		b.length = &f.bind_length;
-		b.error = &f.bind_error;
-		binds.emplace_back(b);
-	}
-
-	return binds;
 }
 
 static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const MySQLTypeConfig &type_config) {
@@ -142,7 +137,13 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 		return;
 	}
 	this->fields = ReadFields(query, stmt.get(), type_config);
-	this->binds = InitBinds(fields);
+
+	// Bind structs are copied onto the statetment, so they can live on stack
+	std::vector<MYSQL_BIND> binds;
+	for (MySQLField &f : fields) {
+		MYSQL_BIND b = f.CreateBindStruct();
+		binds.push_back(b);
+	}
 
 	int res_bind = mysql_stmt_bind_result(stmt.get(), binds.data());
 	if (res_bind != 0) {
@@ -157,32 +158,25 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 void MySQLResult::HandleTruncatedData() {
 	for (size_t i = 0; i < fields.size(); i++) {
 		MySQLField &f = fields[i];
-		MYSQL_BIND &b = binds[i];
 
 		if (!f.bind_error || f.bind_buffer.size() >= f.bind_length) {
 			continue;
 		}
 
-		size_t offset = f.bind_buffer.size();
-		f.bind_buffer.resize(static_cast<size_t>(f.bind_length));
-		b.buffer = f.bind_buffer.data() + offset;
-		b.buffer_length = static_cast<unsigned long>(f.bind_buffer.size() - offset);
-
+		size_t full_len = f.bind_length;
 		f.ResetBind();
-		int res_fetch =
-		    mysql_stmt_fetch_column(stmt.get(), &b, static_cast<unsigned int>(i), static_cast<unsigned long>(offset));
+
+		f.varlen_buffer.resize(static_cast<size_t>(full_len));
+		memcpy(f.varlen_buffer.data(), f.bind_buffer.data(), f.bind_buffer.size());
+		MYSQL_BIND b = f.CreateBindStruct();
+		b.buffer = f.varlen_buffer.data() + f.bind_buffer.size();
+		b.buffer_length = static_cast<unsigned long>(f.varlen_buffer.size() - f.bind_buffer.size());
+
+		int res_fetch = mysql_stmt_fetch_column(stmt.get(), &b, static_cast<unsigned int>(i),
+		                                        static_cast<unsigned long>(f.bind_buffer.size()));
 		if (res_fetch != 0) {
 			throw IOException("Failed to re-fetch result field \"%s\" for MySQL query \"%s\": %s\n", f.name.c_str(),
 			                  query.c_str(), mysql_stmt_error(stmt.get()));
-		}
-
-		b.buffer = f.bind_buffer.data();
-		b.buffer_length = static_cast<unsigned long>(f.bind_buffer.size());
-
-		int res_bind = mysql_stmt_bind_result(stmt.get(), binds.data());
-		if (res_bind != 0) {
-			throw IOException("Failed to re-bind result set for MySQL query \"%s\": %s\n", query.c_str(),
-			                  mysql_stmt_error(stmt.get()));
 		}
 	}
 }
@@ -347,9 +341,16 @@ static void WriteString(MySQLField &f, Vector &vec, idx_t row) {
 		return;
 	}
 
+	auto data = FlatVector::GetData<string_t>(vec);
+
+	if (f.varlen_buffer.size() > 0) {
+		string_t st(f.varlen_buffer.data(), f.varlen_buffer.size());
+		data[row] = StringVector::AddStringOrBlob(vec, std::move(st));
+		return;
+	}
+
 	D_ASSERT(f.bind_buffer.size() >= f.bind_length);
 	string_t st(f.bind_buffer.data(), f.bind_length);
-	auto data = FlatVector::GetData<string_t>(vec);
 	data[row] = StringVector::AddStringOrBlob(vec, std::move(st));
 }
 
