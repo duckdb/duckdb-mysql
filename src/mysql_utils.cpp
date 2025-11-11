@@ -245,7 +245,7 @@ void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value)
 	}
 }
 
-MYSQL *MySQLUtils::Connect(const string &dsn) {
+MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	MYSQL *mysql = mysql_init(NULL);
 	if (!mysql) {
 		throw IOException("Failure in mysql_init");
@@ -287,12 +287,12 @@ MYSQL *MySQLUtils::Connect(const string &dsn) {
 				throw IOException("Failed to connect to MySQL database with parameters "
 				                  "\"%s\": %s. First attempted host: %s. "
 				                  "Retry with 127.0.0.1 also failed.",
-				                  dsn, mysql_error(mysql), attempted_host.c_str());
+				                  attach_path, mysql_error(mysql), attempted_host.c_str());
 			}
 		} else {
 			throw IOException("Failed to connect to MySQL database with parameters "
 			                  "\"%s\": %s. Attempted host: %s",
-			                  dsn, original_error.c_str(), attempted_host.c_str());
+			                  attach_path, original_error.c_str(), attempted_host.c_str());
 		}
 	}
 	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {

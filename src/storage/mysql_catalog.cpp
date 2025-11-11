@@ -25,7 +25,7 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 	default_schema = connection_params.db;
 	// try to connect
 	MySQLTypeConfig type_config;
-	auto connection = MySQLConnection::Open(type_config, connection_string);
+	auto connection = MySQLConnection::Open(type_config, connection_string, attach_path);
 }
 
 MySQLCatalog::~MySQLCatalog() = default;

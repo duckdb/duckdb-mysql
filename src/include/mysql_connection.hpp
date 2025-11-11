@@ -41,8 +41,7 @@ struct OwnedMySQLConnection {
 
 class MySQLConnection {
 public:
-	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, const std::string &dsn_p,
-	                         MySQLTypeConfig type_config_p);
+	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, MySQLTypeConfig type_config_p);
 	~MySQLConnection();
 	// disable copy constructors
 	MySQLConnection(const MySQLConnection &other) = delete;
@@ -52,7 +51,8 @@ public:
 	MySQLConnection &operator=(MySQLConnection &&) noexcept;
 
 public:
-	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string);
+	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string,
+	                            const string &attach_path);
 	void Execute(const string &query);
 	void Execute(const string &query, vector<Value> params);
 	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
@@ -65,9 +65,6 @@ public:
 
 	shared_ptr<OwnedMySQLConnection> GetConnection() {
 		return connection;
-	}
-	string GetDSN() {
-		return dsn;
 	}
 
 	MYSQL *GetConn() {
@@ -87,7 +84,6 @@ private:
 
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;
-	string dsn;
 	MySQLTypeConfig type_config;
 };
 
