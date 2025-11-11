@@ -12,7 +12,8 @@ namespace duckdb {
 
 MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context)
     : Transaction(manager, context),
-      connection(MySQLConnection::Open(MySQLTypeConfig(context), mysql_catalog.connection_string)),
+      connection(
+          MySQLConnection::Open(MySQLTypeConfig(context), mysql_catalog.connection_string, mysql_catalog.attach_path)),
       access_mode(mysql_catalog.access_mode) {
 	string time_zone;
 	{

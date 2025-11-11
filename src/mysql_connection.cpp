@@ -12,9 +12,8 @@ namespace duckdb {
 
 static bool debug_mysql_print_queries = false;
 
-MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p, const std::string &dsn_p,
-                                 MySQLTypeConfig type_config_p)
-    : connection(std::move(connection_p)), dsn(std::move(dsn_p)), type_config(std::move(type_config_p)) {
+MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p, MySQLTypeConfig type_config_p)
+    : connection(std::move(connection_p)), type_config(std::move(type_config_p)) {
 }
 
 MySQLConnection::~MySQLConnection() {
@@ -23,20 +22,19 @@ MySQLConnection::~MySQLConnection() {
 
 MySQLConnection::MySQLConnection(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
-	std::swap(dsn, other.dsn);
 	std::swap(type_config, other.type_config);
 }
 
 MySQLConnection &MySQLConnection::operator=(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
-	std::swap(dsn, other.dsn);
 	std::swap(type_config, other.type_config);
 	return *this;
 }
 
-MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string &connection_string) {
-	auto connection = make_shared_ptr<OwnedMySQLConnection>(MySQLUtils::Connect(connection_string));
-	return MySQLConnection(std::move(connection), connection_string, std::move(type_config));
+MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string &connection_string,
+                                      const string &attach_path) {
+	auto connection = make_shared_ptr<OwnedMySQLConnection>(MySQLUtils::Connect(connection_string, attach_path));
+	return MySQLConnection(std::move(connection), std::move(type_config));
 }
 
 idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vector<Value> params, bool streaming) {

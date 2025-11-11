@@ -40,7 +40,7 @@ enum class MySQLConnectorInterface { UNINITIALIZED, BASIC, PREPARED_STATEMENT };
 class MySQLUtils {
 public:
 	static std::tuple<MySQLConnectionParameters, unordered_set<string>> ParseConnectionParameters(const string &dsn);
-	static MYSQL *Connect(const string &dsn);
+	static MYSQL *Connect(const string &dsn, const string &attach_path);
 
 	static string WriteIdentifier(const string &identifier);
 	static string WriteLiteral(const string &identifier);
