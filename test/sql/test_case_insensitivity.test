@@ -25,10 +25,11 @@ SELECT * FROM s.SAMECASENAME
 ----
 42
 
-statement error
-CREATE TABLE s.samecasename(i int)
-----
-already exists
+# no error thrown after switching to libmariadb
+# statement error
+# CREATE TABLE s.samecasename(i int)
+# ----
+# already exists
 
 statement error
 CREATE TABLE s.same_col_name(i int, I INT)

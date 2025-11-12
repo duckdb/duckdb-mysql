@@ -1,0 +1,23 @@
+# name: test/sql/attach_ssl_enabled.test
+# description: ATTACH with SSL parameters
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+# invalid ssl mode
+statement error
+ATTACH 'host=localhost user=root port=0 database=mysql ssl_mode=xxx' AS simple (TYPE MYSQL_SCANNER)
+----
+ssl mode must be either
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql ssl_mode=required' AS simple (TYPE MYSQL_SCANNER)
+
+statement error
+ATTACH 'host=localhost user=root port=0 database=mysql ssl_mode=required ssl_ca=/xxx/ ssl_capath=/xxx/ ssl_cert=/xxx/ ssl_cipher=/xxx/ ssl_crl=/xxx/ ssl_crlpath=/xxx/ ssl_key=/xxx/' AS simple (TYPE MYSQL_SCANNER)
+----
+TLS/SSL error

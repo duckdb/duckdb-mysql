@@ -2,8 +2,6 @@
 
 #include <tuple>
 
-#include "mysql_com.h"
-
 #include "duckdb/common/string_util.hpp"
 
 #include "storage/mysql_schema_entry.hpp"
@@ -245,6 +243,38 @@ void SetMySQLOption(MYSQL *mysql, enum mysql_option option, const string &value)
 	}
 }
 
+static void SetSSLOptions(MYSQL *mysql, MySQLConnectionParameters &config) {
+	// translate libmysql's ssl_mode option into libmariadb
+	my_bool my_false = 0;
+	my_bool my_true = 1;
+	switch (config.ssl_mode) {
+	case SSL_MODE_DISABLED:
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_ENFORCE, reinterpret_cast<void *>(&my_false));
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, reinterpret_cast<void *>(&my_false));
+		break;
+	case SSL_MODE_PREFERRED:
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_ENFORCE, reinterpret_cast<void *>(&my_true));
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, reinterpret_cast<void *>(&my_false));
+		break;
+	case SSL_MODE_REQUIRED:
+	case SSL_MODE_VERIFY_CA:
+	case SSL_MODE_VERIFY_IDENTITY:
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_ENFORCE, reinterpret_cast<void *>(&my_true));
+		mysql_optionsv(mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, reinterpret_cast<void *>(&my_true));
+		break;
+	default:
+		throw IOException("Invalid SSL mode");
+	}
+
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CA, config.ssl_ca);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CAPATH, config.ssl_ca_path);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CERT, config.ssl_cert);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CIPHER, config.ssl_cipher);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CRL, config.ssl_crl);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_CRLPATH, config.ssl_crl_path);
+	SetMySQLOption(mysql, MYSQL_OPT_SSL_KEY, config.ssl_key);
+}
+
 MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	MYSQL *mysql = mysql_init(NULL);
 	if (!mysql) {
@@ -256,17 +286,7 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	unordered_set<string> unused;
 	std::tie(config, unused) = ParseConnectionParameters(dsn);
 
-	// set SSL options (if any)
-	if (config.ssl_mode != SSL_MODE_PREFERRED) {
-		mysql_options(mysql, MYSQL_OPT_SSL_MODE, &config.ssl_mode);
-	}
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CA, config.ssl_ca);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CAPATH, config.ssl_ca_path);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CERT, config.ssl_cert);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CIPHER, config.ssl_cipher);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CRL, config.ssl_crl);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_CRLPATH, config.ssl_crl_path);
-	SetMySQLOption(mysql, MYSQL_OPT_SSL_KEY, config.ssl_key);
+	SetSSLOptions(mysql, config);
 
 	// get connection options
 	const char *host = config.host.empty() ? nullptr : config.host.c_str();
@@ -280,6 +300,10 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 		string attempted_host = host ? host : "nullptr (default)";
 
 		if (config.host.empty() || config.host == "localhost") {
+			// options were partially cleared after the connection failure above
+			// and need to be re-applied
+			SetSSLOptions(mysql, config);
+			// re-try to establish connection specifying IP address to avoid using unix sockets
 			result =
 			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
 

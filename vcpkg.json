@@ -1,6 +1,6 @@
 {
   "dependencies": [
-    "libmysql"
+    "libmariadb"
   ],
   "vcpkg-configuration": {
     "overlay-ports": [
