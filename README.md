@@ -250,3 +250,12 @@ make test
 
 Note that most test will require to have a mysql server running to actually run. To run these tests, setup the mysql server
 and set the environment variable `MYSQL_TEST_DATABASE_AVAILABLE=1`. 
+
+## License
+
+The source code in this repository is published under the [MIT license](https://github.com/duckdb/duckdb-mysql/blob/main/LICENSE).
+
+The resulting binaries of this extension (that are [distributed on duckdb.org](https://duckdb.org/docs/stable/core_extensions/mysql))
+contain the [MariaDB Connector/C](https://github.com/mariadb-corporation/mariadb-connector-c) (`libmariadb`) library
+that is linked statically into the shared library of the extension. `libmariadb` source code is published under the [LGPL v2.1 license](https://opensource.org/license/lgpl-2-1).
+Thus the binary shared library `mysql_scanner.duckdb_extension` is also published under the LGPL v2.1 license.

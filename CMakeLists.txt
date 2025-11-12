@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.5.0)
 set(TARGET_NAME mysql_scanner)
 project(${TARGET_NAME})
 
-find_package(libmysql REQUIRED)
+set(libmariadb_DIR ${CMAKE_CURRENT_LIST_DIR}/vcpkg_ports/libmariadb)
+find_package(libmariadb REQUIRED)
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 
 set(MYSQL_INCLUDE_DIR

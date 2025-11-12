@@ -155,7 +155,7 @@ MYSQL_BIND MySQLParameter::CreateBind() {
 		bind.length = &bind_length;
 	} else if (value.type().id() == LogicalTypeId::VARCHAR) {
 		const string &str = StringValue::Get(value);
-		bind.buffer_type = MYSQL_TYPE_VARCHAR;
+		bind.buffer_type = MYSQL_TYPE_VAR_STRING;
 		bind.buffer = const_cast<char *>(str.c_str());
 		bind.buffer_length = str.length();
 		bind_length = str.length();

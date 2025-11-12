@@ -23,8 +23,8 @@ struct MySQLField {
 	vector<char> bind_buffer;
 	vector<char> varlen_buffer;
 	unsigned long bind_length = 0;
-	bool bind_is_null = false;
-	bool bind_error = false;
+	my_bool bind_is_null = 0;
+	my_bool bind_error = 0;
 
 	MySQLField(MYSQL_FIELD *mf, LogicalType duckdb_type_p, const MySQLTypeConfig &type_config);
 

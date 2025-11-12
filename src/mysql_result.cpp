@@ -40,9 +40,9 @@ MySQLField::MySQLField(MYSQL_FIELD *mf, LogicalType duckdb_type_p, const MySQLTy
 }
 
 void MySQLField::ResetBind() {
-	this->bind_is_null = false;
+	this->bind_is_null = 0;
 	this->bind_length = 0;
-	this->bind_error = false;
+	this->bind_error = 0;
 	this->varlen_buffer.resize(0);
 }
 

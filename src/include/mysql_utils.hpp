@@ -15,6 +15,16 @@ namespace duckdb {
 class MySQLSchemaEntry;
 class MySQLTransaction;
 
+// The option remained from libmysql,
+// is translated to libmariadb options on connect
+enum mysql_ssl_mode_compat {
+	SSL_MODE_DISABLED,
+	SSL_MODE_PREFERRED,
+	SSL_MODE_REQUIRED,
+	SSL_MODE_VERIFY_CA,
+	SSL_MODE_VERIFY_IDENTITY
+};
+
 struct MySQLConnectionParameters {
 	string host;
 	string user;

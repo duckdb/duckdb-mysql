@@ -15,7 +15,7 @@ namespace duckdb {
 
 struct MySQLParameter {
 	Value value;
-	enum_field_types buffer_type = MYSQL_TYPE_INVALID;
+	enum_field_types buffer_type = MYSQL_TYPE_NULL;
 	bool is_unsigned = false;
 
 	vector<char> bind_buffer;
