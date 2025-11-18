@@ -316,10 +316,6 @@ const vector<MySQLField> &MySQLResult::Fields() {
 // This conversion is slow, 'mysql_time_as_time' flag should be set to avoid it.
 static void WriteTimeAsString(MySQLField &f, Vector &vec, idx_t row) {
 	MYSQL_TIME *mt = reinterpret_cast<MYSQL_TIME *>(f.bind_buffer.data());
-	if (mt->hour == 0 && mt->minute == 0 && mt->second == 0) {
-		FlatVector::SetNull(vec, row, true);
-		return;
-	}
 	dtime_t tm = Time::FromTime(0, mt->minute, mt->second, mt->second_part);
 	string tail = Time::ToString(tm).substr(2);
 	string head = std::to_string(mt->hour);
@@ -396,9 +392,9 @@ static void WriteNumber(MySQLField &f, Vector &vec, idx_t row) {
 static void WriteDateTime(MySQLField &f, Vector &vec, idx_t row) {
 	D_ASSERT(f.bind_buffer.size() >= sizeof(MYSQL_TIME));
 	MYSQL_TIME *mt = reinterpret_cast<MYSQL_TIME *>(f.bind_buffer.data());
-	if ((mt->year == 0 && mt->month == 0 && mt->day == 0 && mt->hour == 0 && mt->minute == 0 && mt->second == 0 &&
+	if (((f.mysql_type == MYSQL_TYPE_DATETIME || f.mysql_type == MYSQL_TYPE_TIMESTAMP) && mt->year == 0 &&
+	     mt->month == 0 && mt->day == 0 && mt->hour == 0 && mt->minute == 0 && mt->second == 0 &&
 	     mt->second_part == 0) ||
-	    (f.mysql_type == MYSQL_TYPE_TIME && mt->hour == 0 && mt->minute == 0 && mt->second == 0) ||
 	    (f.mysql_type == MYSQL_TYPE_DATE && mt->year == 0 && mt->month == 0 && mt->day == 0)) {
 		FlatVector::SetNull(vec, row, true);
 		return;

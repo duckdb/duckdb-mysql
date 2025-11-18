@@ -52,6 +52,16 @@ SELECT * FROM scan_datetime_1 ORDER BY col1
 ----
 1	2020-12-31
 
+query I
+SELECT * FROM mysql_query('msql', 'SELECT CAST(''0000-00-00'' AS DATE)')
+----
+NULL
+
+query I
+SELECT * FROM mysql_query('msql', 'SELECT CAST(''0000-00-00 00:00:00'' AS DATETIME)')
+----
+NULL
+
 # enable TIME type
 statement ok
 SET mysql_time_as_time = TRUE
@@ -109,6 +119,11 @@ SELECT typeof(col2) FROM scan_datetime_2
 TIME
 TIME
 
+query I
+SELECT * FROM mysql_query('msql', 'SELECT CAST(''00:00:00'' AS TIME)')
+----
+00:00:00
+
 # disable TIME type
 statement ok
 SET mysql_time_as_time = FALSE
@@ -146,3 +161,8 @@ VARCHAR
 
 statement ok
 DROP TABLE IF EXISTS scan_datetime_3
+
+query I
+SELECT * FROM mysql_query('msql', 'SELECT CAST(''00:00:00'' AS TIME)')
+----
+00:00:00
