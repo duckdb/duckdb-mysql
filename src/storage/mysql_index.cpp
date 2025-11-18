@@ -15,8 +15,8 @@ MySQLCreateIndex::MySQLCreateIndex(PhysicalPlan &physical_plan, unique_ptr<Creat
 //===--------------------------------------------------------------------===//
 // Source
 //===--------------------------------------------------------------------===//
-SourceResultType MySQLCreateIndex::GetData(ExecutionContext &context, DataChunk &chunk,
-                                           OperatorSourceInput &input) const {
+SourceResultType MySQLCreateIndex::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                                   OperatorSourceInput &input) const {
 	auto &catalog = table.catalog;
 	if (info->catalog == INVALID_CATALOG && info->schema == catalog.GetName()) {
 		info->schema = DEFAULT_SCHEMA;

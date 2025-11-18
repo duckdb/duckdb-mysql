@@ -246,7 +246,8 @@ SinkFinalizeType MySQLInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 //===--------------------------------------------------------------------===//
 // GetData
 //===--------------------------------------------------------------------===//
-SourceResultType MySQLInsert::GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const {
+SourceResultType MySQLInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                              OperatorSourceInput &input) const {
 	auto &insert_gstate = sink_state->Cast<MySQLInsertGlobalState>();
 	chunk.SetCardinality(1);
 	chunk.SetValue(0, 0, Value::BIGINT(insert_gstate.insert_count));
