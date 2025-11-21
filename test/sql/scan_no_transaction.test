@@ -1,0 +1,30 @@
+# name: test/sql/scan_no_transaction.test
+# description: Test scan and remote queries with MySQL transactions disabled
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET mysql_enable_transactions = FALSE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS mysqldb (TYPE MYSQL_SCANNER)
+
+query IIIII
+SELECT * FROM mysql_query('mysqldb', 'SELECT * FROM decimals')
+----
+0.5	1234.1	12345678.12	12345678901234567.123	1.2345678901234568e+35
+-0.5	-1234.1	-12345678.12	-12345678901234567.123	-1.2345678901234568e+35
+NULL	NULL	NULL	NULL	NULL
+
+query IIIII
+SELECT * FROM mysqldb.decimals
+----
+0.5	1234.1	12345678.12	12345678901234567.123	1.2345678901234568e+35
+-0.5	-1234.1	-12345678.12	-12345678901234567.123	-1.2345678901234568e+35
+NULL	NULL	NULL	NULL	NULL
+
+statement ok
+SET mysql_enable_transactions = TRUE
