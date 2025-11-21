@@ -36,6 +36,7 @@ public:
 
 private:
 	MySQLConnection connection;
+	bool transactions_enabled = true;
 	MySQLTransactionState transaction_state;
 	AccessMode access_mode;
 };
