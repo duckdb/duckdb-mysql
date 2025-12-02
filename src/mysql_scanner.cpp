@@ -190,16 +190,38 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		params = StructValue::GetChildren(struct_val);
 	}
 
-	auto result =
-	    transaction.GetConnection().Query(sql, std::move(params), MySQLResultStreaming::FORCE_MATERIALIZATION);
-	for (auto &field : result->Fields()) {
+	MySQLResultStreaming streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+	auto streaming_it = input.named_parameters.find("stream_results");
+	if (streaming_it != input.named_parameters.end()) {
+		Value &bool_val = streaming_it->second;
+		if (!bool_val.IsNull()) {
+			if (BooleanValue::Get(bool_val)) {
+				streaming = MySQLResultStreaming::REQUIRE_STREAMING;
+			} else {
+				streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+			}
+		} else {
+			streaming = MySQLResultStreaming::ALLOW_STREAMING;
+		}
+	}
+
+	MySQLConnection &conn = transaction.GetConnection();
+
+	if (streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
+		auto result = conn.Query(sql, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
+		for (auto &field : result->Fields()) {
+			names.push_back(field.name);
+			return_types.push_back(field.duckdb_type);
+		}
+		return make_uniq<MySQLQueryBindData>(catalog, std::move(result), std::move(sql), streaming);
+	}
+
+	auto stmt = transaction.GetConnection().Prepare(sql);
+	for (auto &field : stmt->Fields()) {
 		names.push_back(field.name);
 		return_types.push_back(field.duckdb_type);
 	}
-	if (return_types.empty()) {
-		throw InvalidInputException("Failed to fetch return types for query '%s'", sql);
-	}
-	return make_uniq<MySQLQueryBindData>(catalog, std::move(result), std::move(sql));
+	return make_uniq<MySQLQueryBindData>(catalog, std::move(stmt), std::move(params), std::move(sql), streaming);
 }
 
 static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
@@ -208,20 +230,34 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 	unique_ptr<MySQLResult> mysql_result;
 	if (bind_data.result) {
 		mysql_result = std::move(bind_data.result);
-	} else {
-		auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
-		mysql_result = transaction.GetConnection().Query(bind_data.query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	}
-
 	return make_uniq<MySQLGlobalState>(std::move(mysql_result));
 }
 
+static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
+	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
+	if (!gstate.result) {
+		auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
+		if (bind_data.user_streaming == MySQLResultStreaming::REQUIRE_STREAMING &&
+		    bind_data.streaming != MySQLResultStreaming::ALLOW_STREAMING) {
+			throw IOException("Unable to stream results of 'mysql_query' function, ensure that each invocation with "
+			                  "'stream_results=TRUE' uses its own private connection");
+		}
+		auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
+		MySQLStatement &stmt = *bind_data.stmt;
+		auto result = transaction.GetConnection().Query(stmt, bind_data.params, bind_data.streaming);
+		gstate.result = std::move(result);
+	}
+	MySQLScan(context, data, output);
+}
+
 MySQLQueryFunction::MySQLQueryFunction()
-    : TableFunction("mysql_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLScan, MySQLQueryBind,
+    : TableFunction("mysql_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLQueryScan, MySQLQueryBind,
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
+	named_parameters["stream_results"] = LogicalType::BOOLEAN;
 }
 
 } // namespace duckdb

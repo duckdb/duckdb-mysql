@@ -11,6 +11,7 @@
 #include "duckdb.hpp"
 
 #include "mysql_connection.hpp"
+#include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 
@@ -39,13 +40,23 @@ public:
 };
 
 struct MySQLQueryBindData : public FunctionData {
-	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLResult> result_p, string query_p)
-	    : catalog(catalog), result(std::move(result_p)), query(std::move(query_p)) {
+	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLStatement> stmt_p, vector<Value> params_p, string query_p,
+	                   MySQLResultStreaming streaming_p)
+	    : catalog(catalog), stmt(std::move(stmt_p)), params(std::move(params_p)), query(std::move(query_p)),
+	      user_streaming(streaming_p) {
+	}
+
+	MySQLQueryBindData(Catalog &catalog, unique_ptr<MySQLResult> result_p, string query_p,
+	                   MySQLResultStreaming streaming_p)
+	    : catalog(catalog), result(std::move(result_p)), query(std::move(query_p)), user_streaming(streaming_p) {
 	}
 
 	Catalog &catalog;
 	unique_ptr<MySQLResult> result;
+	unique_ptr<MySQLStatement> stmt;
+	vector<Value> params;
 	string query;
+	MySQLResultStreaming user_streaming = MySQLResultStreaming::UNINITIALIZED;
 	MySQLResultStreaming streaming = MySQLResultStreaming::UNINITIALIZED;
 
 public:
