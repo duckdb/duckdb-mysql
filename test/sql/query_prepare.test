@@ -1,0 +1,35 @@
+# name: test/sql/query_prepare.test
+# description: Test mysql_query with prepared statement
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT ?', params=row(?))
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN TRANSACTION
+
+query I
+EXECUTE p1('foo')
+----
+foo
+
+statement ok
+COMMIT
+
+query I
+EXECUTE p1('bar')
+----
+bar

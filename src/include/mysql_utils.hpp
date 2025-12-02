@@ -43,7 +43,7 @@ struct MySQLConnectionParameters {
 	string ssl_key;
 };
 
-enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION };
+enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION, REQUIRE_STREAMING };
 
 enum class MySQLConnectorInterface { UNINITIALIZED, BASIC, PREPARED_STATEMENT };
 
@@ -58,17 +58,5 @@ public:
 	static string WriteQuoted(const string &text, char quote);
 	static string TransformConstant(const Value &val);
 };
-
-using MySQLStatementPtr = duckdb::unique_ptr<MYSQL_STMT, void (*)(MYSQL_STMT *)>;
-
-inline void MySQLStatementDelete(MYSQL_STMT *stmt) {
-	mysql_stmt_close(stmt);
-}
-
-using MySQLResultPtr = duckdb::unique_ptr<MYSQL_RES, void (*)(MYSQL_RES *)>;
-
-inline void MySQLResultDelete(MYSQL_RES *res) {
-	mysql_free_result(res);
-}
 
 } // namespace duckdb

@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "mysql_field.hpp"
+#include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 
@@ -15,33 +17,16 @@ namespace duckdb {
 class MySQLConnection;
 struct OwnedMySQLConnection;
 
-struct MySQLField {
-	string name;
-	enum_field_types mysql_type;
-	LogicalType duckdb_type;
+using MySQLResultPtr = duckdb::unique_ptr<MYSQL_RES, void (*)(MYSQL_RES *)>;
 
-	vector<char> bind_buffer;
-	vector<char> varlen_buffer;
-	unsigned long bind_length = 0;
-	my_bool bind_is_null = 0;
-	my_bool bind_error = 0;
-
-	MySQLField(MYSQL_FIELD *mf, LogicalType duckdb_type_p, const MySQLTypeConfig &type_config);
-
-	void ResetBind();
-
-	MYSQL_BIND CreateBindStruct();
-};
-
-struct MySQLBind {
-
-	MySQLBind(const LogicalType &ltype);
-};
+inline void MySQLResultDelete(MYSQL_RES *res) {
+	mysql_free_result(res);
+}
 
 class MySQLResult {
 public:
 	MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
-	            idx_t affected_rows_p);
+	            idx_t affected_rows_p, vector<MySQLField> fields_p = vector<MySQLField>());
 
 	string GetString(idx_t col);
 	int32_t GetInt32(idx_t col);
