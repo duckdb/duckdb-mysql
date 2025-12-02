@@ -12,6 +12,7 @@
 #include "duckdb/common/mutex.hpp"
 
 #include "mysql_result.hpp"
+#include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 
@@ -54,9 +55,11 @@ public:
 	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string,
 	                            const string &attach_path);
 	void Execute(const string &query);
-	void Execute(const string &query, vector<Value> params);
+	void Execute(const string &query, const vector<Value> &params);
 	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
-	unique_ptr<MySQLResult> Query(const string &query, vector<Value> params, MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> Query(const string &query, const vector<Value> &params, MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> Query(MySQLStatement &stmt, const vector<Value> &params, MySQLResultStreaming streaming);
+	unique_ptr<MySQLStatement> Prepare(const string &query);
 
 	vector<IndexInfo> GetIndexInfo(const string &table_name);
 
@@ -78,9 +81,10 @@ public:
 	static bool DebugPrintQueries();
 
 private:
-	unique_ptr<MySQLResult> QueryInternal(const string &query, vector<Value> params, MySQLResultStreaming streaming,
-	                                      MySQLConnectorInterface con_interface);
-	idx_t MySQLExecute(MYSQL_STMT *stmt, const string &query, vector<Value> params, bool streaming);
+	unique_ptr<MySQLResult> QueryInternal(const string &query, const vector<Value> &params,
+	                                      MySQLResultStreaming streaming, MySQLConnectorInterface con_interface);
+	idx_t MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
+	                   bool prepared = false);
 
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;
