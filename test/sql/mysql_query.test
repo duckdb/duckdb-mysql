@@ -171,3 +171,69 @@ SELECT * FROM mysql_query('simple', 'SELECT * FROM tbl_issue65')
 1	1.11
 2	2.22
 3	3.33
+
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+  stream_results=TRUE)
+----
+foo
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+  stream_results=FALSE)
+----
+foo
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+  stream_results=NULL)
+----
+foo
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ?',
+  params=row('foo'),
+  stream_results=TRUE)
+----
+foo
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ?',
+  params=row('foo'),
+  stream_results=FALSE)
+----
+foo
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT ?',
+  params=row('foo'),
+  stream_results=NULL)
+----
+foo
+
+statement error
+SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
+UNION ALL
+SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=TRUE)
+----
+Unable to stream results
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=NULL)
+UNION ALL
+SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=NULL)
+----
+42
+43
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple2 (TYPE MYSQL_SCANNER)
+
+query I
+SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
+UNION ALL
+SELECT * FROM mysql_query('simple2', 'SELECT 43 col1', stream_results=TRUE)
+----
+42
+43

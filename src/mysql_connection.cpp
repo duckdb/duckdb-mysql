@@ -37,7 +37,8 @@ MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string 
 	return MySQLConnection(std::move(connection), std::move(type_config));
 }
 
-idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vector<Value> params, bool streaming) {
+idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
+                                    bool prepared) {
 	if (MySQLConnection::DebugPrintQueries()) {
 		Printer::Print(query + "\n");
 	}
@@ -54,11 +55,13 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vecto
 		return 0;
 	}
 
-	// prepared statement interface
+	// statement interface, may or may not be already prepared
 
-	int res_prepare = mysql_stmt_prepare(stmt, query.c_str(), query.size());
-	if (res_prepare != 0) {
-		throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+	if (!prepared) {
+		int res_prepare = mysql_stmt_prepare(stmt, query.c_str(), query.size());
+		if (res_prepare != 0) {
+			throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+		}
 	}
 
 	vector<MySQLParameter> mysql_params;
@@ -72,8 +75,9 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vecto
 		}
 		mysql_params.reserve(params.size());
 		binds.reserve(params.size());
-		for (Value &dp : params) {
-			MySQLParameter mp(query, std::move(dp));
+		for (const Value &dp : params) {
+			Value copied = dp; // todo: copy here can be avoided
+			MySQLParameter mp(query, std::move(copied));
 			mysql_params.emplace_back(std::move(mp));
 			MySQLParameter &mp_ref = mysql_params.back();
 			binds.push_back(mp_ref.CreateBind());
@@ -110,7 +114,7 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, vecto
 	return affected_rows;
 }
 
-unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, vector<Value> params,
+unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, const vector<Value> &params,
                                                        MySQLResultStreaming streaming,
                                                        MySQLConnectorInterface con_interface) {
 	auto con = GetConn();
@@ -131,22 +135,53 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, vect
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
-	return Query(query, vector<Value>(), streaming);
+	return QueryInternal(query, vector<Value>(), streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, vector<Value> params,
+unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, const vector<Value> &params,
                                                MySQLResultStreaming streaming) {
 	return QueryInternal(query, params, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
+}
+
+unique_ptr<MySQLResult> MySQLConnection::Query(MySQLStatement &stmt, const vector<Value> &params,
+                                               MySQLResultStreaming streaming) {
+
+	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
+	bool prepared = true;
+	idx_t affected_rows = MySQLExecute(stmt.get(), stmt.Query(), params, result_streaming, prepared);
+	auto stmt_ptr = stmt.release();
+	return make_uniq<MySQLResult>(stmt.Query(), std::move(stmt_ptr), type_config, affected_rows, stmt.FieldsCopy());
+}
+
+unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
+	auto con = GetConn();
+
+	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
+	if (!stmt) {
+		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+	}
+
+	int res_prepare = mysql_stmt_prepare(stmt.get(), query.c_str(), query.size());
+	if (res_prepare != 0) {
+		throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt.get()));
+	}
+
+	vector<MySQLField> fields = MySQLField::ReadFields(query, stmt.get(), type_config);
+	if (fields.empty()) {
+		throw InvalidInputException("Failed to fetch return types for query '%s'", query);
+	}
+
+	return make_uniq<MySQLStatement>(query, stmt.release(), std::move(fields));
 }
 
 void MySQLConnection::Execute(const string &query) {
 	Execute(query, vector<Value>());
 }
 
-void MySQLConnection::Execute(const string &query, vector<Value> params) {
+void MySQLConnection::Execute(const string &query, const vector<Value> &params) {
 	MySQLConnectorInterface con_interface =
 	    params.size() > 0 ? MySQLConnectorInterface::PREPARED_STATEMENT : MySQLConnectorInterface::BASIC;
-	QueryInternal(query, std::move(params), MySQLResultStreaming::FORCE_MATERIALIZATION, con_interface);
+	QueryInternal(query, params, MySQLResultStreaming::FORCE_MATERIALIZATION, con_interface);
 }
 
 bool MySQLConnection::IsOpen() {
