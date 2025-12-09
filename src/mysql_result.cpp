@@ -4,6 +4,8 @@
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 
+#include "mysql_connection.hpp"
+
 namespace duckdb {
 
 static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const MySQLTypeConfig &type_config) {
@@ -50,9 +52,11 @@ static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const My
 }
 
 MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
-                         idx_t affected_rows_p, vector<MySQLField> fields_p)
-    : query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)), affected_rows(affected_rows_p),
-      fields(std::move(fields_p)) {
+                         const string &connection_string_p, unsigned long connection_id_p,
+                         MySQLResultStreaming streaming_p, idx_t affected_rows_p, vector<MySQLField> fields_p)
+    : query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
+      connection_string(connection_string_p), connection_id(connection_id_p), streaming(streaming_p),
+      affected_rows(affected_rows_p), fields(std::move(fields_p)) {
 	if (affected_rows != static_cast<idx_t>(-1)) {
 		return;
 	}
@@ -75,6 +79,14 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 
 	auto ltypes = CreateChunkTypes(fields, type_config);
 	this->data_chunk.Initialize(Allocator::DefaultAllocator(), ltypes);
+}
+
+MySQLResult::~MySQLResult() {
+	bool stream_active =
+	    streaming == MySQLResultStreaming::ALLOW_STREAMING || streaming == MySQLResultStreaming::REQUIRE_STREAMING;
+	if (stream_active && !exhausted) {
+		TryCancelQuery();
+	}
 }
 
 void MySQLResult::HandleTruncatedData() {
@@ -110,6 +122,7 @@ DataChunk &MySQLResult::NextChunk() {
 	idx_t r = 0;
 	for (; r < STANDARD_VECTOR_SIZE; r++) {
 		if (!FetchNext()) {
+			this->exhausted = true;
 			break;
 		}
 
@@ -232,6 +245,21 @@ idx_t MySQLResult::AffectedRows() {
 
 const vector<MySQLField> &MySQLResult::Fields() {
 	return fields;
+}
+
+bool MySQLResult::TryCancelQuery() {
+	try {
+		// open a new connection
+		auto con = MySQLConnection::Open(type_config, connection_string, "");
+
+		// execute KILL QUERY [connection_id] to kill the running query
+		string kill_query = "KILL QUERY " + to_string(connection_id);
+		con.Execute(kill_query);
+
+		return true;
+	} catch (...) {
+		return false;
+	}
 }
 
 // MySQL TIME values may range from '-838:59:59' to '838:59:59'

@@ -27,8 +27,10 @@ class MySQLResult;
 struct IndexInfo;
 
 struct OwnedMySQLConnection {
+
 	explicit OwnedMySQLConnection(MYSQL *conn = nullptr) : connection(conn) {
 	}
+
 	~OwnedMySQLConnection() {
 		if (!connection) {
 			return;
@@ -37,12 +39,20 @@ struct OwnedMySQLConnection {
 		connection = nullptr;
 	}
 
+	unsigned long GetID() {
+		if (!connection) {
+			return 0;
+		}
+		return mysql_thread_id(connection);
+	}
+
 	MYSQL *connection;
 };
 
 class MySQLConnection {
 public:
-	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, MySQLTypeConfig type_config_p);
+	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, MySQLTypeConfig type_config_p,
+	                         const string &connection_string);
 	~MySQLConnection();
 	// disable copy constructors
 	MySQLConnection(const MySQLConnection &other) = delete;
@@ -89,6 +99,7 @@ private:
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;
 	MySQLTypeConfig type_config;
+	string connection_string;
 };
 
 } // namespace duckdb
