@@ -12,8 +12,10 @@ namespace duckdb {
 
 static bool debug_mysql_print_queries = false;
 
-MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p, MySQLTypeConfig type_config_p)
-    : connection(std::move(connection_p)), type_config(std::move(type_config_p)) {
+MySQLConnection::MySQLConnection(shared_ptr<OwnedMySQLConnection> connection_p, MySQLTypeConfig type_config_p,
+                                 const string &connection_string_p)
+    : connection(std::move(connection_p)), type_config(std::move(type_config_p)),
+      connection_string(connection_string_p) {
 }
 
 MySQLConnection::~MySQLConnection() {
@@ -34,7 +36,7 @@ MySQLConnection &MySQLConnection::operator=(MySQLConnection &&other) noexcept {
 MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string &connection_string,
                                       const string &attach_path) {
 	auto connection = make_shared_ptr<OwnedMySQLConnection>(MySQLUtils::Connect(connection_string, attach_path));
-	return MySQLConnection(std::move(connection), std::move(type_config));
+	return MySQLConnection(std::move(connection), std::move(type_config), connection_string);
 }
 
 idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
@@ -131,7 +133,9 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, cons
 		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
 	}
 	idx_t affected_rows = MySQLExecute(stmt.get(), query, params, result_streaming);
-	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, affected_rows);
+	unsigned long connection_id = connection->GetID();
+	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, connection_string, connection_id, streaming,
+	                              affected_rows);
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
@@ -150,7 +154,9 @@ unique_ptr<MySQLResult> MySQLConnection::Query(MySQLStatement &stmt, const vecto
 	bool prepared = true;
 	idx_t affected_rows = MySQLExecute(stmt.get(), stmt.Query(), params, result_streaming, prepared);
 	auto stmt_ptr = stmt.release();
-	return make_uniq<MySQLResult>(stmt.Query(), std::move(stmt_ptr), type_config, affected_rows, stmt.FieldsCopy());
+	unsigned long connection_id = connection->GetID();
+	return make_uniq<MySQLResult>(stmt.Query(), std::move(stmt_ptr), type_config, connection_string, connection_id,
+	                              streaming, affected_rows, stmt.FieldsCopy());
 }
 
 unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
