@@ -55,6 +55,9 @@ jobs:
 
     env:
       GEN: ninja
+      CC: 'ccache clang'
+      CXX: 'ccache clang++'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
       OSX_BUILD_ARCH: arm64
       VCPKG_TARGET_TRIPLET: arm64-osx-release
       VCPKG_HOST_TRIPLET: arm64-osx-release
@@ -69,16 +72,31 @@ jobs:
 
       - name: Install
         run: |
-          brew install \
+          brew install -q \
             autoconf \
             autoconf-archive \
             automake \
+            ccache \
             mysql
           brew services start mysql
 
+      - name: Cache Key
+        id: cache_key
+        working-directory: ./duckdb
+        run: |
+          DUCKDB_VERSION=$(git rev-parse --short HEAD)
+          KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
+          echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/ccache
+          key: ${{ steps.cache_key.outputs.value }}
+
       - uses: actions/setup-python@v2
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11.1
@@ -110,12 +128,21 @@ jobs:
           cat /Users/runner/work/duckdb-mysql/duckdb-mysql/vcpkg/buildtrees/libmysql/*.log
           cat /Users/runner/work/duckdb-mysql/duckdb-mysql/build/release/*.log
 
+      - name: Save Cache
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/ccache
+          key: ${{ steps.cache_key.outputs.value }}
+
   linux:
     name: Linux (amd64)
     runs-on: ubuntu-latest
     needs: format-check
     env:
       GEN: ninja
+      CC: 'ccache gcc'
+      CXX: 'ccache g++'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
       VCPKG_TARGET_TRIPLET: x64-linux-release
       VCPKG_HOST_TRIPLET: x64-linux-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
@@ -124,22 +151,37 @@ jobs:
       MARIADB_SERVER: 1
 
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: 'true'
+
     - name: Install required ubuntu packages
       run: |
         sudo apt-get update -y -q -o=Dpkg::Use-Pty=0
         sudo apt-get install -y -q -o=Dpkg::Use-Pty=0 \
           build-essential \
+          ccache \
           cmake \
           mariadb-server \
           ninja-build \
           pkg-config \
           zip
 
-    - name: Checkout
-      uses: actions/checkout@v4
+    - name: Cache Key
+      id: cache_key
+      working-directory: ./duckdb
+      run: |
+        DUCKDB_VERSION=$(git rev-parse --short HEAD)
+        KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
+        echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
+
+    - name: Restore Cache
+      uses: actions/cache/restore@v4
       with:
-        fetch-depth: 0
-        submodules: 'true'
+        path: ${{ github.workspace }}/ccache
+        key: ${{ steps.cache_key.outputs.value }}
 
     - name: Setup MariaDB
       run: |
@@ -162,3 +204,9 @@ jobs:
     - name: Test extension
       run: |
         make test
+
+    - name: Save Cache
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ steps.cache_key.outputs.value }}
