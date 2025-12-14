@@ -8,8 +8,6 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 require-env MARIADB_SERVER
 
-require-env TEMPORARY_DISABLED
-
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
