@@ -45,7 +45,12 @@ void MySQLField::ResetBind() {
 MYSQL_BIND MySQLField::CreateBindStruct() {
 	MYSQL_BIND b;
 	std::memset(&b, '\0', sizeof(MYSQL_BIND));
-	b.buffer_type = mysql_type;
+	enum_field_types bind_type = mysql_type;
+	// see https://github.com/duckdb/duckdb-mysql/issues/188
+	if (bind_type == MYSQL_TYPE_GEOMETRY) {
+		bind_type = MYSQL_TYPE_VAR_STRING;
+	}
+	b.buffer_type = bind_type;
 	b.buffer = bind_buffer.data();
 	b.buffer_length = static_cast<unsigned long>(bind_buffer.size());
 	b.is_null = &bind_is_null;
