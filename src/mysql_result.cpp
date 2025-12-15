@@ -133,6 +133,10 @@ DataChunk &MySQLResult::NextChunk() {
 	return this->data_chunk;
 }
 
+bool MySQLResult::Exhausted() {
+	return this->exhausted;
+}
+
 bool MySQLResult::FetchNext() {
 	for (auto &f : fields) {
 #ifdef DEBUG

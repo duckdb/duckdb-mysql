@@ -38,6 +38,7 @@ public:
 
 	DataChunk &NextChunk();
 	bool Next();
+	bool Exhausted();
 	idx_t AffectedRows();
 	const vector<MySQLField> &Fields();
 
