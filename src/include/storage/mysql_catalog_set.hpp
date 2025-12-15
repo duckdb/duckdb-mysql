@@ -30,6 +30,8 @@ public:
 protected:
 	virtual void LoadEntries(ClientContext &context) = 0;
 
+	void TryLoadEntries(ClientContext &context);
+
 	void EraseEntryInternal(const string &name);
 
 protected:
@@ -37,8 +39,9 @@ protected:
 
 private:
 	mutex entry_lock;
+	mutex load_lock;
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> entries;
-	bool is_loaded;
+	atomic<bool> is_loaded;
 };
 
 class MySQLInSchemaSet : public MySQLCatalogSet {
