@@ -130,6 +130,10 @@ static void MySQLCastBlob(const Vector &input, Vector &result, idx_t count) {
 		}
 		auto blob_data = const_data_ptr_cast(input_data[r].GetData());
 		auto blob_size = input_data[r].GetSize();
+		if (blob_size == 0) {
+			result_data[r] = StringVector::AddString(result, "''");
+			continue;
+		}
 		string result_blob = "0x";
 		for (idx_t b = 0; b < blob_size; b++) {
 			auto blob_entry = blob_data[b];
