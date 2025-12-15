@@ -77,6 +77,11 @@ static unique_ptr<LocalTableFunctionState> MySQLInitLocalState(ExecutionContext 
 
 static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
+	if (gstate.result->Exhausted()) {
+		output.SetCardinality(0);
+		return;
+	}
+
 	DataChunk &res_chunk = gstate.result->NextChunk();
 	D_ASSERT(output.ColumnCount() == res_chunk.ColumnCount());
 	string error;
