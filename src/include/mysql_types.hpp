@@ -32,6 +32,7 @@ struct MySQLTypeConfig {
 	bool bit1_as_boolean = false;
 	bool tinyint1_as_boolean = false;
 	bool time_as_time = false;
+	bool incomplete_dates_as_nulls = false;
 
 	MySQLTypeConfig();
 	MySQLTypeConfig(ClientContext &context);

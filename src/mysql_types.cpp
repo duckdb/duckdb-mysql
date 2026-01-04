@@ -16,7 +16,8 @@ MySQLTypeConfig::MySQLTypeConfig() {
 MySQLTypeConfig::MySQLTypeConfig(ClientContext &context)
     : bit1_as_boolean(GetBoolOption(context, "mysql_bit1_as_boolean")),
       tinyint1_as_boolean(GetBoolOption(context, "mysql_tinyint1_as_boolean")),
-      time_as_time(GetBoolOption(context, "mysql_time_as_time")) {
+      time_as_time(GetBoolOption(context, "mysql_time_as_time")),
+      incomplete_dates_as_nulls(GetBoolOption(context, "mysql_incomplete_dates_as_nulls")) {
 }
 
 LogicalType MySQLTypes::TypeToLogicalType(const MySQLTypeConfig &type_config, const MySQLTypeData &type_info) {

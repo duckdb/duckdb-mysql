@@ -24,3 +24,22 @@ query IIIII
 SELECT * FROM simple.zero_date
 ----
 NULL	NULL	NULL	00:00:00	0
+
+statement error
+SELECT * FROM simple.incomplete_date
+----
+Date out of range
+
+statement ok
+SET mysql_incomplete_dates_as_nulls = TRUE
+
+query I
+SELECT * FROM simple.incomplete_date
+----
+NULL
+NULL
+NULL
+2026-01-01
+
+statement ok
+SET mysql_incomplete_dates_as_nulls = FALSE
