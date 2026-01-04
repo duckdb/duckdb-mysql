@@ -142,6 +142,12 @@ SET sql_mode = '';
 CREATE TABLE zero_date(d DATE, date_time DATETIME, ts TIMESTAMP, t TIME, y YEAR);
 INSERT INTO zero_date VALUES ('0000-00-00', '0000-00-00 00:00:00', '0000-00-00 00:00:00', '00:00:00', '0000');
 
+CREATE TABLE incomplete_date(d DATE);
+INSERT INTO incomplete_date VALUES ('2026-00-00');
+INSERT INTO incomplete_date VALUES ('2026-01-00');
+INSERT INTO incomplete_date VALUES ('2026-00-01');
+INSERT INTO incomplete_date VALUES ('2026-01-01');
+
 CREATE TABLE geom (
 	g GEOMETRY,
 	p POINT,

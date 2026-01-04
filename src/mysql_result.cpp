@@ -343,13 +343,15 @@ static void WriteNumber(MySQLField &f, Vector &vec, idx_t row) {
 	data[row] = num;
 }
 
-static void WriteDateTime(MySQLField &f, Vector &vec, idx_t row) {
+static void WriteDateTime(MySQLTypeConfig &type_config, MySQLField &f, Vector &vec, idx_t row) {
 	D_ASSERT(f.bind_buffer.size() >= sizeof(MYSQL_TIME));
 	MYSQL_TIME *mt = reinterpret_cast<MYSQL_TIME *>(f.bind_buffer.data());
 	if (((f.mysql_type == MYSQL_TYPE_DATETIME || f.mysql_type == MYSQL_TYPE_TIMESTAMP) && mt->year == 0 &&
 	     mt->month == 0 && mt->day == 0 && mt->hour == 0 && mt->minute == 0 && mt->second == 0 &&
 	     mt->second_part == 0) ||
-	    (f.mysql_type == MYSQL_TYPE_DATE && mt->year == 0 && mt->month == 0 && mt->day == 0)) {
+	    (f.mysql_type == MYSQL_TYPE_DATE &&
+	     ((mt->year == 0 && mt->month == 0 && mt->day == 0) ||
+	      (type_config.incomplete_dates_as_nulls && (mt->month == 0 || mt->day == 0))))) {
 		FlatVector::SetNull(vec, row, true);
 		return;
 	}
@@ -447,7 +449,7 @@ void MySQLResult::WriteToChunk(idx_t row) {
 		case LogicalTypeId::TIME:
 		case LogicalTypeId::TIMESTAMP:
 		case LogicalTypeId::TIMESTAMP_TZ: {
-			WriteDateTime(f, vec, row);
+			WriteDateTime(type_config, f, vec, row);
 			break;
 		}
 		default: {

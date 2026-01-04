@@ -126,6 +126,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("mysql_time_as_time", "Whether or not to convert MySQL's TIME columns to DuckDB's TIME",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(false),
 	                          MySQLClearCacheFunction::ClearCacheOnSetting);
+	config.AddExtensionOption("mysql_incomplete_dates_as_nulls",
+	                          "Whether to return DATEs with zero month or day as NULLs", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(false), MySQLClearCacheFunction::ClearCacheOnSetting);
 	config.AddExtensionOption("mysql_enable_transactions",
 	                          "Whether to run 'START TRANSACTION'/'COMMIT'/'ROLLBACK' on MySQL connections",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), MySQLClearCacheFunction::ClearCacheOnSetting);
