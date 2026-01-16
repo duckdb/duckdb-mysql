@@ -57,7 +57,7 @@ SinkFinalizeType MySQLExecuteQuery::Finalize(Pipeline &pipeline, Event &event, C
 //===--------------------------------------------------------------------===//
 // GetData
 //===--------------------------------------------------------------------===//
-SourceResultType MySQLExecuteQuery::GetData(ExecutionContext &context, DataChunk &chunk,
+SourceResultType MySQLExecuteQuery::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
                                             OperatorSourceInput &input) const {
 	auto &insert_gstate = sink_state->Cast<MySQLExecuteQueryGlobalState>();
 	chunk.SetCardinality(1);
