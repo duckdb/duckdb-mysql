@@ -6,6 +6,11 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+statement error
+SELECT * FROM mysql_query('fail1', 'fail2')
+----
+fail
+
 statement ok
 SET mysql_enable_transactions = FALSE
 

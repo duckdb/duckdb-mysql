@@ -62,7 +62,6 @@ jobs:
       VCPKG_TARGET_TRIPLET: arm64-osx-release
       VCPKG_HOST_TRIPLET: arm64-osx-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-      ORACLE_MYSQL_SERVER: 1
 
     steps:
       - uses: actions/checkout@v4
@@ -116,7 +115,9 @@ jobs:
       - name: Test Extension
         shell: bash
         env:
+          LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
           MYSQL_TEST_DATABASE_AVAILABLE: 1
+          ORACLE_MYSQL_SERVER: 1
         run: |
           make test
 
@@ -147,8 +148,6 @@ jobs:
       VCPKG_HOST_TRIPLET: x64-linux-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       MYSQL_PWD: root
-      MYSQL_TEST_DATABASE_AVAILABLE: 1
-      MARIADB_SERVER: 1
 
     steps:
     - name: Checkout
@@ -202,6 +201,10 @@ jobs:
         make release
 
     - name: Test extension
+      env: 
+        LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
+        MYSQL_TEST_DATABASE_AVAILABLE: 1
+        MARIADB_SERVER: 1
       run: |
         make test
 
