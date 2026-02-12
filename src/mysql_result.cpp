@@ -353,7 +353,8 @@ static void WriteDateTime(MySQLTypeConfig &type_config, MySQLField &f, Vector &v
 
 	bool is_zero_date = f.mysql_type == MYSQL_TYPE_DATE && mt->year == 0 && mt->month == 0 && mt->day == 0;
 
-	bool is_incomplete_date = type_config.incomplete_dates_as_nulls && (mt->month == 0 || mt->day == 0);
+	bool is_incomplete_date = (f.mysql_type == MYSQL_TYPE_DATE || f.mysql_type == MYSQL_TYPE_DATETIME) &&
+	                          type_config.incomplete_dates_as_nulls && (mt->month == 0 || mt->day == 0);
 
 	if (is_zero_datetime || is_zero_date || is_incomplete_date) {
 		FlatVector::SetNull(vec, row, true);
