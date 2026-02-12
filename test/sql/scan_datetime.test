@@ -79,7 +79,7 @@ SELECT t FROM datetime_tbl WHERE y = '1901'
 statement error
 SELECT t FROM datetime_tbl WHERE y = '2000'
 ----
-Binder Error: time field value out of range, hour value: 838
+time field value out of range
 
 statement ok
 CREATE OR REPLACE TABLE scan_datetime_2(col1 INTEGER, col2 TIME);

@@ -160,6 +160,9 @@ LogicalType MySQLTypes::FieldToLogicalType(const MySQLTypeConfig &type_config, M
 		break;
 	case MYSQL_TYPE_BIT:
 		type_data.type_name = "bit";
+		if (type_config.bit1_as_boolean && field->length == 1) {
+			type_data.column_type = "bit(1)";
+		}
 		break;
 	case MYSQL_TYPE_GEOMETRY:
 		type_data.type_name = "geometry";
@@ -186,9 +189,11 @@ LogicalType MySQLTypes::FieldToLogicalType(const MySQLTypeConfig &type_config, M
 		type_data.type_name = "__unknown_type";
 		break;
 	}
-	type_data.column_type = type_data.type_name;
-	if (field->length != 0) {
-		type_data.column_type += "(" + std::to_string(field->length) + ")";
+	if (type_data.column_type.empty()) {
+		type_data.column_type = type_data.type_name;
+		if (field->length != 0) {
+			type_data.column_type += "(" + std::to_string(field->length) + ")";
+		}
 	}
 	if (field->flags & UNSIGNED_FLAG && field->flags & NUM_FLAG) {
 		type_data.column_type += " unsigned";
