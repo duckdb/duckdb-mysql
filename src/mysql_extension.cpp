@@ -108,7 +108,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &db = loader.GetDatabaseInstance();
 
 	auto &config = DBConfig::GetConfig(db);
-	config.storage_extensions["mysql_scanner"] = make_uniq<MySQLStorageExtension>();
+	StorageExtension::Register(config, "mysql_scanner", make_shared_ptr<MySQLStorageExtension>());
 
 	config.AddExtensionOption("mysql_experimental_filter_pushdown",
 	                          "Whether or not to use filter pushdown (currently experimental)", LogicalType::BOOLEAN,
@@ -135,7 +135,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
-	config.optimizer_extensions.push_back(std::move(mysql_optimizer));
+	OptimizerExtension::Register(config, std::move(mysql_optimizer));
 }
 
 void MysqlScannerExtension::Load(ExtensionLoader &loader) {
