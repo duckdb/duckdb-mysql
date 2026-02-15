@@ -171,3 +171,11 @@ SELECT * FROM s.test
 1
 2
 3
+
+# Cleanup
+statement ok
+DROP TABLE IF EXISTS s.test
+
+statement ok
+DETACH s
+

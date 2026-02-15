@@ -1,0 +1,115 @@
+# name: test/sql/connection_pool_error_recovery.test
+# description: Test connection pool behavior after query errors
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s.error_test
+
+statement ok
+CREATE TABLE s.error_test(id INTEGER PRIMARY KEY, value VARCHAR(100))
+
+statement ok
+INSERT INTO s.error_test VALUES (1, 'original')
+
+# Test 1: Error during insert should not corrupt pool
+statement error
+INSERT INTO s.error_test VALUES (1, 'duplicate')
+----
+Duplicate entry
+
+# Connection should still be usable
+query II
+SELECT * FROM s.error_test
+----
+1	original
+
+# Test 2: Error in transaction should allow rollback
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.error_test VALUES (2, 'in_transaction')
+
+statement error
+INSERT INTO s.error_test VALUES (1, 'duplicate_in_tx')
+----
+Duplicate entry
+
+statement ok
+ROLLBACK
+
+# Only original row should exist
+query II
+SELECT * FROM s.error_test
+----
+1	original
+
+# Test 3: Successful operations after error recovery
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.error_test VALUES (3, 'after_error')
+
+statement ok
+COMMIT
+
+query II
+SELECT * FROM s.error_test ORDER BY id
+----
+1	original
+3	after_error
+
+# Test 4: Syntax error should not affect pool
+statement error
+SELEC * FROM s.error_test
+----
+Parser Error
+
+query II
+SELECT * FROM s.error_test ORDER BY id
+----
+1	original
+3	after_error
+
+# Test 5: Error in one transaction, success in next
+statement ok
+BEGIN
+
+statement error
+INSERT INTO s.error_test VALUES (1, 'will_fail')
+----
+Duplicate entry
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.error_test VALUES (4, 'will_succeed')
+
+statement ok
+COMMIT
+
+query II
+SELECT * FROM s.error_test ORDER BY id
+----
+1	original
+3	after_error
+4	will_succeed
+
+# Cleanup
+statement ok
+DROP TABLE s.error_test
+
+statement ok
+DETACH s

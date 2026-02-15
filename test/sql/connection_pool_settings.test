@@ -1,0 +1,63 @@
+# name: test/sql/connection_pool_settings.test
+# description: Test connection pool configuration settings
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# First attach to ensure extension is fully loaded
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s_default (TYPE MYSQL_SCANNER)
+
+# Test that pool settings exist and have correct defaults
+query I
+SELECT current_setting('mysql_pool_size')
+----
+4
+
+query I
+SELECT current_setting('mysql_pool_timeout_ms')
+----
+30000
+
+# Basic query to verify connection works
+statement ok
+SELECT 1 FROM s_default.information_schema.tables LIMIT 1
+
+statement ok
+DETACH s_default
+
+# Test pool size of 1 (minimal pool) via SET
+statement ok
+SET mysql_pool_size = 1
+
+query I
+SELECT current_setting('mysql_pool_size')
+----
+1
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s2 (TYPE MYSQL_SCANNER)
+
+statement ok
+SELECT 1 FROM s2.information_schema.tables LIMIT 1
+
+statement ok
+DETACH s2
+
+# Test custom timeout
+statement ok
+SET mysql_pool_timeout_ms = 60000
+
+query I
+SELECT current_setting('mysql_pool_timeout_ms')
+----
+60000
+
+# Reset to defaults
+statement ok
+SET mysql_pool_size = 4
+
+statement ok
+SET mysql_pool_timeout_ms = 30000

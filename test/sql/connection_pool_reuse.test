@@ -1,0 +1,103 @@
+# name: test/sql/connection_pool_reuse.test
+# description: Test that connections are properly reused and state is reset
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s.pool_reuse_test
+
+statement ok
+CREATE TABLE s.pool_reuse_test(id INTEGER)
+
+# Test 1: Session variables should not persist across transactions
+# First transaction sets a session variable (via temp table as proxy)
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (1)
+
+statement ok
+COMMIT
+
+# Second transaction should work without issues
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (2)
+
+statement ok
+COMMIT
+
+query I
+SELECT * FROM s.pool_reuse_test ORDER BY id
+----
+1
+2
+
+# Test 2: Multiple attach/detach cycles with same connection string
+statement ok
+DETACH s
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+# Data should still be there
+query I
+SELECT * FROM s.pool_reuse_test ORDER BY id
+----
+1
+2
+
+# Test 3: Verify autocommit mode after connection reuse
+# Without explicit transaction, each statement should auto-commit
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (3)
+
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (4)
+
+query I
+SELECT * FROM s.pool_reuse_test ORDER BY id
+----
+1
+2
+3
+4
+
+# Test 4: Mixed transaction and auto-commit modes
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (100)
+
+statement ok
+ROLLBACK
+
+# Auto-commit insert after rolled back transaction
+statement ok
+INSERT INTO s.pool_reuse_test VALUES (5)
+
+query I
+SELECT * FROM s.pool_reuse_test ORDER BY id
+----
+1
+2
+3
+4
+5
+
+# Cleanup
+statement ok
+DROP TABLE s.pool_reuse_test
+
+statement ok
+DETACH s

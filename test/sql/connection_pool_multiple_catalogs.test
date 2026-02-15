@@ -1,0 +1,82 @@
+# name: test/sql/connection_pool_multiple_catalogs.test
+# description: Test connection pool with multiple attached MySQL catalogs
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# Each catalog gets its own connection pool
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS db1 (TYPE MYSQL_SCANNER)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS db2 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS db1.multi_cat_test
+
+statement ok
+CREATE TABLE db1.multi_cat_test(id INTEGER, source VARCHAR(10))
+
+# Both connections should see the same table (same database)
+statement ok
+INSERT INTO db1.multi_cat_test VALUES (1, 'db1')
+
+query II
+SELECT * FROM db2.multi_cat_test ORDER BY id
+----
+1	db1
+
+statement ok
+INSERT INTO db2.multi_cat_test VALUES (2, 'db2')
+
+query II
+SELECT * FROM db1.multi_cat_test ORDER BY id
+----
+1	db1
+2	db2
+
+# Test transactions on separate catalogs
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO db1.multi_cat_test VALUES (10, 'tx1')
+
+# db2 should not see uncommitted changes (depending on isolation level)
+# Note: DuckDB manages separate transactions per catalog
+
+statement ok
+COMMIT
+
+query II
+SELECT * FROM db1.multi_cat_test ORDER BY id
+----
+1	db1
+2	db2
+10	tx1
+
+# Cross-catalog query (both use their own pools)
+query II
+SELECT * FROM db1.multi_cat_test
+UNION ALL
+SELECT * FROM db2.multi_cat_test
+ORDER BY id, source
+----
+1	db1
+1	db1
+2	db2
+2	db2
+10	tx1
+10	tx1
+
+# Cleanup
+statement ok
+DROP TABLE db1.multi_cat_test
+
+statement ok
+DETACH db1
+
+statement ok
+DETACH db2

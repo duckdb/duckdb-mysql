@@ -2,6 +2,8 @@
 
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "mysql_scanner.hpp"
+#include "mysql_types.hpp"
+#include "mysql_connection_pool.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "storage/mysql_catalog.hpp"
@@ -22,6 +24,7 @@ static unique_ptr<FunctionData> ClearCacheBind(ClientContext &context, TableFunc
 }
 
 static void ClearMySQLCaches(ClientContext &context) {
+	MySQLTypeConfig new_config(context);
 	auto databases = DatabaseManager::Get(context).GetDatabases(context);
 	for (auto &db_ref : databases) {
 		auto &db = *db_ref;
@@ -29,7 +32,9 @@ static void ClearMySQLCaches(ClientContext &context) {
 		if (catalog.GetCatalogType() != "mysql") {
 			continue;
 		}
-		catalog.Cast<MySQLCatalog>().ClearCache();
+		auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
+		mysql_catalog.ClearCache();
+		mysql_catalog.GetConnectionPool().UpdateTypeConfig(new_config);
 	}
 }
 

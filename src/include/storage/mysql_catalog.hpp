@@ -11,6 +11,7 @@
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
 #include "mysql_connection.hpp"
+#include "mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
 
 namespace duckdb {
@@ -18,7 +19,10 @@ class MySQLSchemaEntry;
 
 class MySQLCatalog : public Catalog {
 public:
-	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode);
+	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode,
+	                      idx_t pool_size = MySQLConnectionPool::DEFAULT_POOL_SIZE,
+	                      idx_t pool_timeout_ms = MySQLConnectionPool::DEFAULT_POOL_TIMEOUT_MS,
+	                      bool thread_local_cache_enabled = true);
 	~MySQLCatalog();
 
 	string connection_string;
@@ -64,12 +68,15 @@ public:
 	static bool IsMySQLScan(const string &name);
 	static bool IsMySQLQuery(const string &name);
 
+	MySQLConnectionPool &GetConnectionPool();
+
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
 
 private:
 	MySQLSchemaSet schemas;
 	string default_schema;
+	shared_ptr<MySQLConnectionPool> connection_pool;
 };
 
 } // namespace duckdb

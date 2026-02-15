@@ -78,11 +78,8 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const
 		mysql_params.reserve(params.size());
 		binds.reserve(params.size());
 		for (const Value &dp : params) {
-			Value copied = dp; // todo: copy here can be avoided
-			MySQLParameter mp(query, std::move(copied));
-			mysql_params.emplace_back(std::move(mp));
-			MySQLParameter &mp_ref = mysql_params.back();
-			binds.push_back(mp_ref.CreateBind());
+			mysql_params.emplace_back(query, dp);
+			binds.push_back(mysql_params.back().CreateBind());
 		}
 		auto res_bind = mysql_stmt_bind_param(stmt, binds.data());
 		if (res_bind != 0) {

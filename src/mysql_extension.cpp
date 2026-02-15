@@ -19,6 +19,13 @@ static void SetMySQLDebugQueryPrint(ClientContext &context, SetScope scope, Valu
 	MySQLConnection::DebugSetPrintQueries(BooleanValue::Get(parameter));
 }
 
+static void ValidatePoolSize(ClientContext &context, SetScope scope, Value &parameter) {
+	auto val = parameter.GetValue<uint64_t>();
+	if (val < 1) {
+		throw InvalidInputException("mysql_pool_size must be at least 1");
+	}
+}
+
 unique_ptr<BaseSecret> CreateMySQLSecretFunction(ClientContext &, CreateSecretInput &input) {
 	// apply any overridden settings
 	vector<string> prefix_paths;
@@ -42,8 +49,6 @@ unique_ptr<BaseSecret> CreateMySQLSecretFunction(ClientContext &, CreateSecretIn
 			result->secret_map["ssl_mode"] = named_param.second.ToString();
 		} else if (lower_name == "ssl_ca") {
 			result->secret_map["ssl_ca"] = named_param.second.ToString();
-		} else if (lower_name == "ssl_capath") {
-			result->secret_map["ssl_capath"] = named_param.second.ToString();
 		} else if (lower_name == "ssl_capath") {
 			result->secret_map["ssl_capath"] = named_param.second.ToString();
 		} else if (lower_name == "ssl_cert") {
@@ -132,6 +137,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("mysql_enable_transactions",
 	                          "Whether to run 'START TRANSACTION'/'COMMIT'/'ROLLBACK' on MySQL connections",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true), MySQLClearCacheFunction::ClearCacheOnSetting);
+	config.AddExtensionOption("mysql_pool_size", "Maximum number of connections per MySQL catalog (default: 4)",
+	                          LogicalType::UBIGINT, Value::UBIGINT(4), ValidatePoolSize);
+	config.AddExtensionOption("mysql_pool_timeout_ms",
+	                          "Timeout in milliseconds when waiting for a connection from the pool (default: 30000)",
+	                          LogicalType::UBIGINT, Value::UBIGINT(30000));
+	config.AddExtensionOption(
+	    "mysql_thread_local_cache",
+	    "Enable thread-local connection caching for faster same-thread connection reuse (default: true)",
+	    LogicalType::BOOLEAN, Value::BOOLEAN(true));
 
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
