@@ -1,0 +1,127 @@
+# name: test/sql/connection_pool_transactions.test
+# description: Test that connection pool properly handles transaction pinning
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s.pool_test
+
+statement ok
+CREATE TABLE s.pool_test(id INTEGER, value VARCHAR(100))
+
+# Test 1: Transaction isolation - connection stays pinned
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_test VALUES (1, 'first')
+
+# Within the same transaction, we should see our own changes
+query II
+SELECT * FROM s.pool_test ORDER BY id
+----
+1	first
+
+statement ok
+INSERT INTO s.pool_test VALUES (2, 'second')
+
+query II
+SELECT * FROM s.pool_test ORDER BY id
+----
+1	first
+2	second
+
+statement ok
+ROLLBACK
+
+# After rollback, changes should be gone
+query I
+SELECT COUNT(*) FROM s.pool_test
+----
+0
+
+# Test 2: Committed transaction should persist
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_test VALUES (10, 'committed')
+
+statement ok
+COMMIT
+
+query II
+SELECT * FROM s.pool_test ORDER BY id
+----
+10	committed
+
+# Test 3: Multiple sequential transactions
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_test VALUES (20, 'trans2')
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_test VALUES (30, 'trans3')
+
+statement ok
+COMMIT
+
+query II
+SELECT * FROM s.pool_test ORDER BY id
+----
+10	committed
+20	trans2
+30	trans3
+
+# Test 4: Nested operations within transaction
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO s.pool_test VALUES (40, 'before_update')
+
+statement ok
+UPDATE s.pool_test SET value = 'updated' WHERE id = 40
+
+query II
+SELECT * FROM s.pool_test WHERE id = 40
+----
+40	updated
+
+statement ok
+DELETE FROM s.pool_test WHERE id = 40
+
+query I
+SELECT COUNT(*) FROM s.pool_test WHERE id = 40
+----
+0
+
+statement ok
+ROLLBACK
+
+# 40 should never have existed after rollback
+query I
+SELECT COUNT(*) FROM s.pool_test WHERE id = 40
+----
+0
+
+# Cleanup
+statement ok
+DROP TABLE s.pool_test
+
+statement ok
+DETACH s

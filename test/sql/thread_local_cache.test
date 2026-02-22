@@ -1,0 +1,98 @@
+# name: test/sql/thread_local_cache.test
+# description: Test thread-local connection cache for faster connection acquisition
+# group: [sql]
+
+require mysql_scanner
+
+# This test verifies that the thread-local connection cache works correctly
+# for same-thread connection reuse scenarios
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s1 (TYPE mysql);
+
+# Create a test table
+statement ok
+CALL mysql_execute('s1', 'DROP TABLE IF EXISTS tl_cache_test');
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE tl_cache_test (id INT PRIMARY KEY, val VARCHAR(100))');
+
+statement ok
+CALL mysql_clear_cache();
+
+# Insert some test data via DuckDB (triggers connection acquisition)
+statement ok
+INSERT INTO s1.tl_cache_test VALUES (1, 'first'), (2, 'second'), (3, 'third');
+
+# Multiple queries in sequence - same thread should reuse cached connection
+query II
+SELECT * FROM s1.tl_cache_test WHERE id = 1;
+----
+1	first
+
+query II
+SELECT * FROM s1.tl_cache_test WHERE id = 2;
+----
+2	second
+
+query II
+SELECT * FROM s1.tl_cache_test WHERE id = 3;
+----
+3	third
+
+# Multiple queries to exercise the cache
+query I
+SELECT COUNT(*) FROM s1.tl_cache_test;
+----
+3
+
+query II
+SELECT id, val FROM s1.tl_cache_test ORDER BY id;
+----
+1	first
+2	second
+3	third
+
+# Test with transactions - connection should still be cached per thread
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO s1.tl_cache_test VALUES (4, 'fourth');
+
+query II
+SELECT * FROM s1.tl_cache_test WHERE id = 4;
+----
+4	fourth
+
+statement ok
+COMMIT;
+
+# Verify the transaction was committed
+query II
+SELECT * FROM s1.tl_cache_test WHERE id = 4;
+----
+4	fourth
+
+# Test rollback path
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO s1.tl_cache_test VALUES (5, 'fifth');
+
+statement ok
+ROLLBACK;
+
+# Verify the row was not inserted
+query I
+SELECT COUNT(*) FROM s1.tl_cache_test WHERE id = 5;
+----
+0
+
+# Clean up
+statement ok
+CALL mysql_execute('s1', 'DROP TABLE tl_cache_test');
+
+statement ok
+DETACH s1;

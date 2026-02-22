@@ -90,6 +90,10 @@ public:
 	static void DebugSetPrintQueries(bool print);
 	static bool DebugPrintQueries();
 
+	void SetTypeConfig(MySQLTypeConfig new_config) {
+		type_config = std::move(new_config);
+	}
+
 private:
 	unique_ptr<MySQLResult> QueryInternal(const string &query, const vector<Value> &params,
 	                                      MySQLResultStreaming streaming, MySQLConnectorInterface con_interface);

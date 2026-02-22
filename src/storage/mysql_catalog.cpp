@@ -16,16 +16,22 @@
 namespace duckdb {
 
 MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, string attach_path_p,
-                           AccessMode access_mode)
+                           AccessMode access_mode, idx_t pool_size, idx_t pool_timeout_ms,
+                           bool thread_local_cache_enabled)
     : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
       access_mode(access_mode), schemas(*this) {
 	MySQLConnectionParameters connection_params;
 	unordered_set<string> unused;
 	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
 	default_schema = connection_params.db;
-	// try to connect
+
 	MySQLTypeConfig type_config;
-	auto connection = MySQLConnection::Open(type_config, connection_string, attach_path);
+	connection_pool =
+	    make_shared_ptr<MySQLConnectionPool>(connection_string, attach_path, type_config, pool_size, pool_timeout_ms);
+	connection_pool->SetThreadLocalCacheEnabled(thread_local_cache_enabled);
+
+	auto pooled = connection_pool->Acquire();
+	(void)pooled;
 }
 
 MySQLCatalog::~MySQLCatalog() = default;
@@ -523,6 +529,10 @@ WHERE table_schema = ${SCHEMA_NAME};
 
 void MySQLCatalog::ClearCache() {
 	schemas.ClearEntries();
+}
+
+MySQLConnectionPool &MySQLCatalog::GetConnectionPool() {
+	return *connection_pool;
 }
 
 } // namespace duckdb

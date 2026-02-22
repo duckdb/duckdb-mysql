@@ -1,0 +1,126 @@
+# name: test/sql/thread_local_cache_settings.test
+# description: Test thread-local connection cache with multiple attach/detach cycles
+# group: [sql]
+
+require mysql_scanner
+
+# Test 1: First attach - thread local cache is enabled by default
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s1 (TYPE mysql);
+
+statement ok
+CALL mysql_execute('s1', 'DROP TABLE IF EXISTS tl_settings_test');
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE tl_settings_test (id INT PRIMARY KEY, val VARCHAR(100))');
+
+statement ok
+CALL mysql_clear_cache();
+
+# Multiple rapid operations on the same thread should benefit from cache
+statement ok
+INSERT INTO s1.tl_settings_test VALUES (1, 'one');
+
+query II
+SELECT * FROM s1.tl_settings_test WHERE id = 1;
+----
+1	one
+
+statement ok
+INSERT INTO s1.tl_settings_test VALUES (2, 'two');
+
+query II
+SELECT * FROM s1.tl_settings_test ORDER BY id;
+----
+1	one
+2	two
+
+statement ok
+DETACH s1;
+
+# Test 2: Re-attach - should create new pool with fresh thread local cache
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s2 (TYPE mysql);
+
+# Operations should still work correctly after detach/reattach
+query II
+SELECT * FROM s2.tl_settings_test ORDER BY id;
+----
+1	one
+2	two
+
+statement ok
+INSERT INTO s2.tl_settings_test VALUES (3, 'three');
+
+query II
+SELECT * FROM s2.tl_settings_test ORDER BY id;
+----
+1	one
+2	two
+3	three
+
+statement ok
+DETACH s2;
+
+# Test 3: Third attach cycle with rapid queries
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s3 (TYPE mysql);
+
+# Many rapid queries to exercise thread-local cache
+query I
+SELECT COUNT(*) FROM s3.tl_settings_test;
+----
+3
+
+query I
+SELECT COUNT(*) FROM s3.tl_settings_test WHERE id > 1;
+----
+2
+
+query I
+SELECT COUNT(*) FROM s3.tl_settings_test WHERE id < 3;
+----
+2
+
+query I
+SELECT SUM(id) FROM s3.tl_settings_test;
+----
+6
+
+query I
+SELECT MAX(id) FROM s3.tl_settings_test;
+----
+3
+
+query I
+SELECT MIN(id) FROM s3.tl_settings_test;
+----
+1
+
+# Test with transaction
+statement ok
+BEGIN;
+
+statement ok
+INSERT INTO s3.tl_settings_test VALUES (4, 'four');
+
+query II
+SELECT * FROM s3.tl_settings_test WHERE id = 4;
+----
+4	four
+
+statement ok
+COMMIT;
+
+# Verify commit worked
+query I
+SELECT COUNT(*) FROM s3.tl_settings_test;
+----
+4
+
+# Clean up
+statement ok
+CALL mysql_execute('s3', 'DROP TABLE tl_settings_test');
+
+statement ok
+DETACH s3;
