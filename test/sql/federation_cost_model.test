@@ -1,0 +1,161 @@
+# name: test/sql/federation_cost_model.test
+# description: Test cost model behavior for federation optimizer pushdown decisions
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# ==============================================================================
+# Test Setup: Create tables of varying sizes for cost estimation
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.cost_small;
+
+statement ok
+DROP TABLE IF EXISTS s1.cost_large;
+
+# Small table (100 rows)
+statement ok
+CREATE TABLE s1.cost_small(
+    id INTEGER PRIMARY KEY,
+    val INTEGER
+);
+
+statement ok
+INSERT INTO s1.cost_small SELECT range, range % 10 FROM range(100);
+
+# Large table (100000 rows)
+statement ok
+CREATE TABLE s1.cost_large(
+    id INTEGER PRIMARY KEY,
+    indexed_val INTEGER,
+    data VARCHAR(100)
+);
+
+statement ok
+CREATE INDEX idx_cost_large_val ON s1.cost_large(indexed_val);
+
+statement ok
+INSERT INTO s1.cost_large
+SELECT
+    range,
+    range % 1000,
+    REPEAT('x', 50)
+FROM range(100000);
+
+# ==============================================================================
+# Small Table Tests (low network cost)
+# ==============================================================================
+
+# Test 1: Full scan on small table (low cost, filter may execute locally)
+query I
+SELECT COUNT(*) FROM s1.cost_small WHERE val = 5
+----
+10
+
+# Test 2: Primary key lookup on small table
+query II
+SELECT id, val FROM s1.cost_small WHERE id = 50
+----
+50	0
+
+# ==============================================================================
+# Large Table Tests (high network cost benefit from pushdown)
+# ==============================================================================
+
+# Test 3: Highly selective filter on indexed column (should push)
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val = 500
+----
+100
+
+# Test 4: Very selective primary key filter
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE id = 50000
+----
+1
+
+# Test 5: Range filter with good selectivity on index
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val BETWEEN 0 AND 9
+----
+1000
+
+# Test 6: Low selectivity filter (large result set)
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val < 500
+----
+50000
+
+# ==============================================================================
+# Cost Comparison Scenarios
+# ==============================================================================
+
+# Test 7: Index lookup vs sequential scan comparison
+# Highly selective (should use index)
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val = 999
+----
+100
+
+# Test 8: Filter that returns most rows (seq scan may be cheaper)
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val >= 0
+----
+100000
+
+# ==============================================================================
+# Network Cost Reduction Tests
+# ==============================================================================
+
+# Test 9: Filter reduces data transfer significantly
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE id < 100
+----
+100
+
+# Test 10: Multiple filters compound selectivity
+query I
+SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val = 500 AND id > 50000
+----
+50
+
+# ==============================================================================
+# Column Projection with Pushdown
+# ==============================================================================
+
+# Test 11: Select only needed columns with filter
+query I
+SELECT id FROM s1.cost_large WHERE indexed_val = 100 ORDER BY id LIMIT 5
+----
+100
+1100
+2100
+3100
+4100
+
+# Test 12: Select multiple columns with filter
+query II
+SELECT id, indexed_val FROM s1.cost_large WHERE id IN (1000, 2000, 3000) ORDER BY id
+----
+1000	0
+2000	0
+3000	0
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.cost_small;
+
+statement ok
+DROP TABLE IF EXISTS s1.cost_large;

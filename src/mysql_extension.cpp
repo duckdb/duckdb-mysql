@@ -51,6 +51,13 @@ static void ValidatePoolAcquireMode(ClientContext &context, SetScope scope, Valu
 	}
 }
 
+static void ValidateUnitInterval(ClientContext &context, SetScope scope, Value &parameter) {
+	auto val = parameter.GetValue<double>();
+	if (val < 0.0 || val > 1.0) {
+		throw InvalidInputException("Value must be between 0.0 and 1.0, got %f", val);
+	}
+}
+
 unique_ptr<BaseSecret> CreateMySQLSecretFunction(ClientContext &, CreateSecretInput &input) {
 	// apply any overridden settings
 	vector<string> prefix_paths;
@@ -177,7 +184,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    "mysql_thread_local_cache",
 	    "Enable thread-local connection caching for faster same-thread connection reuse (default: true)",
 	    LogicalType::BOOLEAN, Value::BOOLEAN(true));
-
+	config.AddExtensionOption("mysql_compression_aware_costs",
+	                          "Apply compression ratios when estimating transfer costs (default: true)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_compression_ratio",
+	                          "Compression ratio for transfer cost estimation (default: 0.7)", LogicalType::DOUBLE,
+	                          Value::DOUBLE(0.7), ValidateUnitInterval);
+	config.AddExtensionOption("mysql_push_threshold_with_index",
+	                          "Selectivity threshold for pushing filters with index support (default: 0.5)",
+	                          LogicalType::DOUBLE, Value::DOUBLE(0.5), ValidateUnitInterval);
+	config.AddExtensionOption("mysql_push_threshold_no_index",
+	                          "Selectivity threshold for pushing filters without index support (default: 0.3)",
+	                          LogicalType::DOUBLE, Value::DOUBLE(0.3), ValidateUnitInterval);
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	OptimizerExtension::Register(config, std::move(mysql_optimizer));

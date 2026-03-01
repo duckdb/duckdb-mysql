@@ -1,0 +1,177 @@
+# name: test/sql/federation_statistics.test
+# description: Test statistics collection and predicate analysis for federation optimizer
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# ==============================================================================
+# Test Setup: Create table with composite indexes
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.stats_test;
+
+statement ok
+CREATE TABLE s1.stats_test(
+    id INTEGER PRIMARY KEY,
+    col_a INTEGER NOT NULL,
+    col_b INTEGER NOT NULL,
+    col_c VARCHAR(50),
+    unique_col INTEGER UNIQUE
+);
+
+# Create composite index
+statement ok
+CREATE INDEX idx_composite ON s1.stats_test(col_a, col_b);
+
+# Insert data with known distribution
+statement ok
+INSERT INTO s1.stats_test
+SELECT
+    range as id,
+    range % 10 as col_a,
+    range % 100 as col_b,
+    CONCAT('value_', range % 50) as col_c,
+    range as unique_col
+FROM range(10000);
+
+# ==============================================================================
+# Index Usage Tests
+# ==============================================================================
+
+# Test 1: Filter on leading column of composite index
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5
+----
+1000
+
+# Test 2: Filter on both columns of composite index
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5 AND col_b = 55
+----
+100
+
+# Test 3: Filter on non-leading column (index may not be used)
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_b = 50
+----
+100
+
+# Test 4: Filter on unique column
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE unique_col = 5000
+----
+1
+
+# ==============================================================================
+# Cardinality Estimation Tests
+# ==============================================================================
+
+# Test 5: High cardinality column (unique)
+query II
+SELECT id, unique_col FROM s1.stats_test WHERE unique_col = 9999
+----
+9999	9999
+
+# Test 6: Low cardinality column (10 distinct values)
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 0
+----
+1000
+
+# Test 7: Medium cardinality (100 distinct values)
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_b = 0
+----
+100
+
+# ==============================================================================
+# Range Query Tests with Statistics
+# ==============================================================================
+
+# Test 8: Range on high cardinality column
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE unique_col BETWEEN 1000 AND 2000
+----
+1001
+
+# Test 9: Range on low cardinality column
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a BETWEEN 0 AND 2
+----
+3000
+
+# Test 10: Range on medium cardinality column
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_b BETWEEN 0 AND 9
+----
+1000
+
+# ==============================================================================
+# Multiple Filter Selectivity Tests
+# ==============================================================================
+
+# Test 11: Two filters that combine multiplicatively
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5 AND col_b < 10
+----
+100
+
+# Test 12: Highly selective combined filters
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5 AND col_b = 5 AND col_c = 'value_5'
+----
+100
+
+# ==============================================================================
+# String Column Tests
+# ==============================================================================
+
+# Test 13: String equality filter
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_c = 'value_25'
+----
+200
+
+# Test 14: String with IN clause
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_c IN ('value_0', 'value_1', 'value_2')
+----
+600
+
+# ==============================================================================
+# Edge Cases
+# ==============================================================================
+
+# Test 15: Filter that matches nothing
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE unique_col = 99999
+----
+0
+
+# Test 16: Filter that matches everything
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE col_a < 100
+----
+10000
+
+# Test 17: Filter on primary key with range
+query I
+SELECT COUNT(*) FROM s1.stats_test WHERE id BETWEEN 0 AND 99
+----
+100
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.stats_test;

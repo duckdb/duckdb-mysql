@@ -1,0 +1,183 @@
+# name: test/sql/partition_pruning.test
+# description: Test partition pruning optimization for MySQL partitioned tables
+# group: [sql]
+
+#
+# Partition key filters should ALWAYS be pushed to MySQL regardless of selectivity
+# or index availability. This enables MySQL to perform partition pruning and avoid
+# scanning irrelevant partitions.
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# ==============================================================================
+# Test Setup: Create partitioned tables
+# ==============================================================================
+
+# RANGE partitioned table (most common for time-series data)
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_orders;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE partitioned_orders (
+    id INT NOT NULL,
+    order_date DATE NOT NULL,
+    customer_id INT,
+    amount DECIMAL(10,2),
+    PRIMARY KEY (id, order_date)
+) PARTITION BY RANGE (YEAR(order_date)) (
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+)');
+
+statement ok
+CALL mysql_clear_cache();
+
+# Insert test data across partitions
+statement ok
+INSERT INTO s1.partitioned_orders VALUES
+    (1, '2022-06-15', 100, 99.99),
+    (2, '2022-12-01', 101, 150.00),
+    (3, '2023-03-20', 100, 200.50),
+    (4, '2023-08-10', 102, 75.25),
+    (5, '2024-01-05', 101, 300.00),
+    (6, '2024-06-30', 100, 125.75);
+
+# Force statistics update
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE partitioned_orders');
+
+# ==============================================================================
+# Test 1: Verify partition info is detected
+# ==============================================================================
+
+# Query a partitioned table - partition info should be detected
+query ITRR
+SELECT * FROM s1.partitioned_orders WHERE order_date >= '2024-01-01' ORDER BY id;
+----
+5	2024-01-05	101	300.00
+6	2024-06-30	100	125.75
+
+# ==============================================================================
+# Test 2: Partition key filter should always be pushed
+# ==============================================================================
+
+# Even without index on customer_id, partition key filter should be pushed
+query ITRR
+SELECT * FROM s1.partitioned_orders
+WHERE order_date >= '2023-01-01' AND order_date < '2024-01-01'
+ORDER BY id;
+----
+3	2023-03-20	100	200.50
+4	2023-08-10	102	75.25
+
+# ==============================================================================
+# Test 3: Combination of partition key and non-partition filters
+# ==============================================================================
+
+# Both filters should work, but partition key is mandatory push
+query ITRR
+SELECT * FROM s1.partitioned_orders
+WHERE order_date >= '2023-01-01' AND customer_id = 100
+ORDER BY id;
+----
+3	2023-03-20	100	200.50
+6	2024-06-30	100	125.75
+
+# ==============================================================================
+# Test 4: LIST partitioned table
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_regions;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE partitioned_regions (
+    id INT NOT NULL,
+    region VARCHAR(20) NOT NULL,
+    sales DECIMAL(12,2),
+    PRIMARY KEY (id, region)
+) PARTITION BY LIST COLUMNS(region) (
+    PARTITION p_east VALUES IN (''NY'', ''MA'', ''FL''),
+    PARTITION p_west VALUES IN (''CA'', ''WA'', ''OR''),
+    PARTITION p_central VALUES IN (''TX'', ''IL'', ''OH'')
+)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.partitioned_regions VALUES
+    (1, 'NY', 1000.00),
+    (2, 'CA', 2000.00),
+    (3, 'TX', 1500.00),
+    (4, 'FL', 800.00),
+    (5, 'WA', 1200.00);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE partitioned_regions');
+
+# LIST partition key filter
+query ITR
+SELECT * FROM s1.partitioned_regions WHERE region IN ('CA', 'WA') ORDER BY id;
+----
+2	CA	2000.00
+5	WA	1200.00
+
+# ==============================================================================
+# Test 5: HASH partitioned table (partition pruning less impactful but still detected)
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_users;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE partitioned_users (
+    user_id INT NOT NULL PRIMARY KEY,
+    username VARCHAR(50),
+    created_at DATETIME
+) PARTITION BY HASH(user_id) PARTITIONS 4');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.partitioned_users VALUES
+    (1, 'alice', '2024-01-01 10:00:00'),
+    (2, 'bob', '2024-01-02 11:00:00'),
+    (3, 'charlie', '2024-01-03 12:00:00'),
+    (4, 'diana', '2024-01-04 13:00:00');
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE partitioned_users');
+
+# HASH partition - equality on partition key enables pruning
+query ITT
+SELECT * FROM s1.partitioned_users WHERE user_id = 2;
+----
+2	bob	2024-01-02 11:00:00
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_orders;
+
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_regions;
+
+statement ok
+DROP TABLE IF EXISTS s1.partitioned_users;

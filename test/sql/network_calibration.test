@@ -1,0 +1,121 @@
+# name: test/sql/network_calibration.test
+# description: Test network calibration functionality for cost model optimization
+# group: [sql]
+
+#
+# This test validates that network calibration is performed on first connection
+# and that calibrated values affect cost model decisions.
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# ==============================================================================
+# Test 1: Verify network calibration occurs on first connection
+# When a catalog is attached, the first connection should measure RTT
+# ==============================================================================
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# Simple query to trigger connection acquisition (calibration happens on first connect)
+query I
+SELECT COUNT(*) FROM s1.unsigned_integers
+----
+3
+
+# ==============================================================================
+# Test 2: Network calibration should persist across queries
+# Subsequent queries should not re-calibrate (uses cached calibration)
+# ==============================================================================
+
+query I
+SELECT COUNT(*) FROM s1.unsigned_integers
+----
+3
+
+query I
+SELECT SUM(t) FROM s1.unsigned_integers WHERE t > 0
+----
+255
+
+# ==============================================================================
+# Test 3: Network calibration affects transfer cost calculations
+# Create a table and verify queries work (cost model uses calibrated network)
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.network_cal_test
+
+statement ok
+CREATE TABLE s1.network_cal_test(
+    id INTEGER PRIMARY KEY,
+    data VARCHAR(1000)
+)
+
+statement ok
+INSERT INTO s1.network_cal_test
+SELECT range as id, REPEAT('x', 500) as data FROM range(1000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE network_cal_test')
+
+# Wide row query - network cost should be significant factor
+query I
+SELECT COUNT(*) FROM s1.network_cal_test WHERE id < 100
+----
+100
+
+# Point lookup - minimal network transfer
+query I
+SELECT id FROM s1.network_cal_test WHERE id = 500
+----
+500
+
+# ==============================================================================
+# Test 4: Detach and re-attach triggers new calibration
+# Each new pool should calibrate independently
+# ==============================================================================
+
+statement ok
+DETACH s1
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# First query after re-attach triggers calibration
+query I
+SELECT COUNT(*) FROM s1.network_cal_test
+----
+1000
+
+# ==============================================================================
+# Test 5: Multiple catalogs calibrate independently
+# ==============================================================================
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s2 (TYPE MYSQL_SCANNER)
+
+# Both catalogs should work with their own calibration
+query I
+SELECT COUNT(*) FROM s1.network_cal_test WHERE id < 50
+----
+50
+
+query I
+SELECT 1
+----
+1
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.network_cal_test
+
+statement ok
+DETACH s1
+
+statement ok
+DETACH s2

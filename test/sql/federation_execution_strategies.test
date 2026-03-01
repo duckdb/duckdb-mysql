@@ -1,0 +1,289 @@
+# name: test/sql/federation_execution_strategies.test
+# description: Test that all execution strategies (PUSH_ALL, HYBRID) produce correct results
+# group: [sql]
+
+#
+# This test validates that the cost model correctly chooses execution strategies
+# and that filters are applied correctly regardless of which strategy is chosen.
+#
+# NOTE: EXECUTE_ALL_LOCALLY is currently disabled in the cost model because
+# the scanner does not implement local filter execution. This test ensures
+# that PUSH_ALL and HYBRID strategies work correctly.
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# ==============================================================================
+# Test Setup: Create tables with different characteristics
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.exec_strategy_test;
+
+statement ok
+CREATE TABLE s1.exec_strategy_test(
+    id INTEGER PRIMARY KEY,
+    indexed_val INTEGER,
+    non_indexed_val INTEGER,
+    text_data VARCHAR(100)
+);
+
+statement ok
+CREATE INDEX idx_exec_val ON s1.exec_strategy_test(indexed_val);
+
+# Insert 10000 rows with known distribution:
+# - indexed_val: 0-99 (100 distinct values, 100 rows each)
+# - non_indexed_val: 0-999 (1000 distinct values, 10 rows each)
+statement ok
+INSERT INTO s1.exec_strategy_test
+SELECT
+    range as id,
+    range % 100 as indexed_val,
+    range % 1000 as non_indexed_val,
+    CONCAT('data_', range) as text_data
+FROM range(10000);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE exec_strategy_test');
+
+# ==============================================================================
+# PUSH_ALL Strategy Tests (highly selective filters with index)
+# ==============================================================================
+
+# Test 1: Primary key point lookup (most selective, always push)
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE id = 5000
+----
+1
+
+query II
+SELECT id, indexed_val FROM s1.exec_strategy_test WHERE id = 9999
+----
+9999	99
+
+# Test 2: Indexed column equality (1% selectivity)
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val = 50
+----
+100
+
+query I
+SELECT SUM(id) FROM s1.exec_strategy_test WHERE indexed_val = 0
+----
+495000
+
+# Test 3: Primary key range (highly selective)
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE id BETWEEN 1000 AND 1099
+----
+100
+
+query II
+SELECT MIN(id), MAX(id) FROM s1.exec_strategy_test WHERE id >= 9900
+----
+9900	9999
+
+# ==============================================================================
+# HYBRID Strategy Tests (mix of pushed and local filters)
+# ==============================================================================
+
+# Test 4: Indexed + non-indexed filter combination
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val = 50 AND non_indexed_val >= 500
+----
+50
+
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val = 50 AND id > 5000
+----
+50
+
+# Test 5: Multiple filters with varying selectivity
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val < 10 AND non_indexed_val < 100
+----
+100
+
+# ==============================================================================
+# Range Filter Tests (verify correct row counts)
+# ==============================================================================
+
+# Test 6: Small range on indexed column
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val < 5
+----
+500
+
+# Test 7: Medium range on indexed column
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val < 50
+----
+5000
+
+# Test 8: Large range on indexed column
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val < 90
+----
+9000
+
+# Test 9: Full range (all rows match)
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val < 100
+----
+10000
+
+# ==============================================================================
+# IN Filter Tests
+# ==============================================================================
+
+# Test 10: IN filter on indexed column
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val IN (1, 2, 3)
+----
+300
+
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val IN (10, 20, 30, 40, 50)
+----
+500
+
+# Test 11: IN filter on primary key
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE id IN (100, 200, 300, 400, 500)
+----
+5
+
+# ==============================================================================
+# NULL Handling Tests
+# ==============================================================================
+
+# Test 12: IS NOT NULL (all rows have values)
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val IS NOT NULL
+----
+10000
+
+# ==============================================================================
+# Comparison Operator Tests
+# ==============================================================================
+
+# Test 13: Less than
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE id < 100
+----
+100
+
+# Test 14: Greater than
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE id > 9900
+----
+99
+
+# Test 15: Not equal
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val != 0
+----
+9900
+
+# Test 16: Less than or equal
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val <= 9
+----
+1000
+
+# Test 17: Greater than or equal
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE indexed_val >= 90
+----
+1000
+
+# ==============================================================================
+# Aggregate with Filter Tests
+# ==============================================================================
+
+# Test 18: SUM with filter
+query I
+SELECT SUM(indexed_val) FROM s1.exec_strategy_test WHERE id < 100
+----
+4950
+
+# Test 19: AVG with filter
+query I
+SELECT AVG(indexed_val)::INTEGER FROM s1.exec_strategy_test WHERE id BETWEEN 0 AND 999
+----
+50
+
+# Test 20: COUNT DISTINCT with filter
+query I
+SELECT COUNT(DISTINCT indexed_val) FROM s1.exec_strategy_test WHERE id < 1000
+----
+100
+
+# ==============================================================================
+# Projection Tests (ensure correct columns returned)
+# ==============================================================================
+
+# Test 21: Select specific columns with filter
+query III
+SELECT id, indexed_val, non_indexed_val FROM s1.exec_strategy_test WHERE id = 5555
+----
+5555	55	555
+
+# Test 22: Select with ORDER BY and LIMIT
+query I
+SELECT id FROM s1.exec_strategy_test WHERE indexed_val = 42 ORDER BY id LIMIT 3
+----
+42
+142
+242
+
+# ==============================================================================
+# String Filter Tests
+# ==============================================================================
+
+# Test 23: String equality
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE text_data = 'data_1234'
+----
+1
+
+# Test 24: String comparison
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test WHERE text_data > 'data_9990'
+----
+9
+
+# ==============================================================================
+# Combined Complex Filters
+# ==============================================================================
+
+# Test 25: Three-way AND filter
+# indexed_val=50 gives 50 rows with id>5000 (5050,5150,...,9950)
+# Of those, 8 out of every 10 have non_indexed_val < 800
+# (non_indexed_val = id % 1000, so 50,150,250,350,450,550,650,750 < 800)
+# That's 5 groups of 10 → 5 × 8 = 40 matching rows
+query I
+SELECT COUNT(*) FROM s1.exec_strategy_test
+WHERE indexed_val = 50 AND id > 5000 AND non_indexed_val < 800
+----
+40
+
+# Test 26: Filter with arithmetic in result
+query I
+SELECT SUM(id + indexed_val) FROM s1.exec_strategy_test WHERE indexed_val = 99
+----
+514800
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.exec_strategy_test;

@@ -1,0 +1,122 @@
+# name: test/sql/compression_cost_model.test
+# description: Test compression-aware transfer cost estimation
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# ==============================================================================
+# Test Setup: Create regular and compressed tables
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.uncompressed_data;
+
+statement ok
+DROP TABLE IF EXISTS s1.compressed_data;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE uncompressed_data (
+    id INT NOT NULL PRIMARY KEY,
+    data_col VARCHAR(500),
+    value DECIMAL(10,2)
+) ROW_FORMAT=DYNAMIC');
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE compressed_data (
+    id INT NOT NULL PRIMARY KEY,
+    data_col VARCHAR(500),
+    value DECIMAL(10,2)
+) ROW_FORMAT=COMPRESSED');
+
+statement ok
+CALL mysql_clear_cache();
+
+# Insert test data
+statement ok
+INSERT INTO s1.uncompressed_data
+SELECT id, REPEAT('x', 100), id * 1.5 FROM range(1, 1001) t(id);
+
+statement ok
+INSERT INTO s1.compressed_data
+SELECT id, REPEAT('x', 100), id * 1.5 FROM range(1, 1001) t(id);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE uncompressed_data');
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE compressed_data');
+
+# ==============================================================================
+# Test 1: Verify compression setting works
+# ==============================================================================
+
+statement ok
+SET mysql_compression_aware_costs = true;
+
+statement ok
+SET mysql_compression_ratio = 0.7;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.uncompressed_data WHERE id < 100;
+----
+99	7425.00
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id < 100;
+----
+99	7425.00
+
+# ==============================================================================
+# Test 2: Verify disabling compression awareness
+# ==============================================================================
+
+statement ok
+SET mysql_compression_aware_costs = false;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id < 50;
+----
+49	1837.50
+
+# ==============================================================================
+# Test 3: Different compression ratios
+# ==============================================================================
+
+statement ok
+SET mysql_compression_aware_costs = true;
+
+statement ok
+SET mysql_compression_ratio = 0.5;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id BETWEEN 100 AND 200;
+----
+101	22725.00
+
+statement ok
+SET mysql_compression_ratio = 0.8;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id BETWEEN 200 AND 300;
+----
+101	37875.00
+
+# ==============================================================================
+# Cleanup
+# ==============================================================================
+
+statement ok
+DROP TABLE IF EXISTS s1.uncompressed_data;
+
+statement ok
+DROP TABLE IF EXISTS s1.compressed_data;
