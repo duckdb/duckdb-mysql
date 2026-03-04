@@ -1,0 +1,118 @@
+# name: test/sql/federation_execution_plan.test
+# description: Test execution plan selection based on cost model
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create tables to exercise different execution strategies
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_test;
+
+statement ok
+CREATE TABLE s1.plan_test(
+    id INTEGER PRIMARY KEY,
+    indexed_col INTEGER,
+    data VARCHAR(200)
+);
+
+statement ok
+CREATE INDEX idx_plan_indexed ON s1.plan_test(indexed_col);
+
+statement ok
+INSERT INTO s1.plan_test
+SELECT
+    range as id,
+    range % 100 as indexed_col,
+    REPEAT('x', 100) as data
+FROM range(50000);
+
+# Scenario 1: Highly selective filter on indexed column
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE id = 25000
+----
+1
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col = 50 AND id < 1000
+----
+10
+
+# Scenario 2: Moderately selective filter
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col = 50
+----
+500
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col IN (1, 2, 3, 4, 5)
+----
+2500
+
+# Scenario 3: Range queries on indexed column
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col BETWEEN 10 AND 20
+----
+5500
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE id >= 49000
+----
+1000
+
+# Scenario 4: Multiple filters with varying selectivity
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col = 25 AND id > 40000
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE id BETWEEN 10000 AND 20000 AND indexed_col < 50
+----
+5001
+
+# Scenario 5: String filters
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE data = REPEAT('x', 100)
+----
+50000
+
+# Scenario 6: NULL handling with cost consideration
+
+statement ok
+UPDATE s1.plan_test SET indexed_col = NULL WHERE id % 1000 = 0;
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col IS NULL
+----
+50
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col IS NOT NULL
+----
+49950
+
+# Scenario 7: Complex combined filters
+
+query I
+SELECT COUNT(*) FROM s1.plan_test WHERE indexed_col = 10 AND id > 25000 AND id < 30000
+----
+50
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_test;

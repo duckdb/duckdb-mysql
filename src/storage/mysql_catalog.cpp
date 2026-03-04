@@ -30,6 +30,9 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 	    make_shared_ptr<MySQLConnectionPool>(connection_string, attach_path, type_config, pool_size, pool_timeout_ms);
 	connection_pool->SetThreadLocalCacheEnabled(thread_local_cache_enabled);
 
+	stats_cache_.SetInvalidationCallback(
+	    [this](const string &schema, const string &table) { plan_cache_.InvalidateTable(schema, table); });
+
 	auto pooled = connection_pool->ForceAcquire();
 	(void)pooled;
 }
@@ -529,10 +532,20 @@ WHERE table_schema = ${SCHEMA_NAME};
 
 void MySQLCatalog::ClearCache() {
 	schemas.ClearEntries();
+	plan_cache_.Clear();
+	stats_cache_.Clear();
 }
 
 MySQLConnectionPool &MySQLCatalog::GetConnectionPool() {
 	return *connection_pool;
+}
+
+PlanCache &MySQLCatalog::GetPlanCache() {
+	return plan_cache_;
+}
+
+MySQLStatsCache &MySQLCatalog::GetStatsCache() {
+	return stats_cache_;
 }
 
 } // namespace duckdb

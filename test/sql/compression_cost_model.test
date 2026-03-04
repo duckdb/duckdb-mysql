@@ -12,9 +12,7 @@ SET GLOBAL mysql_experimental_filter_pushdown=true;
 statement ok
 ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
 
-# ==============================================================================
 # Test Setup: Create regular and compressed tables
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.uncompressed_data;
@@ -56,9 +54,7 @@ CALL mysql_execute('s1', 'ANALYZE TABLE uncompressed_data');
 statement ok
 CALL mysql_execute('s1', 'ANALYZE TABLE compressed_data');
 
-# ==============================================================================
 # Test 1: Verify compression setting works
-# ==============================================================================
 
 statement ok
 SET mysql_compression_aware_costs = true;
@@ -76,9 +72,7 @@ SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id < 100;
 ----
 99	7425.00
 
-# ==============================================================================
 # Test 2: Verify disabling compression awareness
-# ==============================================================================
 
 statement ok
 SET mysql_compression_aware_costs = false;
@@ -88,9 +82,7 @@ SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id < 50;
 ----
 49	1837.50
 
-# ==============================================================================
 # Test 3: Different compression ratios
-# ==============================================================================
 
 statement ok
 SET mysql_compression_aware_costs = true;
@@ -111,9 +103,7 @@ SELECT COUNT(*), SUM(value) FROM s1.compressed_data WHERE id BETWEEN 200 AND 300
 ----
 101	37875.00
 
-# ==============================================================================
 # Cleanup
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.uncompressed_data;

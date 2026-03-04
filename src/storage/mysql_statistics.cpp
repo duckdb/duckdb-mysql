@@ -367,7 +367,184 @@ double MySQLHistogram::EstimateRangeSelectivity(const Value &low, const Value &h
 	return std::max(0.0, high_freq - low_freq);
 }
 
-MySQLStatisticsCollector::MySQLStatisticsCollector(MySQLConnection &connection) : connection_(connection) {
+void MySQLStatsCache::SetInvalidationCallback(InvalidationCallback callback) {
+	invalidation_callback_ = std::move(callback);
+}
+
+string MySQLStatsCache::MakeCacheKey(const string &schema, const string &table) {
+	string key;
+	key.reserve(schema.size() + 1 + table.size());
+	key += schema;
+	key += '\0';
+	key += table;
+	return key;
+}
+
+void MySQLStatsCache::CompactEvictionQueue() {
+	if (eviction_queue_.size() <= 2 * MAX_TABLE_STATS_ENTRIES) {
+		return;
+	}
+	std::deque<StatsEvictionEntry> compacted;
+	for (auto &entry : eviction_queue_) {
+		auto it = table_stats_.find(entry.key);
+		if (it != table_stats_.end() && it->second.eviction_seq == entry.seq) {
+			compacted.push_back(std::move(entry));
+		}
+	}
+	eviction_queue_ = std::move(compacted);
+}
+
+void MySQLStatsCache::EvictOldest() {
+	while (!eviction_queue_.empty()) {
+		auto entry = std::move(eviction_queue_.front());
+		eviction_queue_.pop_front();
+		auto it = table_stats_.find(entry.key);
+		if (it != table_stats_.end() && it->second.eviction_seq == entry.seq) {
+			table_stats_.erase(it);
+			return;
+		}
+	}
+}
+
+bool MySQLStatsCache::GetTableStats(const string &schema, const string &table, MySQLTableStats &out) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	auto cache_key = MakeCacheKey(schema, table);
+	auto it = table_stats_.find(cache_key);
+	if (it == table_stats_.end()) {
+		return false;
+	}
+	auto elapsed = std::chrono::steady_clock::now() - it->second.cached_at;
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+	if (seconds >= TABLE_STATS_TTL_SECONDS) {
+		table_stats_.erase(it);
+		return false;
+	}
+	out = it->second.stats;
+	return true;
+}
+
+void MySQLStatsCache::StoreTableStats(const string &schema, const string &table, const MySQLTableStats &stats) {
+	bool replaced_existing = false;
+	{
+		std::lock_guard<std::mutex> lock(mutex_);
+		auto cache_key = MakeCacheKey(schema, table);
+
+		auto seq = next_eviction_seq_++;
+		auto it = table_stats_.find(cache_key);
+		if (it != table_stats_.end()) {
+			auto old_row_count = it->second.stats.estimated_row_count;
+			it->second.stats = stats;
+			it->second.cached_at = std::chrono::steady_clock::now();
+			it->second.eviction_seq = seq;
+			double ratio = (old_row_count > 0)
+			                   ? static_cast<double>(stats.estimated_row_count) / static_cast<double>(old_row_count)
+			                   : 2.0;
+			replaced_existing = (ratio > 1.5 || ratio < 0.67);
+			StatsEvictionEntry entry;
+			entry.key = cache_key;
+			entry.seq = seq;
+			eviction_queue_.push_back(std::move(entry));
+			CompactEvictionQueue();
+		} else {
+			while (table_stats_.size() >= MAX_TABLE_STATS_ENTRIES) {
+				EvictOldest();
+			}
+
+			CachedTableStats cached;
+			cached.stats = stats;
+			cached.cached_at = std::chrono::steady_clock::now();
+			cached.eviction_seq = seq;
+			table_stats_[cache_key] = std::move(cached);
+
+			StatsEvictionEntry entry;
+			entry.key = cache_key;
+			entry.seq = seq;
+			eviction_queue_.push_back(std::move(entry));
+		}
+	}
+	if (replaced_existing && invalidation_callback_) {
+		invalidation_callback_(schema, table);
+	}
+}
+
+bool MySQLStatsCache::GetCostConstants(CachedCostConstants &out) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!cost_constants_.loaded) {
+		return false;
+	}
+	auto elapsed = std::chrono::steady_clock::now() - cost_constants_.cached_at;
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+	if (seconds >= COST_CONSTANTS_TTL_SECONDS) {
+		cost_constants_.loaded = false;
+		return false;
+	}
+	out = cost_constants_;
+	return true;
+}
+
+void MySQLStatsCache::StoreCostConstants(const CachedCostConstants &constants) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	cost_constants_ = constants;
+	cost_constants_.cached_at = std::chrono::steady_clock::now();
+}
+
+bool MySQLStatsCache::GetBufferPoolHitRate(double &out) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!buffer_pool_.loaded) {
+		return false;
+	}
+	auto elapsed = std::chrono::steady_clock::now() - buffer_pool_.cached_at;
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+	if (seconds >= BUFFER_POOL_TTL_SECONDS) {
+		buffer_pool_.loaded = false;
+		return false;
+	}
+	out = buffer_pool_.hit_rate;
+	return true;
+}
+
+void MySQLStatsCache::StoreBufferPoolHitRate(double hit_rate) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	buffer_pool_.hit_rate = hit_rate;
+	buffer_pool_.loaded = true;
+	buffer_pool_.cached_at = std::chrono::steady_clock::now();
+}
+
+bool MySQLStatsCache::GetVersionInfo(string &version, bool &has_histogram_support) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (!version_info_.detected) {
+		return false;
+	}
+	version = version_info_.mysql_version;
+	has_histogram_support = version_info_.has_histogram_support;
+	return true;
+}
+
+void MySQLStatsCache::StoreVersionInfo(const string &version, bool has_histogram_support) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	version_info_.mysql_version = version;
+	version_info_.has_histogram_support = has_histogram_support;
+	version_info_.detected = true;
+}
+
+void MySQLStatsCache::Clear() {
+	std::lock_guard<std::mutex> lock(mutex_);
+	table_stats_.clear();
+	eviction_queue_.clear();
+	next_eviction_seq_ = 0;
+	cost_constants_.loaded = false;
+	buffer_pool_.loaded = false;
+	version_info_.detected = false;
+}
+
+void MySQLStatsCache::Invalidate(const string &schema, const string &table) {
+	std::lock_guard<std::mutex> lock(mutex_);
+	auto cache_key = MakeCacheKey(schema, table);
+	table_stats_.erase(cache_key);
+}
+
+MySQLStatisticsCollector::MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache)
+    : connection_(connection), shared_cache_(shared_cache) {
 }
 
 double MySQLStatisticsCollector::ComputeStalenessScore(const MySQLTableStats &stats) {
@@ -405,6 +582,16 @@ void MySQLStatisticsCollector::DetectVersion() {
 	if (version_detected_) {
 		return;
 	}
+
+	string cached_version;
+	bool cached_histogram;
+	if (shared_cache_.get().GetVersionInfo(cached_version, cached_histogram)) {
+		mysql_version_ = cached_version;
+		has_histogram_support_ = cached_histogram;
+		version_detected_ = true;
+		return;
+	}
+
 	version_detected_ = true;
 
 	auto result =
@@ -422,26 +609,8 @@ void MySQLStatisticsCollector::DetectVersion() {
 	mysql_version_ = chunk.data[0].GetValue(0).ToString();
 	bool is_mariadb = StringUtil::Contains(StringUtil::Lower(mysql_version_), "mariadb");
 	has_histogram_support_ = (!is_mariadb && GetMajorVersion() >= 8);
-}
 
-string MySQLStatisticsCollector::GetCacheKey(const string &schema, const string &table) const {
-	string key;
-	key.reserve(schema.size() + 1 + table.size());
-	key += schema;
-	key += ".";
-	key += table;
-	return key;
-}
-
-void MySQLStatisticsCollector::ClearCache() {
-	std::lock_guard<std::mutex> lock(mutex_);
-	stats_cache_.clear();
-}
-
-void MySQLStatisticsCollector::ClearCache(const string &schema, const string &table) {
-	std::lock_guard<std::mutex> lock(mutex_);
-	auto key = GetCacheKey(schema, table);
-	stats_cache_.erase(key);
+	shared_cache_.get().StoreVersionInfo(mysql_version_, has_histogram_support_);
 }
 
 void MySQLStatisticsCollector::EnsureFreshStats() {
@@ -457,20 +626,22 @@ void MySQLStatisticsCollector::EnsureFreshStats() {
 }
 
 MySQLTableStats MySQLStatisticsCollector::GetTableStats(const string &schema, const string &table) {
-	std::lock_guard<std::mutex> lock(mutex_);
+	MySQLTableStats cached_stats;
+	if (shared_cache_.get().GetTableStats(schema, table, cached_stats)) {
+		if (!version_detected_) {
+			string cached_ver;
+			bool cached_hist;
+			if (shared_cache_.get().GetVersionInfo(cached_ver, cached_hist)) {
+				mysql_version_ = cached_ver;
+				has_histogram_support_ = cached_hist;
+				version_detected_ = true;
+			}
+		}
+		return cached_stats;
+	}
+
 	DetectVersion();
 	EnsureFreshStats();
-
-	auto cache_key = GetCacheKey(schema, table);
-	auto it = stats_cache_.find(cache_key);
-	if (it != stats_cache_.end()) {
-		auto elapsed = std::chrono::steady_clock::now() - it->second.cached_at;
-		auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-		if (seconds < STATS_CACHE_TTL_SECONDS) {
-			return it->second.stats;
-		}
-		stats_cache_.erase(it);
-	}
 
 	MySQLTableStats stats;
 	stats.schema_name = schema;
@@ -499,20 +670,8 @@ MySQLTableStats MySQLStatisticsCollector::GetTableStats(const string &schema, co
 
 	stats.staleness_score = ComputeStalenessScore(stats);
 
-	if (stats_cache_.size() >= MAX_STATS_CACHE_SIZE) {
-		auto oldest = stats_cache_.begin();
-		for (auto sit = stats_cache_.begin(); sit != stats_cache_.end(); ++sit) {
-			if (sit->second.cached_at < oldest->second.cached_at) {
-				oldest = sit;
-			}
-		}
-		stats_cache_.erase(oldest);
-	}
+	shared_cache_.get().StoreTableStats(schema, table, stats);
 
-	CachedTableStats cached;
-	cached.stats = stats;
-	cached.cached_at = std::chrono::steady_clock::now();
-	stats_cache_[cache_key] = std::move(cached);
 	return stats;
 }
 
@@ -628,46 +787,53 @@ void MySQLStatisticsCollector::FetchInnoDBStats(const string &schema, const stri
 	}
 
 	try {
+		string index_stats_query =
+		    "SELECT index_name, stat_name, stat_value "
+		    "FROM mysql.innodb_index_stats "
+		    "WHERE database_name = ? AND table_name = ? "
+		    "AND (stat_name LIKE 'n_diff_pfx%' OR stat_name = 'size' OR stat_name = 'n_leaf_pages')";
+		vector<Value> idx_params;
+		idx_params.push_back(Value(schema));
+		idx_params.push_back(Value(table));
+
+		auto idx_result =
+		    connection_.get().Query(index_stats_query, idx_params, MySQLResultStreaming::FORCE_MATERIALIZATION);
+
+		case_insensitive_map_t<vector<std::pair<string, int64_t>>> index_stat_map;
+		while (!idx_result->Exhausted()) {
+			auto &chunk = idx_result->NextChunk();
+			for (idx_t row = 0; row < chunk.size(); row++) {
+				string idx_name = chunk.data[0].GetValue(row).ToString();
+				string stat_name = chunk.data[1].GetValue(row).ToString();
+				int64_t stat_value = chunk.data[2].GetValue(row).GetValue<int64_t>();
+				index_stat_map[idx_name].push_back(std::make_pair(std::move(stat_name), stat_value));
+			}
+		}
+
 		for (auto &index : stats.indexes) {
 			string idx_name = index.is_primary ? "PRIMARY" : index.index_name;
-
-			string index_stats_query = "SELECT stat_name, stat_value "
-			                           "FROM mysql.innodb_index_stats "
-			                           "WHERE database_name = ? AND table_name = ? AND index_name = ? "
-			                           "AND (stat_name LIKE 'n_diff_pfx%' OR stat_name = 'size')";
-			vector<Value> params;
-			params.push_back(Value(schema));
-			params.push_back(Value(table));
-			params.push_back(Value(idx_name));
-
-			auto result =
-			    connection_.get().Query(index_stats_query, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			if (result->Exhausted()) {
+			auto it = index_stat_map.find(idx_name);
+			if (it == index_stat_map.end()) {
 				continue;
 			}
-
-			while (!result->Exhausted()) {
-				auto &chunk = result->NextChunk();
-				for (idx_t row = 0; row < chunk.size(); row++) {
-					string stat_name = chunk.data[0].GetValue(row).ToString();
-					int64_t stat_value = chunk.data[1].GetValue(row).GetValue<int64_t>();
-
-					if (stat_name == "size") {
-						index.index_size_pages = (stat_value > 0) ? static_cast<idx_t>(stat_value) : 0;
-					} else if (StringUtil::StartsWith(stat_name, "n_diff_pfx")) {
-						string num_str = stat_name.substr(10);
-						try {
-							idx_t prefix_idx = static_cast<idx_t>(std::stoull(num_str));
-							if (prefix_idx > 0) {
-								idx_t arr_idx = prefix_idx - 1;
-								if (index.prefix_distinct_counts.size() <= arr_idx) {
-									index.prefix_distinct_counts.resize(arr_idx + 1, 0);
-								}
-								index.prefix_distinct_counts[arr_idx] =
-								    (stat_value > 0) ? static_cast<idx_t>(stat_value) : 0;
+			for (auto &stat_pair : it->second) {
+				if (stat_pair.first == "size") {
+					index.index_size_pages = (stat_pair.second > 0) ? static_cast<idx_t>(stat_pair.second) : 0;
+				} else if (stat_pair.first == "n_leaf_pages") {
+					index.leaf_pages = (stat_pair.second > 0) ? static_cast<idx_t>(stat_pair.second) : 0;
+				} else if (StringUtil::StartsWith(stat_pair.first, "n_diff_pfx")) {
+					string num_str = stat_pair.first.substr(10);
+					try {
+						idx_t prefix_idx = static_cast<idx_t>(std::stoull(num_str));
+						if (prefix_idx > 0) {
+							idx_t arr_idx = prefix_idx - 1;
+							if (index.prefix_distinct_counts.size() <= arr_idx) {
+								index.prefix_distinct_counts.resize(arr_idx + 1, 0);
 							}
-						} catch (const std::exception &) {
+							index.prefix_distinct_counts[arr_idx] =
+							    (stat_pair.second > 0) ? static_cast<idx_t>(stat_pair.second) : 0;
 						}
+					} catch (const std::exception &) {
 					}
 				}
 			}
@@ -737,84 +903,15 @@ void MySQLStatisticsCollector::FetchPartitionInfo(const string &schema, const st
 		return;
 	}
 
-	string method_query = "SELECT PARTITION_METHOD, PARTITION_EXPRESSION "
-	                      "FROM information_schema.PARTITIONS "
-	                      "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PARTITION_NAME IS NOT NULL "
-	                      "LIMIT 1";
+	string partition_query = "SELECT PARTITION_METHOD, PARTITION_EXPRESSION, "
+	                         "PARTITION_NAME, SUBPARTITION_NAME, TABLE_ROWS, PARTITION_DESCRIPTION "
+	                         "FROM information_schema.PARTITIONS "
+	                         "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PARTITION_NAME IS NOT NULL "
+	                         "ORDER BY PARTITION_ORDINAL_POSITION, SUBPARTITION_ORDINAL_POSITION";
 
 	vector<Value> params;
 	params.push_back(Value(schema));
 	params.push_back(Value(table));
-
-	auto method_result = connection_.get().Query(method_query, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
-	if (method_result->Exhausted()) {
-		return;
-	}
-
-	auto &method_chunk = method_result->NextChunk();
-	if (method_chunk.size() == 0) {
-		return;
-	}
-
-	auto method_val = method_chunk.data[0].GetValue(0);
-	if (!method_val.IsNull()) {
-		string method = method_val.ToString();
-		if (method == "RANGE") {
-			stats.partition_info.type = MySQLPartitionType::RANGE;
-		} else if (method == "RANGE COLUMNS") {
-			stats.partition_info.type = MySQLPartitionType::RANGE_COLUMNS;
-		} else if (method == "LIST") {
-			stats.partition_info.type = MySQLPartitionType::LIST;
-		} else if (method == "LIST COLUMNS") {
-			stats.partition_info.type = MySQLPartitionType::LIST_COLUMNS;
-		} else if (method == "HASH") {
-			stats.partition_info.type = MySQLPartitionType::HASH;
-		} else if (method == "KEY") {
-			stats.partition_info.type = MySQLPartitionType::KEY;
-		}
-	}
-
-	auto expr_val = method_chunk.data[1].GetValue(0);
-	if (!expr_val.IsNull()) {
-		string expr = expr_val.ToString();
-		if (stats.partition_info.type == MySQLPartitionType::RANGE_COLUMNS ||
-		    stats.partition_info.type == MySQLPartitionType::LIST_COLUMNS ||
-		    stats.partition_info.type == MySQLPartitionType::KEY) {
-			auto columns = StringUtil::Split(expr, ",");
-			for (auto &col : columns) {
-				StringUtil::Trim(col);
-				if (!col.empty() && col.front() == '`' && col.back() == '`') {
-					col = col.substr(1, col.size() - 2);
-				}
-				stats.partition_info.partition_columns.push_back(col);
-			}
-		} else {
-			size_t start = expr.find('(');
-			size_t end = expr.rfind(')');
-			if (start != string::npos && end != string::npos && start < end) {
-				string col = expr.substr(start + 1, end - start - 1);
-				StringUtil::Trim(col);
-				if (!col.empty() && col.front() == '`' && col.back() == '`') {
-					col = col.substr(1, col.size() - 2);
-				}
-				stats.partition_info.partition_columns.push_back(col);
-			} else {
-				string col = expr;
-				StringUtil::Trim(col);
-				if (!col.empty() && col.front() == '`' && col.back() == '`') {
-					col = col.substr(1, col.size() - 2);
-				}
-				if (!col.empty()) {
-					stats.partition_info.partition_columns.push_back(col);
-				}
-			}
-		}
-	}
-
-	string partition_query = "SELECT PARTITION_NAME, SUBPARTITION_NAME, TABLE_ROWS, PARTITION_DESCRIPTION "
-	                         "FROM information_schema.PARTITIONS "
-	                         "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PARTITION_NAME IS NOT NULL "
-	                         "ORDER BY PARTITION_ORDINAL_POSITION, SUBPARTITION_ORDINAL_POSITION";
 
 	auto partition_result =
 	    connection_.get().Query(partition_query, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
@@ -822,29 +919,88 @@ void MySQLStatisticsCollector::FetchPartitionInfo(const string &schema, const st
 		return;
 	}
 
+	bool method_parsed = false;
 	while (!partition_result->Exhausted()) {
 		auto &chunk = partition_result->NextChunk();
 		for (idx_t row = 0; row < chunk.size(); row++) {
+			if (!method_parsed) {
+				auto method_val = chunk.data[0].GetValue(row);
+				if (!method_val.IsNull()) {
+					string method = method_val.ToString();
+					if (method == "RANGE") {
+						stats.partition_info.type = MySQLPartitionType::RANGE;
+					} else if (method == "RANGE COLUMNS") {
+						stats.partition_info.type = MySQLPartitionType::RANGE_COLUMNS;
+					} else if (method == "LIST") {
+						stats.partition_info.type = MySQLPartitionType::LIST;
+					} else if (method == "LIST COLUMNS") {
+						stats.partition_info.type = MySQLPartitionType::LIST_COLUMNS;
+					} else if (method == "HASH") {
+						stats.partition_info.type = MySQLPartitionType::HASH;
+					} else if (method == "KEY") {
+						stats.partition_info.type = MySQLPartitionType::KEY;
+					}
+				}
+
+				auto expr_val = chunk.data[1].GetValue(row);
+				if (!expr_val.IsNull()) {
+					string expr = expr_val.ToString();
+					if (stats.partition_info.type == MySQLPartitionType::RANGE_COLUMNS ||
+					    stats.partition_info.type == MySQLPartitionType::LIST_COLUMNS ||
+					    stats.partition_info.type == MySQLPartitionType::KEY) {
+						auto columns = StringUtil::Split(expr, ",");
+						for (auto &col : columns) {
+							StringUtil::Trim(col);
+							if (!col.empty() && col.front() == '`' && col.back() == '`') {
+								col = col.substr(1, col.size() - 2);
+							}
+							stats.partition_info.partition_columns.push_back(col);
+						}
+					} else {
+						size_t start = expr.find('(');
+						size_t end = expr.rfind(')');
+						if (start != string::npos && end != string::npos && start < end) {
+							string col = expr.substr(start + 1, end - start - 1);
+							StringUtil::Trim(col);
+							if (!col.empty() && col.front() == '`' && col.back() == '`') {
+								col = col.substr(1, col.size() - 2);
+							}
+							stats.partition_info.partition_columns.push_back(col);
+						} else {
+							string col = expr;
+							StringUtil::Trim(col);
+							if (!col.empty() && col.front() == '`' && col.back() == '`') {
+								col = col.substr(1, col.size() - 2);
+							}
+							if (!col.empty()) {
+								stats.partition_info.partition_columns.push_back(col);
+							}
+						}
+					}
+				}
+				method_parsed = true;
+			}
+
 			MySQLPartitionDetail detail;
 
-			auto part_name_val = chunk.data[0].GetValue(row);
+			auto part_name_val = chunk.data[2].GetValue(row);
 			if (!part_name_val.IsNull()) {
 				detail.partition_name = part_name_val.ToString();
 			}
 
-			auto subpart_name_val = chunk.data[1].GetValue(row);
+			auto subpart_name_val = chunk.data[3].GetValue(row);
 			if (!subpart_name_val.IsNull()) {
 				detail.subpartition_name = subpart_name_val.ToString();
 				detail.is_subpartition = true;
 			}
 
-			auto rows_val = chunk.data[2].GetValue(row);
+			auto rows_val = chunk.data[4].GetValue(row);
 			if (!rows_val.IsNull()) {
 				int64_t rows = rows_val.GetValue<int64_t>();
 				detail.estimated_rows = (rows > 0) ? static_cast<idx_t>(rows) : 0;
 			}
 
-			auto desc_val = chunk.data[3].GetValue(row);
+			auto desc_val = chunk.data[5].GetValue(row);
 			if (!desc_val.IsNull()) {
 				detail.description = desc_val.ToString();
 			}
@@ -1003,87 +1159,101 @@ void MySQLStatisticsCollector::FetchHistograms(const string &schema, const strin
 MySQLStatisticsCollector::MySQLCostConstants MySQLStatisticsCollector::FetchMySQLCostConstants() {
 	MySQLCostConstants constants;
 
-	try {
-		auto result = connection_.get().Query("SELECT cost_name, cost_value, default_value "
-		                                      "FROM mysql.server_cost",
-		                                      MySQLResultStreaming::FORCE_MATERIALIZATION);
-		while (!result->Exhausted()) {
-			auto &chunk = result->NextChunk();
-			for (idx_t row = 0; row < chunk.size(); row++) {
-				string name = chunk.data[0].GetValue(row).ToString();
-				auto cost_val = chunk.data[1].GetValue(row);
-				auto default_val = chunk.data[2].GetValue(row);
-				double value = 0.0;
-				if (!cost_val.IsNull()) {
-					value = cost_val.GetValue<double>();
-				} else if (!default_val.IsNull()) {
-					value = default_val.GetValue<double>();
-				}
-				if (name == "row_evaluate_cost" && value > 0) {
-					constants.row_evaluate_cost = value;
-				}
-			}
-		}
-	} catch (const std::exception &) {
+	CachedCostConstants cached_costs;
+	bool have_cached_costs = shared_cache_.get().GetCostConstants(cached_costs);
+	double cached_bp_rate = -1.0;
+	bool have_cached_bp = shared_cache_.get().GetBufferPoolHitRate(cached_bp_rate);
+	if (have_cached_costs && have_cached_bp) {
+		constants.io_block_read_cost = cached_costs.io_block_read_cost;
+		constants.memory_block_read_cost = cached_costs.memory_block_read_cost;
+		constants.row_evaluate_cost = cached_costs.row_evaluate_cost;
+		constants.buffer_pool_hit_rate = cached_bp_rate;
+		constants.loaded = true;
 		return constants;
 	}
 
-	try {
-		auto result = connection_.get().Query("SELECT cost_name, cost_value, default_value "
-		                                      "FROM mysql.engine_cost",
-		                                      MySQLResultStreaming::FORCE_MATERIALIZATION);
-		while (!result->Exhausted()) {
-			auto &chunk = result->NextChunk();
-			for (idx_t row = 0; row < chunk.size(); row++) {
-				string name = chunk.data[0].GetValue(row).ToString();
-				auto cost_val = chunk.data[1].GetValue(row);
-				auto default_val = chunk.data[2].GetValue(row);
-				double value = 0.0;
-				if (!cost_val.IsNull()) {
-					value = cost_val.GetValue<double>();
-				} else if (!default_val.IsNull()) {
-					value = default_val.GetValue<double>();
-				}
-				if (name == "io_block_read_cost" && value > 0) {
-					constants.io_block_read_cost = value;
-				} else if (name == "memory_block_read_cost" && value > 0) {
-					constants.memory_block_read_cost = value;
+	if (!have_cached_costs) {
+		try {
+			auto result = connection_.get().Query(
+			    "SELECT 'server' AS source, cost_name, cost_value, default_value FROM mysql.server_cost "
+			    "UNION ALL "
+			    "SELECT 'engine' AS source, cost_name, cost_value, default_value FROM mysql.engine_cost",
+			    MySQLResultStreaming::FORCE_MATERIALIZATION);
+			while (!result->Exhausted()) {
+				auto &chunk = result->NextChunk();
+				for (idx_t row = 0; row < chunk.size(); row++) {
+					string name = chunk.data[1].GetValue(row).ToString();
+					auto cost_val = chunk.data[2].GetValue(row);
+					auto default_val = chunk.data[3].GetValue(row);
+					double value = 0.0;
+					if (!cost_val.IsNull()) {
+						value = cost_val.GetValue<double>();
+					} else if (!default_val.IsNull()) {
+						value = default_val.GetValue<double>();
+					}
+					if (name == "row_evaluate_cost" && value > 0) {
+						constants.row_evaluate_cost = value;
+					} else if (name == "io_block_read_cost" && value > 0) {
+						constants.io_block_read_cost = value;
+					} else if (name == "memory_block_read_cost" && value > 0) {
+						constants.memory_block_read_cost = value;
+					}
 				}
 			}
+		} catch (const std::exception &) {
+			return constants;
 		}
-	} catch (const std::exception &) {
-		return constants;
+
+		CachedCostConstants to_cache;
+		to_cache.io_block_read_cost = constants.io_block_read_cost;
+		to_cache.memory_block_read_cost = constants.memory_block_read_cost;
+		to_cache.row_evaluate_cost = constants.row_evaluate_cost;
+		to_cache.loaded = true;
+		shared_cache_.get().StoreCostConstants(to_cache);
+	} else {
+		constants.io_block_read_cost = cached_costs.io_block_read_cost;
+		constants.memory_block_read_cost = cached_costs.memory_block_read_cost;
+		constants.row_evaluate_cost = cached_costs.row_evaluate_cost;
 	}
 
-	try {
-		auto bp_result = connection_.get().Query("SHOW GLOBAL STATUS WHERE variable_name IN "
-		                                         "('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
-		                                         MySQLResultStreaming::FORCE_MATERIALIZATION);
-		idx_t read_requests = 0, reads = 0;
-		while (!bp_result->Exhausted()) {
-			auto &chunk = bp_result->NextChunk();
-			for (idx_t row = 0; row < chunk.size(); row++) {
-				string name = chunk.data[0].GetValue(row).ToString();
-				auto val_str = chunk.data[1].GetValue(row).ToString();
-				idx_t val = 0;
-				try {
-					val = static_cast<idx_t>(std::stoull(val_str));
-				} catch (...) {
-					continue;
-				}
-				if (name == "Innodb_buffer_pool_read_requests") {
-					read_requests = val;
-				} else if (name == "Innodb_buffer_pool_reads") {
-					reads = val;
+	if (!have_cached_bp) {
+		try {
+			auto bp_result = connection_.get().Query("SHOW GLOBAL STATUS WHERE variable_name IN "
+			                                         "('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
+			                                         MySQLResultStreaming::FORCE_MATERIALIZATION);
+			idx_t read_requests = 0, reads = 0;
+			while (!bp_result->Exhausted()) {
+				auto &chunk = bp_result->NextChunk();
+				for (idx_t row = 0; row < chunk.size(); row++) {
+					string name = chunk.data[0].GetValue(row).ToString();
+					auto val_str = chunk.data[1].GetValue(row).ToString();
+					idx_t val = 0;
+					try {
+						val = static_cast<idx_t>(std::stoull(val_str));
+					} catch (...) {
+						continue;
+					}
+					if (name == "Innodb_buffer_pool_read_requests") {
+						read_requests = val;
+					} else if (name == "Innodb_buffer_pool_reads") {
+						reads = val;
+					}
 				}
 			}
+			static constexpr idx_t MIN_READ_REQUESTS = 1000;
+			if (read_requests >= MIN_READ_REQUESTS && reads <= read_requests) {
+				constants.buffer_pool_hit_rate =
+				    1.0 - (static_cast<double>(reads) / static_cast<double>(read_requests));
+				constants.buffer_pool_hit_rate = std::max(0.0, std::min(1.0, constants.buffer_pool_hit_rate));
+			}
+
+			if (constants.buffer_pool_hit_rate >= 0.0) {
+				shared_cache_.get().StoreBufferPoolHitRate(constants.buffer_pool_hit_rate);
+			}
+		} catch (const std::exception &) {
 		}
-		static constexpr idx_t MIN_READ_REQUESTS = 1000;
-		if (read_requests >= MIN_READ_REQUESTS && reads <= read_requests) {
-			constants.buffer_pool_hit_rate = 1.0 - (static_cast<double>(reads) / static_cast<double>(read_requests));
-			constants.buffer_pool_hit_rate = std::max(0.0, std::min(1.0, constants.buffer_pool_hit_rate));
-		}
-	} catch (const std::exception &) {
+	} else {
+		constants.buffer_pool_hit_rate = cached_bp_rate;
 	}
 
 	constants.loaded = true;

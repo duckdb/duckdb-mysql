@@ -1,0 +1,897 @@
+# name: test/sql/federation_comprehensive_benchmark.test
+# description: Comprehensive benchmark validating federation optimizer correctness and strategy selection
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# SETUP
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+# Force extension load before using custom settings
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH loader
+
+statement ok
+SET mysql_adaptive_replan_enabled = true;
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_main;
+
+statement ok
+CREATE TABLE s1.bench_main(
+    id INTEGER PRIMARY KEY,
+    category INTEGER NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    wide_data VARCHAR(500),
+    created_date DATE
+)
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_bench_category ON bench_main(category)')
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_bench_status ON bench_main(status(20))')
+
+statement ok
+INSERT INTO s1.bench_main
+SELECT
+    range as id,
+    range % 100 as category,
+    CASE WHEN range % 3 = 0 THEN 'active' WHEN range % 3 = 1 THEN 'pending' ELSE 'closed' END,
+    (range % 1000) + (range % 100) * 0.01,
+    REPEAT('x', 200) as wide_data,
+    DATE '2024-01-01' + INTERVAL (range % 365) DAY
+FROM range(50000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE bench_main')
+
+statement ok
+CALL mysql_clear_cache()
+
+# SECTION 1: PUSH_ALL Strategy — Highly Selective Filters
+
+# 1a: Point lookup on PK (0.002% selectivity)
+query II
+SELECT id, category FROM s1.bench_main WHERE id = 25000
+----
+25000	0
+
+# Verify via debug plan — should be PUSH_ALL with 1 filter pushed
+query I
+SELECT strategy FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+PUSH_ALL
+
+query I
+SELECT filters_pushed FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+1
+
+query I
+SELECT filters_local FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+0
+
+# 1b: Indexed column equality (1% selectivity → 500 rows)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 42 LIMIT 1
+----
+42	42
+
+query I
+SELECT strategy FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+PUSH_ALL
+
+# 1c: Compound pushable filters — both indexed
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE category = 10 AND status = 'active'
+----
+166
+
+# Aggregate pushdown handles the COUNT — run a non-aggregate to populate plan cache
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 10 AND status = 'active' LIMIT 1
+----
+210	10
+
+query I
+SELECT strategy FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+PUSH_ALL
+
+# 1d: IN filter (5% selectivity)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, category FROM s1.bench_main WHERE category IN (10, 20, 30, 40, 50) LIMIT 1
+----
+10	10
+
+# 1e: Range filter on PK (2%)
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT id FROM s1.bench_main WHERE id BETWEEN 1 AND 1000 LIMIT 1
+----
+1
+
+# SECTION 2: Multi-Filter Correctness & Cost Comparison
+
+statement ok
+CALL mysql_clear_cache()
+
+# 2a: Indexed + function filter — correctness test
+query II
+SELECT id, category FROM s1.bench_main
+WHERE category = 25 AND LENGTH(wide_data) > 100
+LIMIT 1
+----
+25	25
+
+# 2b: Both indexed column filters — at least 1 filter pushed
+query I
+SELECT filters_pushed >= 1 FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# 2c: Function filter that removes some rows
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 10 AND MOD(id, 7) = 0
+) t
+----
+72
+
+# 2d: Function filter that removes ALL rows
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 50 AND LENGTH(wide_data) > 999
+) t
+----
+0
+
+# 2e: Cost comparison — for selective indexed filter, push should be cheaper
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 99 LIMIT 1
+----
+99	99
+
+query I
+SELECT push_all_cost < local_all_cost FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# SECTION 3: Correctness — Pushdown ON vs OFF Produce Identical Results
+
+# 3a: Point lookup
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query II
+SELECT id, amount FROM s1.bench_main WHERE id = 12345
+----
+12345	345.45
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query II
+SELECT id, amount FROM s1.bench_main WHERE id = 12345
+----
+12345	345.45
+
+# 3b: Indexed range — compare SUM via aggregate pushdown
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query I
+SELECT SUM(id) FROM s1.bench_main WHERE category = 77
+----
+12513500
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query I
+SELECT SUM(id) FROM s1.bench_main WHERE category = 77
+----
+12513500
+
+# 3c: Hybrid (function filter)
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
+----
+46
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
+----
+46
+
+# 3d: String filter
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
+----
+834
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
+----
+834
+
+# Re-enable for remaining tests
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+# SECTION 4: Plan Cache — Hits, Invalidation, Generation Tracking
+
+statement ok
+CALL mysql_clear_cache()
+
+# 4a: First query computes plan (cache miss → hit_count = 0)
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 1 LIMIT 1
+----
+1	1
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+0
+
+# 4b: Same pattern (same columns, same filter column) — cache hit
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 2 LIMIT 1
+----
+2	2
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+1
+
+# 4c: Third query — hit count increments
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 3 LIMIT 1
+----
+3	3
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+2
+
+# 4d: Cache invalidation
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+0
+
+# 4e: Cache loop — 10 iterations should all hit after first
+statement ok
+CALL mysql_clear_cache()
+
+loop i 0 10
+
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category = ${i} LIMIT 1
+
+endloop
+
+# After 10 queries: first was miss, 9 were hits
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+9
+
+# SECTION 5: Adaptive Feedback — Execution Count Tracking
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+SET mysql_adaptive_replan_enabled = true;
+
+# 5a: First query populates cache
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category < 3
+
+query I
+SELECT execution_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+1
+
+# 5b: Second execution — still accumulating, no replan yet
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category < 3
+
+query I
+SELECT execution_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+2
+
+# 5c: Third execution triggers replan check.
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category < 3
+
+# Entry was evicted by adaptive feedback — plan cache is empty for this table
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+0
+
+# 5d: Fourth execution re-populates the cache with a fresh plan
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category < 3
+
+query I
+SELECT execution_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+1
+
+# SECTION 6: Cost Model Validation — Costs Are Positive and Well-Formed
+
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 50 LIMIT 1
+----
+50	50
+
+# Total cost should be positive
+query I
+SELECT total_cost > 0 FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# IO, network, and CPU costs should all be non-negative
+query I
+SELECT io_cost >= 0 AND network_cost >= 0 AND cpu_cost >= 0
+FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# Push_all and local_all costs should both be computed
+query I
+SELECT push_all_cost > 0 AND local_all_cost > 0
+FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# Combined selectivity should be between 0 and 1
+query I
+SELECT combined_selectivity > 0 AND combined_selectivity <= 1.0
+FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# Estimated rows should be reasonable (not 0, not more than table size)
+query I
+SELECT estimated_rows > 0 AND estimated_rows <= 50000
+FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# For selective filter (1%), push should be cheaper than local
+query I
+SELECT push_all_cost < local_all_cost
+FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# SECTION 7: ORDER BY Pushdown (including NULL ordering regression fix)
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_order;
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE bench_order (id INT NOT NULL PRIMARY KEY, val INT, name VARCHAR(50))')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.bench_order VALUES
+    (1, 10, 'alice'),
+    (2, 20, 'bob'),
+    (3, NULL, 'carol'),
+    (4, 30, 'dave'),
+    (5, 15, 'eve'),
+    (6, NULL, 'frank'),
+    (7, 25, 'grace'),
+    (8, 5, 'heidi'),
+    (9, 35, 'ivan'),
+    (10, 20, 'judy');
+
+# 7a: ASC with LIMIT (TopN pushdown)
+query III
+SELECT * FROM s1.bench_order ORDER BY val, id LIMIT 5;
+----
+8	5	heidi
+1	10	alice
+5	15	eve
+2	20	bob
+10	20	judy
+
+# 7b: DESC with LIMIT
+query III
+SELECT * FROM s1.bench_order ORDER BY val DESC LIMIT 3;
+----
+9	35	ivan
+4	30	dave
+7	25	grace
+
+# 7c: Standalone ORDER BY ASC (NULLs at end — MySQL default)
+query III
+SELECT * FROM s1.bench_order ORDER BY val, id;
+----
+8	5	heidi
+1	10	alice
+5	15	eve
+2	20	bob
+10	20	judy
+7	25	grace
+4	30	dave
+9	35	ivan
+3	NULL	carol
+6	NULL	frank
+
+# 7d: Standalone ORDER BY DESC (DuckDB default: NULLS LAST for DESC)
+query III
+SELECT * FROM s1.bench_order ORDER BY val DESC;
+----
+9	35	ivan
+4	30	dave
+7	25	grace
+2	20	bob
+10	20	judy
+5	15	eve
+1	10	alice
+8	5	heidi
+3	NULL	carol
+6	NULL	frank
+
+# 7e: WHERE + ORDER BY DESC + LIMIT
+query III
+SELECT * FROM s1.bench_order WHERE val > 15 ORDER BY val DESC LIMIT 3;
+----
+9	35	ivan
+4	30	dave
+7	25	grace
+
+# 7f: Sort by column not in SELECT
+query I
+SELECT name FROM s1.bench_order ORDER BY val DESC LIMIT 3;
+----
+ivan
+dave
+grace
+
+# 7g: Multi-column ORDER BY with filter
+query III
+SELECT * FROM s1.bench_order WHERE val IS NOT NULL ORDER BY val DESC, name ASC LIMIT 4;
+----
+9	35	ivan
+4	30	dave
+7	25	grace
+2	20	bob
+
+# SECTION 8: Aggregate Pushdown
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_agg;
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE bench_agg (id INT NOT NULL PRIMARY KEY, category VARCHAR(50), val INT, name VARCHAR(50))')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.bench_agg VALUES
+    (1, 'A', 10, 'alice'),
+    (2, 'B', 20, 'bob'),
+    (3, 'A', 30, 'carol'),
+    (4, 'B', NULL, 'dave'),
+    (5, 'A', 15, 'eve'),
+    (6, 'C', 25, 'frank'),
+    (7, 'B', 35, 'grace'),
+    (8, 'C', NULL, 'heidi'),
+    (9, 'A', 40, 'ivan'),
+    (10, 'C', 5, 'judy');
+
+# 8a: Ungrouped COUNT(*)
+query I
+SELECT COUNT(*) FROM s1.bench_agg;
+----
+10
+
+# 8b: Grouped COUNT
+query II
+SELECT category, COUNT(*) FROM s1.bench_agg GROUP BY category ORDER BY category;
+----
+A	4
+B	3
+C	3
+
+# 8c: Multiple aggregates
+query IIIII
+SELECT category, SUM(val), AVG(val), MIN(val), MAX(val) FROM s1.bench_agg GROUP BY category ORDER BY category;
+----
+A	95	23.75	10	40
+B	55	27.5	20	35
+C	30	15.0	5	25
+
+# 8d: COUNT(col) with NULLs — should skip NULLs
+query II
+SELECT category, COUNT(val) FROM s1.bench_agg GROUP BY category ORDER BY category;
+----
+A	4
+B	2
+C	2
+
+# 8e: WHERE + GROUP BY
+query II
+SELECT category, COUNT(*) FROM s1.bench_agg WHERE val > 15 GROUP BY category ORDER BY category;
+----
+A	2
+B	2
+C	1
+
+# 8f: ORDER BY on aggregate + LIMIT
+query II
+SELECT category, COUNT(*) cnt FROM s1.bench_agg GROUP BY category ORDER BY cnt DESC LIMIT 2;
+----
+A	4
+B	3
+
+# SECTION 9: Partition Pruning (RANGE)
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_partitioned;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE bench_partitioned (
+    id INT NOT NULL,
+    order_year INT NOT NULL,
+    category INT,
+    amount DECIMAL(10,2),
+    PRIMARY KEY (id, order_year)
+) PARTITION BY RANGE (order_year) (
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025)
+)')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.bench_partitioned
+SELECT
+    i as id,
+    2021 + (i % 4) as order_year,
+    i % 100 as category,
+    (i % 1000) + (i % 100) * 0.01 as amount
+FROM generate_series(1, 10000) AS t(i)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE bench_partitioned')
+
+# 9a: Partition key equality → scan 1 of 4 partitions
+query I
+SELECT COUNT(*) FROM s1.bench_partitioned WHERE order_year = 2024
+----
+2500
+
+# 9b: Partition key range → scan 2 of 4 partitions
+query I
+SELECT COUNT(*) FROM s1.bench_partitioned WHERE order_year >= 2023
+----
+5000
+
+# 9c: Partition key + additional filter
+query I
+SELECT COUNT(*) FROM s1.bench_partitioned WHERE order_year = 2024 AND category = 3
+----
+100
+
+# SECTION 10: Partition Pruning (LIST)
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_list_part;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE bench_list_part (
+    id INT NOT NULL,
+    region VARCHAR(10) NOT NULL,
+    amount DECIMAL(10,2),
+    PRIMARY KEY (id, region)
+) PARTITION BY LIST COLUMNS(region) (
+    PARTITION p_na VALUES IN (''US'', ''CA''),
+    PARTITION p_eu VALUES IN (''UK'', ''DE'', ''FR''),
+    PARTITION p_ap VALUES IN (''JP'', ''AU'')
+)')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.bench_list_part
+SELECT
+    i as id,
+    CASE i % 7
+        WHEN 0 THEN 'US'
+        WHEN 1 THEN 'CA'
+        WHEN 2 THEN 'UK'
+        WHEN 3 THEN 'DE'
+        WHEN 4 THEN 'FR'
+        WHEN 5 THEN 'JP'
+        ELSE 'AU'
+    END as region,
+    (i % 1000) * 1.5 as amount
+FROM generate_series(1, 7000) AS t(i)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE bench_list_part')
+
+# 10a: Single region in single partition
+query I
+SELECT COUNT(*) FROM s1.bench_list_part WHERE region = 'US'
+----
+1000
+
+# 10b: IN list matching one partition
+query I
+SELECT COUNT(*) FROM s1.bench_list_part WHERE region IN ('UK', 'DE', 'FR')
+----
+3000
+
+# 10c: Cross-partition IN list
+query I
+SELECT COUNT(*) FROM s1.bench_list_part WHERE region IN ('US', 'JP')
+----
+2000
+
+# SECTION 11: Large Result Set — Stress Test
+
+# 11a: Full table count (aggregate pushdown)
+query I
+SELECT COUNT(*) FROM s1.bench_main
+----
+50000
+
+# 11b: 50% selectivity
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE category < 50
+----
+25000
+
+# 11c: Many unique filter patterns — exercises cache eviction
+statement ok
+CALL mysql_clear_cache()
+
+loop i 0 20
+
+statement ok
+SELECT id, category FROM s1.bench_main WHERE category = ${i} LIMIT 1
+
+endloop
+
+# SECTION 12: FederationState Refactor Regression Tests
+
+statement ok
+CALL mysql_clear_cache()
+
+# 12a: HYBRID with local filter that filters ALL rows out
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 99 AND LENGTH(wide_data) > 999
+) t
+----
+0
+
+# 12b: Post-scan filter that filters SOME rows
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 50 AND MOD(id, 13) = 0
+) t
+----
+38
+
+# 12c: HYBRID with local filter that keeps ALL rows
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 50 AND LENGTH(wide_data) >= 0
+) t
+----
+500
+
+# 12d: Multiple consecutive queries — tests repeated FederationState creation
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 0 AND MOD(id, 3) = 0
+) t
+----
+167
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 0 AND MOD(id, 5) = 0
+) t
+----
+500
+
+query I
+SELECT COUNT(*) FROM (
+    SELECT id FROM s1.bench_main WHERE category = 0 AND MOD(id, 7) = 0
+) t
+----
+72
+
+# 12e: Verify strategy is chosen — indexed filter should produce a valid plan
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT id FROM s1.bench_main WHERE category = 77 LIMIT 1
+----
+77
+
+query I
+SELECT strategy IN ('PUSH_ALL', 'HYBRID', 'LOCAL_ALL') FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
+----
+true
+
+# SECTION 13: Query Timeout Cap Regression (HIGH-3 fix)
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT id FROM s1.bench_main WHERE category >= 0 ORDER BY id LIMIT 1
+----
+0
+
+# SECTION 14: Aggregate Pushdown Correctness on Larger Table
+
+# Verify aggregates on the main benchmark table
+query I
+SELECT COUNT(*) FROM s1.bench_main WHERE category = 50
+----
+500
+
+query I
+SELECT SUM(id) FROM s1.bench_main WHERE category = 0
+----
+12475000
+
+query R
+SELECT AVG(amount) FROM s1.bench_main WHERE category = 99
+----
+549.99
+
+# Grouped aggregate on large table
+query I
+SELECT COUNT(DISTINCT category) FROM s1.bench_main
+----
+100
+
+# SECTION 15: Multi-table Plan Cache Independence
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_aux;
+
+statement ok
+CREATE TABLE s1.bench_aux(
+    id INTEGER PRIMARY KEY,
+    val INTEGER
+)
+
+statement ok
+INSERT INTO s1.bench_aux SELECT range, range % 50 FROM range(5000)
+
+statement ok
+CREATE INDEX idx_bench_aux_val ON s1.bench_aux(val)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE bench_aux')
+
+statement ok
+CALL mysql_clear_cache()
+
+# Query both tables
+query II
+SELECT id, category FROM s1.bench_main WHERE category = 1 LIMIT 1
+----
+1	1
+
+query II
+SELECT id, val FROM s1.bench_aux WHERE val = 1 LIMIT 1
+----
+1	1
+
+# Both should have independent cache entries
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan()
+WHERE table_name IN ('bench_main', 'bench_aux')
+----
+2
+
+# CLEANUP
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_aux;
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_list_part;
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_partitioned;
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_order;
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_agg;
+
+statement ok
+DROP TABLE IF EXISTS s1.bench_main;

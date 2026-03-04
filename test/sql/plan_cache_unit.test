@@ -1,0 +1,68 @@
+# name: test/sql/plan_cache_unit.test
+# description: Test plan cache observability via mysql_debug_execution_plan()
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH loader
+
+# Test 1: Debug function returns empty when no catalogs are attached
+
+query TTTTIIIIRRRRRRRRTIIT
+SELECT * FROM mysql_debug_execution_plan()
+----
+
+# Test 2: Debug function works with attached catalog (empty cache initially)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+query TTTTIIIIRRRRRRRRTIIT
+SELECT * FROM mysql_debug_execution_plan()
+----
+
+# Test 3: Verify column names in the result set
+
+query I
+SELECT column_name FROM (DESCRIBE SELECT * FROM mysql_debug_execution_plan())
+----
+database_name
+schema_name
+table_name
+strategy
+filters_pushed
+filters_local
+hit_count
+estimated_rows
+io_cost
+network_cost
+cpu_cost
+total_cost
+push_all_cost
+local_all_cost
+hybrid_cost
+combined_selectivity
+partition_clause
+execution_count
+smoothed_actual_rows
+recommended_index
+
+# Test 4: Cache is cleared by mysql_clear_cache
+
+statement ok
+CALL mysql_clear_cache()
+
+query TTTTIIIIRRRRRRRRTIIT
+SELECT * FROM mysql_debug_execution_plan()
+----
+
+# Cleanup
+
+statement ok
+DETACH s1

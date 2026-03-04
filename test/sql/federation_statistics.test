@@ -12,9 +12,7 @@ SET GLOBAL mysql_experimental_filter_pushdown=true;
 statement ok
 ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
 
-# ==============================================================================
 # Test Setup: Create table with composite indexes
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.stats_test;
@@ -28,7 +26,6 @@ CREATE TABLE s1.stats_test(
     unique_col INTEGER UNIQUE
 );
 
-# Create composite index
 statement ok
 CREATE INDEX idx_composite ON s1.stats_test(col_a, col_b);
 
@@ -43,9 +40,7 @@ SELECT
     range as unique_col
 FROM range(10000);
 
-# ==============================================================================
 # Index Usage Tests
-# ==============================================================================
 
 # Test 1: Filter on leading column of composite index
 query I
@@ -59,7 +54,7 @@ SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5 AND col_b = 55
 ----
 100
 
-# Test 3: Filter on non-leading column (index may not be used)
+# Test 3: Filter on non-leading column
 query I
 SELECT COUNT(*) FROM s1.stats_test WHERE col_b = 50
 ----
@@ -71,31 +66,27 @@ SELECT COUNT(*) FROM s1.stats_test WHERE unique_col = 5000
 ----
 1
 
-# ==============================================================================
 # Cardinality Estimation Tests
-# ==============================================================================
 
-# Test 5: High cardinality column (unique)
+# Test 5: High cardinality column
 query II
 SELECT id, unique_col FROM s1.stats_test WHERE unique_col = 9999
 ----
 9999	9999
 
-# Test 6: Low cardinality column (10 distinct values)
+# Test 6: Low cardinality column
 query I
 SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 0
 ----
 1000
 
-# Test 7: Medium cardinality (100 distinct values)
+# Test 7: Medium cardinality
 query I
 SELECT COUNT(*) FROM s1.stats_test WHERE col_b = 0
 ----
 100
 
-# ==============================================================================
 # Range Query Tests with Statistics
-# ==============================================================================
 
 # Test 8: Range on high cardinality column
 query I
@@ -115,9 +106,7 @@ SELECT COUNT(*) FROM s1.stats_test WHERE col_b BETWEEN 0 AND 9
 ----
 1000
 
-# ==============================================================================
 # Multiple Filter Selectivity Tests
-# ==============================================================================
 
 # Test 11: Two filters that combine multiplicatively
 query I
@@ -131,9 +120,7 @@ SELECT COUNT(*) FROM s1.stats_test WHERE col_a = 5 AND col_b = 5 AND col_c = 'va
 ----
 100
 
-# ==============================================================================
 # String Column Tests
-# ==============================================================================
 
 # Test 13: String equality filter
 query I
@@ -147,9 +134,7 @@ SELECT COUNT(*) FROM s1.stats_test WHERE col_c IN ('value_0', 'value_1', 'value_
 ----
 600
 
-# ==============================================================================
 # Edge Cases
-# ==============================================================================
 
 # Test 15: Filter that matches nothing
 query I
@@ -169,9 +154,7 @@ SELECT COUNT(*) FROM s1.stats_test WHERE id BETWEEN 0 AND 99
 ----
 100
 
-# ==============================================================================
 # Cleanup
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.stats_test;

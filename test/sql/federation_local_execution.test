@@ -1,0 +1,136 @@
+# name: test/sql/federation_local_execution.test
+# description: Verify local filter execution for HYBRID and EXECUTE_ALL_LOCALLY strategies
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup
+
+statement ok
+DROP TABLE IF EXISTS s1.local_exec_test;
+
+statement ok
+CREATE TABLE s1.local_exec_test(
+    id INTEGER PRIMARY KEY,
+    indexed_val INTEGER,
+    non_indexed_val INTEGER,
+    nullable_val INTEGER,
+    data VARCHAR(100)
+);
+
+statement ok
+CREATE INDEX idx_local_exec_val ON s1.local_exec_test(indexed_val);
+
+statement ok
+INSERT INTO s1.local_exec_test
+SELECT
+    range as id,
+    range % 100 as indexed_val,
+    range % 1000 as non_indexed_val,
+    CASE WHEN range % 10 = 0 THEN NULL ELSE range % 500 END as nullable_val,
+    CONCAT('data_', range) as data
+FROM range(10000);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE local_exec_test');
+
+# Section 1: HYBRID strategy - selective indexed push + non-selective local
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val = 5 AND non_indexed_val > 200
+----
+80
+
+query II
+SELECT MIN(id), MAX(id) FROM s1.local_exec_test WHERE indexed_val = 5 AND non_indexed_val > 200
+----
+205	9905
+
+# Section 2: Range filter executed locally
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val < 10 AND non_indexed_val >= 900
+----
+100
+
+# Section 3: Non-selective single filter on non-indexed column
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE non_indexed_val > 100
+----
+8990
+
+# Section 4: NULL handling with local filters
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val = 10 AND nullable_val IS NULL
+----
+100
+
+# IS NOT NULL filter
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val = 15 AND nullable_val IS NOT NULL
+----
+100
+
+# Section 5: IN filter applied locally
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val = 3 AND non_indexed_val IN (3, 103, 203)
+----
+30
+
+# Section 6: Multiple local filters
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.local_exec_test WHERE indexed_val = 7 AND non_indexed_val > 200 AND nullable_val IS NOT NULL
+----
+80
+
+# Section 7: Verify result ordering and values
+
+statement ok
+CALL mysql_clear_cache();
+
+query II
+SELECT id, non_indexed_val FROM s1.local_exec_test
+WHERE indexed_val = 2 AND non_indexed_val BETWEEN 200 AND 210
+ORDER BY id LIMIT 3
+----
+202	202
+1202	202
+2202	202
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.local_exec_test;

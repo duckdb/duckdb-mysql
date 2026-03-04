@@ -1,0 +1,113 @@
+# name: test/sql/attach_aggregate_pushdown.test
+# description: Test aggregate pushdown over an attached MySQL table
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.agg_test;
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE agg_test (id INT NOT NULL PRIMARY KEY, category VARCHAR(50), val INT, name VARCHAR(50))');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.agg_test VALUES
+    (1, 'A', 10, 'alice'),
+    (2, 'B', 20, 'bob'),
+    (3, 'A', 30, 'carol'),
+    (4, 'B', NULL, 'dave'),
+    (5, 'A', 15, 'eve'),
+    (6, 'C', 25, 'frank'),
+    (7, 'B', 35, 'grace'),
+    (8, 'C', NULL, 'heidi'),
+    (9, 'A', 40, 'ivan'),
+    (10, 'C', 5, 'judy');
+
+# Ungrouped aggregates
+
+query I
+SELECT COUNT(*) FROM s1.agg_test;
+----
+10
+
+# Basic grouped count
+
+query II
+SELECT category, COUNT(*) FROM s1.agg_test GROUP BY category ORDER BY category;
+----
+A	4
+B	3
+C	3
+
+# Multiple aggregates
+
+query IIIII
+SELECT category, SUM(val), AVG(val), MIN(val), MAX(val) FROM s1.agg_test GROUP BY category ORDER BY category;
+----
+A	95	23.75	10	40
+B	55	27.5	20	35
+C	30	15.0	5	25
+
+# COUNT(col) with NULLs — should skip NULLs
+
+query II
+SELECT category, COUNT(val) FROM s1.agg_test GROUP BY category ORDER BY category;
+----
+A	4
+B	2
+C	2
+
+# WHERE + GROUP BY
+
+query II
+SELECT category, COUNT(*) FROM s1.agg_test WHERE val > 15 GROUP BY category ORDER BY category;
+----
+A	2
+B	2
+C	1
+
+# ORDER BY on aggregate (DESC)
+
+query II
+SELECT category, COUNT(*) cnt FROM s1.agg_test GROUP BY category ORDER BY cnt DESC;
+----
+A	4
+B	3
+C	3
+
+# ORDER BY + LIMIT on aggregate
+
+query II
+SELECT category, COUNT(*) cnt FROM s1.agg_test GROUP BY category ORDER BY cnt DESC LIMIT 2;
+----
+A	4
+B	3
+
+# COUNT(DISTINCT val)
+
+query I
+SELECT COUNT(DISTINCT val) FROM s1.agg_test;
+----
+8
+
+# ORDER BY on group column
+
+query II
+SELECT category, SUM(val) FROM s1.agg_test GROUP BY category ORDER BY category;
+----
+A	95
+B	55
+C	30
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.agg_test;
