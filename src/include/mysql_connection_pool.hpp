@@ -8,13 +8,14 @@
 
 #pragma once
 
-#include "generic_connection_pool.hpp"
+#include "dbconnector/pool.hpp"
+
 #include "mysql_connection.hpp"
 #include "network_calibration.hpp"
 
 namespace duckdb {
 
-class MySQLConnectionPool : public GenericConnectionPool<MySQLConnection> {
+class MySQLConnectionPool : public dbconnector::pool::ConnectionPool<MySQLConnection> {
 public:
 	static idx_t DefaultPoolSize() noexcept {
 		unsigned int hw = std::thread::hardware_concurrency();
@@ -33,7 +34,7 @@ public:
 	void SetNetworkCompression(bool enabled, double ratio = NetworkCalibration::DEFAULT_COMPRESSION_RATIO);
 
 protected:
-	unique_ptr<MySQLConnection> CreateNewConnection() override;
+	std::unique_ptr<MySQLConnection> CreateNewConnection() override;
 	bool CheckConnectionHealthy(MySQLConnection &conn) override;
 	void ResetConnection(MySQLConnection &conn) override;
 
