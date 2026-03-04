@@ -9,6 +9,7 @@ set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(MYSQL_INCLUDE_DIR
     ${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include/mysql)
 include_directories(${MYSQL_INCLUDE_DIR})
+include_directories(database-connector/src/include)
 
 add_subdirectory(src)
 

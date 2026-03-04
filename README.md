@@ -175,9 +175,30 @@ SELECT * FROM mysql_db.tmp;
 | mysql_debug_show_queries           | DEBUG SETTING: print all queries sent to MySQL to stdout       | false   |
 | mysql_bit1_as_boolean              | Whether or not to convert BIT(1) columns to BOOLEAN            | true    |
 | mysql_session_time_zone            | Value to use as a session time zone for newly opened connections to MySQL server | ''    |
-| mysql_time_as_time                 | Whether or not to convert MySQL's TIME columns to DuckDB's TIME | false   |
+| mysql_time_as_time                 | Whether or not to convert MySQL's TIME columns to DuckDB's TIME | false  |
 | mysql_incomplete_dates_as_nulls    | Whether to return DATEs with zero month or day as NULLs        | false   |
 | mysql_enable_transactions          | Whether to run `START TRANSACTION`/`COMMIT`/`ROLLBACK` on MySQL connections | true   |
+| mysql_pool_size                    | Maximum number of connections per MySQL catalog (default: )    | min(cpu_count, 8) |
+| mysql_pool_timeout_ms              | Timeout in milliseconds when waiting for a connection from the pool | 30000 |
+| mysql_pool_acquire_mode            | How to acquire connections from the pool: 'force' (always connect, ignore pool limit), 'wait' (block until available), 'try' (fail immediately if unavailable) | "force" |
+| mysql_pool_thread_local_cache      | Enable thread-local connection caching for faster same-thread connection reuse | true |
+| mysql_pool_connection_max_lifetime_seconds  | Maximum age of a pooled connection in seconds since it was first opened. When exceeded, the connection is closed instead of being returned to the cache| 0: disabled |
+| mysql_pool_connection_idle_timeout_seconds | Maximum time in seconds a connection can sit idle in the cache before being closed | 0: disabled |
+| mysql_pool_enable_reaper_thread    | Whether to run a dedicated thread that periodically scans the pool and removes expired connections | false |
+| mysql_compression_aware_costs      | Apply compression ratios when estimating transfer costs        | true    |
+| mysql_compression_ratio            | Compression ratio for transfer cost estimation                 | 0.7     |
+| mysql_push_threshold_with_index    | Selectivity threshold for pushing filters with index support   | 0.5     |
+| mysql_push_threshold_no_index      | Selectivity threshold for pushing filters without index support | 0.3    |
+| mysql_hint_injection_enabled       | Inject MySQL optimizer hints when statistics appear stale      | false   |
+| mysql_hint_staleness_threshold     | Staleness score threshold for injecting optimizer hints        | 0.5     |
+| mysql_adaptive_replan_enabled      | Enable adaptive execution strategy based on actual vs estimated rows | true |
+| mysql_explain_validation_enabled   | Validate MySQL execution plans with EXPLAIN                    | false    |
+| mysql_query_timeout_enabled        | Add MAX_EXECUTION_TIME hint to MySQL queries for safety        | true    |
+| mysql_query_timeout_min_ms         | Minimum query timeout in milliseconds                          | 5000    |
+| mysql_query_timeout_max_ms         | Maximum query timeout in milliseconds                          | 300000  |
+| mysql_sql_buffer_result            | Add SQL_BUFFER_RESULT for large result sets to release row locks faster | true |
+| mysql_aggregate_pushdown_enabled   | Push aggregate functions (COUNT, SUM, etc.) to MySQL           | true   |
+| mysql_order_pushdown_enabled       | Push ORDER BY and LIMIT clauses to MySQL                       | true   |
 
 ## Schema Cache
 

@@ -40,7 +40,7 @@ private:
 	void EnsureConnection();
 
 	MySQLCatalog &catalog;
-	PooledConnection<MySQLConnection> pooled_connection;
+	dbconnector::pool::PooledConnection<MySQLConnection> pooled_connection;
 	bool transactions_enabled = true;
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	AccessMode access_mode;
