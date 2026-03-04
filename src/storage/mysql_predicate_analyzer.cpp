@@ -6,12 +6,18 @@
 #include "duckdb/planner/filter/in_filter.hpp"
 
 #include <cmath>
+#include <unordered_set>
 
 namespace duckdb {
 
 PredicateAnalyzer::PredicateAnalyzer(MySQLStatisticsCollector &stats, const string &schema, const string &table)
     : stats_(stats), schema_(schema), table_(table) {
 	table_stats_ = stats_.get().GetTableStats(schema, table);
+}
+
+void PredicateAnalyzer::SetHintInjectionEnabled(bool enabled, double staleness_threshold) {
+	hint_injection_enabled_ = enabled;
+	hint_staleness_threshold_ = staleness_threshold;
 }
 
 void PredicateAnalyzer::SetPushThresholds(double with_index, double no_index) {
@@ -261,6 +267,79 @@ PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, Ta
 	return result;
 }
 
+void PredicateAnalyzer::ReorderPredicatesForIndex(vector<PredicateAnalysis> &analyses,
+                                                  vector<string> &pushed_predicates) const {
+	if (pushed_predicates.size() < 2 || table_stats_.indexes.empty()) {
+		return;
+	}
+
+	vector<string> filter_columns;
+	for (const auto &analysis : analyses) {
+		if (analysis.ShouldPush() && !analysis.mysql_predicate.empty()) {
+			filter_columns.push_back(analysis.column_name);
+		}
+	}
+
+	if (filter_columns.size() < 2) {
+		return;
+	}
+
+	optional_ptr<const MySQLIndexInfo> best_index = table_stats_.FindBestIndex(filter_columns);
+	if (!best_index) {
+		for (const auto &index : table_stats_.indexes) {
+			idx_t matched = 0;
+			for (const auto &col : filter_columns) {
+				for (const auto &idx_col : index.columns) {
+					if (StringUtil::CIEquals(col, idx_col)) {
+						matched++;
+						break;
+					}
+				}
+			}
+			if (matched >= 2 && (!best_index || matched > filter_columns.size() / 2)) {
+				best_index = &index;
+			}
+		}
+	}
+
+	if (!best_index || best_index->columns.size() < 2) {
+		return;
+	}
+
+	case_insensitive_map_t<vector<idx_t>> column_to_analysis_indices;
+	for (idx_t i = 0; i < analyses.size(); i++) {
+		if (analyses[i].ShouldPush() && !analyses[i].mysql_predicate.empty()) {
+			column_to_analysis_indices[analyses[i].column_name].push_back(i);
+		}
+	}
+
+	vector<string> reordered_predicates;
+	unordered_set<idx_t> used_indices;
+
+	for (const auto &idx_col : best_index->columns) {
+		auto it = column_to_analysis_indices.find(idx_col);
+		if (it != column_to_analysis_indices.end()) {
+			for (auto analysis_idx : it->second) {
+				if (used_indices.find(analysis_idx) == used_indices.end()) {
+					reordered_predicates.push_back(analyses[analysis_idx].mysql_predicate);
+					used_indices.insert(analysis_idx);
+				}
+			}
+		}
+	}
+
+	for (idx_t i = 0; i < analyses.size(); i++) {
+		if (analyses[i].ShouldPush() && !analyses[i].mysql_predicate.empty() &&
+		    used_indices.find(i) == used_indices.end()) {
+			reordered_predicates.push_back(analyses[i].mysql_predicate);
+		}
+	}
+
+	if (reordered_predicates.size() == pushed_predicates.size()) {
+		pushed_predicates = std::move(reordered_predicates);
+	}
+}
+
 FilterAnalysisResult PredicateAnalyzer::AnalyzeFilters(const vector<column_t> &column_ids,
                                                        optional_ptr<TableFilterSet> filters,
                                                        const vector<string> &names) {
@@ -304,11 +383,44 @@ FilterAnalysisResult PredicateAnalyzer::AnalyzeFilters(const vector<column_t> &c
 		result.analyses.push_back(std::move(analysis));
 	}
 
+	if (pushed_predicates.size() >= 2) {
+		ReorderPredicatesForIndex(result.analyses, pushed_predicates);
+	}
+
 	if (!pushed_predicates.empty()) {
 		result.combined_mysql_predicate = StringUtil::Join(pushed_predicates, " AND ");
 	}
 
+	if (hint_injection_enabled_) {
+		RecommendIndexHint(result);
+	}
+
 	return result;
+}
+
+void PredicateAnalyzer::RecommendIndexHint(FilterAnalysisResult &result) const {
+	if (table_stats_.staleness_score < hint_staleness_threshold_) {
+		return;
+	}
+
+	vector<string> filter_columns;
+	for (const auto &analysis : result.analyses) {
+		if (analysis.ShouldPush() && analysis.has_index) {
+			filter_columns.push_back(analysis.column_name);
+		}
+	}
+
+	if (filter_columns.empty()) {
+		return;
+	}
+
+	auto best_index = table_stats_.FindBestIndex(filter_columns);
+	if (!best_index) {
+		return;
+	}
+
+	result.recommended_index = best_index->index_name;
+	result.suggest_force_index = (table_stats_.staleness_score >= FORCE_INDEX_STALENESS_THRESHOLD);
 }
 
 } // namespace duckdb

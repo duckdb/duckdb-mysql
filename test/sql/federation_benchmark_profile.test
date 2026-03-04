@@ -1,0 +1,199 @@
+# name: test/sql/federation_benchmark_profile.test
+# description: Profile-based benchmark to measure federation optimizer effectiveness
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# SETUP
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysqlscanner' AS bench (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS bench.perf_test
+
+statement ok
+CREATE TABLE bench.perf_test (
+    id INTEGER PRIMARY KEY,
+    indexed_col INTEGER,
+    string_col VARCHAR(50),
+    data_col VARCHAR(200)
+)
+
+statement ok
+CREATE INDEX idx_perf_indexed ON bench.perf_test(indexed_col)
+
+statement ok
+INSERT INTO bench.perf_test
+SELECT
+    i,
+    i % 100,
+    CASE WHEN i % 5 = 0 THEN 'alpha'
+         WHEN i % 5 = 1 THEN 'beta'
+         WHEN i % 5 = 2 THEN 'gamma'
+         WHEN i % 5 = 3 THEN 'delta'
+         ELSE 'epsilon' END,
+    CONCAT('Row data payload for record number ', CAST(i AS VARCHAR), ' with extra padding')
+FROM generate_series(1, 10000) AS t(i)
+
+# TEST 1: Baseline - Full Table Scan (no filter)
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+----
+10000
+
+# TEST 2: Point Lookup - Maximum Pushdown Benefit
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+query II
+SELECT id, indexed_col FROM bench.perf_test WHERE id = 5000
+----
+5000	0
+
+# Verify the row exists
+query I
+SELECT COUNT(*) FROM bench.perf_test WHERE id = 5000
+----
+1
+
+# TEST 3: Indexed Column Equality - High Benefit
+
+query I
+SELECT COUNT(*) FROM bench.perf_test WHERE indexed_col = 50
+----
+100
+
+# Verify distribution
+query I
+SELECT MIN(id) FROM bench.perf_test WHERE indexed_col = 50
+----
+50
+
+query I
+SELECT MAX(id) FROM bench.perf_test WHERE indexed_col = 50
+----
+9950
+
+# TEST 4: IN Filter - Medium Benefit
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col IN (10, 20, 30, 40, 50)
+----
+500
+
+# TEST 5: Range Filter - Medium Benefit
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE id BETWEEN 1 AND 1000
+----
+1000
+
+# TEST 6: String Equality - Medium Benefit
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE string_col = 'alpha'
+----
+2000
+
+# TEST 7: Hybrid Execution - Indexed + Function
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 25
+  AND LENGTH(data_col) > 50
+----
+100
+
+# Test with stricter local filter
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 25
+  AND LENGTH(data_col) > 60
+----
+0
+
+# TEST 8: Multiple Hybrid Filters
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 10
+  AND MOD(id, 7) = 0
+----
+14
+
+# TEST 9: Low Selectivity - Should Prefer Local Execution
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col > 0
+----
+9900
+
+# TEST 10: Aggregation with Selective Filter
+
+query I
+SELECT SUM(indexed_col) FROM bench.perf_test
+WHERE indexed_col = 75
+----
+7500
+
+query I
+SELECT AVG(id) FROM bench.perf_test
+WHERE indexed_col = 75
+----
+5025.0
+
+# TEST 11: Comparison - With vs Without Pushdown
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 33 AND LENGTH(data_col) > 40
+----
+100
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 33 AND LENGTH(data_col) > 40
+----
+100
+
+# Re-enable for remaining tests
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+# TEST 12: Edge Case - Empty Result from Pushed Filter
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col = 999
+  AND LENGTH(data_col) < 10
+----
+0
+
+# TEST 13: Edge Case - All Rows Match Pushed Filter
+
+query I
+SELECT COUNT(*) FROM bench.perf_test
+WHERE indexed_col >= 0
+  AND MOD(id, 500) = 1
+----
+20
+
+# CLEANUP
+
+statement ok
+DROP TABLE bench.perf_test

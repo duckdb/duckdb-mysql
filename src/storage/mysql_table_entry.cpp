@@ -92,13 +92,17 @@ TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_pt
 		result->names.push_back(col.GetName());
 	}
 
+	Value filter_pushdown;
+	bool pushdown_enabled = false;
+	if (context.TryGetCurrentSetting("mysql_experimental_filter_pushdown", filter_pushdown)) {
+		pushdown_enabled = BooleanValue::Get(filter_pushdown);
+	}
+	result->use_predicate_analyzer = pushdown_enabled;
+
 	bind_data = std::move(result);
 
 	auto function = MySQLScanFunction();
-	Value filter_pushdown;
-	if (context.TryGetCurrentSetting("mysql_experimental_filter_pushdown", filter_pushdown)) {
-		function.filter_pushdown = BooleanValue::Get(filter_pushdown);
-	}
+	function.filter_pushdown = pushdown_enabled;
 	return function;
 }
 

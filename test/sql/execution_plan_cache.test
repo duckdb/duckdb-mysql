@@ -1,0 +1,249 @@
+# name: test/sql/execution_plan_cache.test
+# description: Test execution plan caching for repeated queries
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create tables for plan cache testing
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_cache_test1
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_cache_test2
+
+statement ok
+CREATE TABLE s1.plan_cache_test1(
+    id INTEGER PRIMARY KEY,
+    category INTEGER,
+    value INTEGER
+)
+
+statement ok
+CREATE TABLE s1.plan_cache_test2(
+    id INTEGER PRIMARY KEY,
+    item_type INTEGER,
+    amount INTEGER
+)
+
+statement ok
+CREATE INDEX idx_category ON s1.plan_cache_test1(category)
+
+statement ok
+CREATE INDEX idx_item_type ON s1.plan_cache_test2(item_type)
+
+statement ok
+INSERT INTO s1.plan_cache_test1
+SELECT range as id, range % 10 as category, range * 2 as value
+FROM range(1000)
+
+statement ok
+INSERT INTO s1.plan_cache_test2
+SELECT range as id, range % 5 as type, range * 3 as amount
+FROM range(500)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE plan_cache_test1')
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE plan_cache_test2')
+
+# Clear cache to start fresh
+statement ok
+CALL mysql_clear_cache()
+
+# Test 1: First query - plan should be computed and cached
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5
+----
+100
+
+# Test 2: Same query pattern - should hit cache
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 3
+----
+100
+
+# Test 3: Different filter column - different cache key
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE id < 100
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE value > 1000
+----
+499
+
+# Test 4: Different table - independent cache entry
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test2 WHERE item_type = 2
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test2 WHERE item_type = 2
+----
+100
+
+# Test 5: mysql_clear_cache() invalidates plan cache
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 7
+----
+100
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 7
+----
+100
+
+# Test 6: Different column selections - different cache key
+
+query I
+SELECT id FROM s1.plan_cache_test1 WHERE category = 1 LIMIT 3
+----
+1
+11
+21
+
+query II
+SELECT id, value FROM s1.plan_cache_test1 WHERE category = 1 LIMIT 3
+----
+1	2
+11	22
+21	42
+
+# Test 7: Complex filter combinations
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5 AND value > 500
+----
+75
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5 AND value > 500
+----
+75
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category IN (1, 2, 3)
+----
+300
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category IN (1, 2, 3)
+----
+300
+
+# Test 8: Verify cache doesn't affect correctness
+
+query I
+SELECT SUM(value) FROM s1.plan_cache_test1 WHERE category = 0
+----
+99000
+
+query I
+SELECT AVG(value)::INTEGER FROM s1.plan_cache_test1 WHERE category = 9
+----
+1008
+
+query I
+SELECT SUM(amount) FROM s1.plan_cache_test2 WHERE item_type = 0
+----
+74250
+
+# Test 9: Multiple clear/query cycles
+
+loop i 0 3
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = ${i}
+----
+100
+
+endloop
+
+# Test 10: Concurrent-like access patterns (sequential simulation)
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 1
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test2 WHERE item_type = 1
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 2
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test2 WHERE item_type = 2
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 1
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test2 WHERE item_type = 1
+----
+100
+
+# Test 11: Cache behavior with DDL changes
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5
+----
+100
+
+statement ok
+INSERT INTO s1.plan_cache_test1 VALUES (9999, 5, 9999)
+
+query I
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = 5
+----
+101
+
+statement ok
+DELETE FROM s1.plan_cache_test1 WHERE id = 9999
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_cache_test1
+
+statement ok
+DROP TABLE IF EXISTS s1.plan_cache_test2
+
+statement ok
+DETACH s1

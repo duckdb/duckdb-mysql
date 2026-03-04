@@ -13,6 +13,8 @@
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
+#include "storage/federation/plan_cache.hpp"
+#include "storage/mysql_statistics.hpp"
 
 namespace duckdb {
 class MySQLSchemaEntry;
@@ -69,6 +71,8 @@ public:
 	static bool IsMySQLQuery(const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
+	PlanCache &GetPlanCache();
+	MySQLStatsCache &GetStatsCache();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
@@ -77,6 +81,8 @@ private:
 	MySQLSchemaSet schemas;
 	string default_schema;
 	shared_ptr<MySQLConnectionPool> connection_pool;
+	PlanCache plan_cache_;
+	MySQLStatsCache stats_cache_;
 };
 
 } // namespace duckdb

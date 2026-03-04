@@ -28,7 +28,14 @@ struct MySQLBindData : public FunctionData {
 	vector<string> names;
 	vector<LogicalType> types;
 	string limit;
+	string order_by_clause;
+	string aggregate_select_list;
+	string group_by_clause;
+	string aggregate_where_clause;
+	bool has_aggregate_pushdown = false;
 	MySQLResultStreaming streaming = MySQLResultStreaming::UNINITIALIZED;
+
+	bool use_predicate_analyzer = false;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
@@ -88,6 +95,16 @@ public:
 class MySQLExecuteFunction : public TableFunction {
 public:
 	MySQLExecuteFunction();
+};
+
+class MySQLExplainFederatedFunction : public TableFunction {
+public:
+	MySQLExplainFederatedFunction();
+};
+
+class MySQLDebugExecutionPlanFunction : public TableFunction {
+public:
+	MySQLDebugExecutionPlanFunction();
 };
 
 } // namespace duckdb
