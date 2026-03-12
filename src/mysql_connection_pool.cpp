@@ -10,14 +10,14 @@ namespace duckdb {
 //===--------------------------------------------------------------------===//
 MySQLConnectionPool::MySQLConnectionPool(string connection_string_p, string attach_path_p,
                                          MySQLTypeConfig type_config_p, idx_t max_connections_p, idx_t timeout_ms_p)
-    : GenericConnectionPool<MySQLConnection>(max_connections_p, timeout_ms_p, true),
+    : dbconnector::pool::ConnectionPool<MySQLConnection>(max_connections_p, timeout_ms_p, true),
       connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
       type_config(std::move(type_config_p)) {
 }
 
 MySQLConnectionPool::~MySQLConnectionPool() = default;
 
-unique_ptr<MySQLConnection> MySQLConnectionPool::CreateNewConnection() {
+std::unique_ptr<MySQLConnection> MySQLConnectionPool::CreateNewConnection() {
 	MySQLTypeConfig config_snapshot;
 	bool should_calibrate = false;
 	{
