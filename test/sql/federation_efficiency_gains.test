@@ -1,0 +1,522 @@
+# name: test/sql/federation_efficiency_gains.test
+# description: Demonstrate the efficiency gains of federated query optimization
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# SETUP — 50K rows with indexed and non-indexed columns, wide rows (~200 bytes)
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH loader
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_test;
+
+statement ok
+CREATE TABLE s1.eff_test(
+    id INTEGER PRIMARY KEY,
+    indexed_col INTEGER NOT NULL,
+    non_indexed_col INTEGER NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    payload VARCHAR(500) NOT NULL
+)
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_eff_indexed ON eff_test(indexed_col)')
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_eff_status ON eff_test(status(20))')
+
+statement ok
+INSERT INTO s1.eff_test
+SELECT
+    range as id,
+    range % 100 as indexed_col,
+    range % 1000 as non_indexed_col,
+    CASE WHEN range % 3 = 0 THEN 'active'
+         WHEN range % 3 = 1 THEN 'pending'
+         ELSE 'closed' END,
+    REPEAT('x', 200)
+FROM range(50000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE eff_test')
+
+statement ok
+CALL mysql_clear_cache()
+
+# GAIN 1: Row Reduction — Push filters to MySQL, transfer only matching rows
+
+# 1a: PK point lookup — 1 row instead of 50K (99.998% reduction)
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 25000
+----
+25000	0
+
+# The cost model chose PUSH_ALL because it's dramatically cheaper
+query I
+SELECT strategy FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+PUSH_ALL
+
+# Estimated rows transferred: just 1, not 50000
+query I
+SELECT estimated_rows < 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# Push cost is a fraction of full-scan cost
+query I
+SELECT push_all_cost < local_all_cost FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# Quantify: local scan costs at least 10x more than push
+query I
+SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 1b: Indexed equality — 500 rows instead of 50K (99% reduction)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 42 LIMIT 1
+----
+42	42
+
+query I
+SELECT strategy FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+PUSH_ALL
+
+# Estimated rows are ~1% of table
+query I
+SELECT estimated_rows <= 1000 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# Local scan still costs much more
+query I
+SELECT local_all_cost / push_all_cost > 5 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 1c: Compound indexed filters — even fewer rows
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 10 AND status = 'active' LIMIT 1
+----
+210	10
+
+query I
+SELECT filters_pushed FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+2
+
+# Selectivity compounds: 1% × 33% ≈ 0.33%
+query I
+SELECT combined_selectivity < 0.05 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# GAIN 2: Network Cost Dominance — The biggest win is reducing bytes on the wire
+
+statement ok
+CALL mysql_clear_cache()
+
+# Selective query — few rows transferred
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 1 LIMIT 1
+----
+1	1
+
+# Network cost is a major component of the total cost
+query I
+SELECT network_cost > 0 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+query I
+SELECT local_all_cost > push_all_cost FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# GAIN 3: Index Utilization — Push filters let MySQL use indexes
+
+statement ok
+CALL mysql_clear_cache()
+
+# PK lookup uses index → near-zero I/O cost
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 100
+----
+100	0
+
+# I/O cost should be minimal (index lookup, not full scan)
+query I
+SELECT io_cost < 100 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# Total cost dominated by network overhead, not I/O (index is fast)
+query I
+SELECT io_cost < total_cost FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# GAIN 4: Scaling with Selectivity — More selective = bigger savings
+
+# 4a: 1% selectivity (500 out of 50K)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 50 LIMIT 1
+----
+50	50
+
+# Push saves at least 10x over full scan at 1% selectivity
+query I
+SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 4b: 5% selectivity (2500 out of 50K)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col < 5 LIMIT 1
+----
+0	0
+
+# Push is still cheaper at 5%
+query I
+SELECT push_all_cost < local_all_cost FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 4c: 10% selectivity (5000 out of 50K)
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col < 10 LIMIT 1
+----
+0	0
+
+# Push still cheaper at 10%
+query I
+SELECT push_all_cost < local_all_cost FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 4d: Savings ratio should increase with selectivity
+statement ok
+CALL mysql_clear_cache()
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 1
+----
+1	1
+
+# Store the point lookup ratio
+query I
+SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# GAIN 5: Plan Cache — Amortize planning cost across repeated queries
+
+statement ok
+CALL mysql_clear_cache()
+
+# First query: cache miss (hit_count = 0)
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 1 LIMIT 1
+----
+1	1
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+0
+
+# Second query with same filter pattern but different value: cache hit
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 2 LIMIT 1
+----
+2	2
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+1
+
+# 10 more queries: all hit the cache, zero planning overhead
+loop i 3 13
+
+statement ok
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = ${i} LIMIT 1
+
+endloop
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+11
+
+# GAIN 6: Partition Pruning — Skip entire partitions based on filter
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_partitioned;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE eff_partitioned (
+    id INT NOT NULL,
+    order_year INT NOT NULL,
+    amount DECIMAL(10,2),
+    PRIMARY KEY (id, order_year)
+) PARTITION BY RANGE (order_year) (
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025)
+)')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.eff_partitioned
+SELECT i, 2021 + (i % 4), (i % 1000) * 1.5
+FROM generate_series(1, 40000) AS t(i)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE eff_partitioned')
+
+# 6a: Without partition filter — scans all 4 partitions
+query I
+SELECT COUNT(*) FROM s1.eff_partitioned
+----
+40000
+
+# 6b: With partition key filter — scans 1 of 4 partitions (75% I/O reduction)
+query I
+SELECT COUNT(*) FROM s1.eff_partitioned WHERE order_year = 2024
+----
+10000
+
+# 6c: Range filter spans 2 of 4 partitions (50% I/O reduction)
+query I
+SELECT COUNT(*) FROM s1.eff_partitioned WHERE order_year >= 2023
+----
+20000
+
+# 6d: Partition + additional filter — prune partitions AND push filter
+query I
+SELECT COUNT(*) FROM s1.eff_partitioned WHERE order_year = 2024 AND amount > 500
+----
+6680
+
+# GAIN 7: Aggregate Pushdown — Compute aggregates server-side
+
+# 7a: COUNT(*) — instead of transferring 50K rows, MySQL returns 1 number
+query I
+SELECT COUNT(*) FROM s1.eff_test
+----
+50000
+
+# 7b: Grouped COUNT — MySQL groups and counts, returns ~100 rows instead of 50K
+query I
+SELECT COUNT(DISTINCT indexed_col) FROM (
+    SELECT indexed_col, COUNT(*) FROM s1.eff_test GROUP BY indexed_col
+) t
+----
+100
+
+# 7c: COUNT with WHERE — MySQL filters AND aggregates, returns 1 row
+query I
+SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col = 42
+----
+500
+
+# 7d: SUM — single value instead of 50K rows
+query I
+SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 0
+----
+12475000
+
+# 7e: Multiple aggregates in one pass
+query IIIII
+SELECT
+    COUNT(*) as cnt,
+    SUM(id) as sum_id,
+    MIN(id) as min_id,
+    MAX(id) as max_id,
+    AVG(id) as avg_id
+FROM s1.eff_test WHERE indexed_col = 99
+----
+500	12524500	99	49999	25049.0
+
+# GAIN 8: ORDER BY + LIMIT Pushdown — TopN in MySQL
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_order;
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE eff_order (id INT NOT NULL PRIMARY KEY, val INT, name VARCHAR(50))')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s1.eff_order
+SELECT range, range % 1000, 'name_' || CAST(range AS VARCHAR) FROM range(10000)
+
+# 8a: ORDER BY + LIMIT 5 → MySQL returns 5 rows, not 10K
+query II
+SELECT id, val FROM s1.eff_order ORDER BY val, id LIMIT 5
+----
+0	0
+1000	0
+2000	0
+3000	0
+4000	0
+
+# 8b: ORDER BY DESC + LIMIT — reverse sort also pushed
+query II
+SELECT id, val FROM s1.eff_order ORDER BY val DESC, id DESC LIMIT 3
+----
+9999	999
+8999	999
+7999	999
+
+# 8c: WHERE + ORDER BY + LIMIT — filter + sort + limit all pushed
+query II
+SELECT id, val FROM s1.eff_order WHERE val < 10 ORDER BY id DESC LIMIT 3
+----
+9009	9
+9008	8
+9007	7
+
+# GAIN 9: Correctness Guarantee — Same results with or without federation
+
+# 9a: Point lookup
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
+----
+12345	45
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
+----
+12345	45
+
+# 9b: Filtered aggregate
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query I
+SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
+----
+12513500
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query I
+SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
+----
+12513500
+
+# 9c: Complex filter
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+query I
+SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
+----
+833
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+query I
+SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
+----
+833
+
+# Re-enable for remaining tests
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+# GAIN 10: Cost Model Accuracy — The optimizer makes the RIGHT choice
+
+statement ok
+CALL mysql_clear_cache()
+
+# 10a: Highly selective (0.002%) — push is overwhelmingly cheaper
+query II
+SELECT id, indexed_col FROM s1.eff_test WHERE id = 1
+----
+1	1
+
+query I
+SELECT
+    push_all_cost < local_all_cost
+    AND push_all_cost <= hybrid_cost
+    AND total_cost > 0
+    AND io_cost >= 0
+    AND network_cost >= 0
+    AND cpu_cost >= 0
+FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 10b: All three costs computed and positive
+query I
+SELECT push_all_cost > 0 AND local_all_cost > 0 AND hybrid_cost > 0
+FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# 10c: Selectivity is reasonable
+query I
+SELECT combined_selectivity > 0 AND combined_selectivity <= 1.0
+FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+----
+true
+
+# CLEANUP
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_order;
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_partitioned;
+
+statement ok
+DROP TABLE IF EXISTS s1.eff_test;

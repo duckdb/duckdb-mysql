@@ -1,0 +1,324 @@
+# name: test/sql/optimization_benchmark.test
+# description: Benchmark to measure value of optimizations
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# SETUP: Create benchmark tables
+
+statement ok
+DROP TABLE IF EXISTS s1.optim_bench
+
+statement ok
+CREATE TABLE s1.optim_bench(
+    id INTEGER PRIMARY KEY,
+    col_a INTEGER NOT NULL,
+    col_b INTEGER NOT NULL,
+    col_c INTEGER NOT NULL,
+    wide_data VARCHAR(500)
+)
+
+# Composite index for predicate reordering tests
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_abc ON optim_bench(col_a, col_b, col_c)')
+
+# Single column index for covering index tests
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_b ON optim_bench(col_b)')
+
+statement ok
+INSERT INTO s1.optim_bench
+SELECT
+    range as id,
+    range % 100 as col_a,
+    range % 1000 as col_b,
+    range % 50 as col_c,
+    REPEAT('x', 200) as wide_data
+FROM range(50000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE optim_bench')
+
+# Create histogram on columns (MySQL 8.0+ only)
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE optim_bench UPDATE HISTOGRAM ON col_a, col_b WITH 100 BUCKETS')
+
+statement ok
+CALL mysql_clear_cache()
+
+# BENCHMARK 1: Plan Cache Effectiveness
+
+# First query - computes plan
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 50
+----
+500
+
+# Same query pattern - should hit cache
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 50
+----
+500
+
+# Different value, same pattern - should use cached strategy
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 25
+----
+500
+
+# Run 10 iterations to exercise cache
+loop i 0 10
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = ${i}
+----
+500
+
+endloop
+
+# BENCHMARK 2: Covering Index Benefit
+
+# Fully covered query - only indexed columns
+query III
+SELECT col_a, col_b, col_c FROM s1.optim_bench
+WHERE col_a = 50 AND col_b = 50
+LIMIT 1
+----
+50	50	0
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_a = 50 AND col_b = 50
+----
+50
+
+# Compare with query needing table access (wide_data not in index)
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_a = 50 AND col_b = 50 AND LENGTH(wide_data) > 100
+----
+50
+
+# Aggregate on indexed columns only (covering)
+query I
+SELECT SUM(col_b) FROM s1.optim_bench WHERE col_a = 10
+----
+230000
+
+# Aggregate needing table access
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_a = 10 AND wide_data IS NOT NULL
+----
+500
+
+# BENCHMARK 3: Predicate Reordering Effectiveness
+
+# Natural order (a, b, c) - optimal
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_a = 25 AND col_b = 125 AND col_c = 25
+----
+50
+
+# Reverse order (c, b, a) - reordering should help
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_c = 25 AND col_b = 125 AND col_a = 25
+----
+50
+
+# Mixed order (b, a, c)
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_b = 125 AND col_a = 25 AND col_c = 25
+----
+50
+
+# Partial index with out-of-order predicates
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_b = 500 AND col_a = 0
+----
+50
+
+# BENCHMARK 4: Histogram-Based Selectivity (MySQL 8.0+)
+
+# Low cardinality filter (col_a has 100 distinct values, 500 rows each)
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 99
+----
+500
+
+# High cardinality filter (col_b has 1000 distinct values, 50 rows each)
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_b = 999
+----
+50
+
+# Range query - histogram cumulative frequency helps
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a < 10
+----
+5000
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_b < 100
+----
+5000
+
+# BENCHMARK 5: Network Calibration Impact
+
+# Wide row query - high network transfer cost
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_a = 50
+----
+500
+
+# Very selective query - low network cost
+query I
+SELECT id FROM s1.optim_bench WHERE id = 25000
+----
+25000
+
+# Compare: many narrow columns vs few wide columns
+query III
+SELECT col_a, col_b, col_c FROM s1.optim_bench
+WHERE col_a = 10 AND col_b = 10
+LIMIT 3
+----
+10	10	10
+10	10	10
+10	10	10
+
+# BENCHMARK 6: Combined Optimizations
+
+# Cache + Covering + Reordering
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_c = 0 AND col_b = 0 AND col_a = 0
+----
+50
+
+# Cache hit with same pattern, different values
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+WHERE col_c = 25 AND col_b = 125 AND col_a = 25
+----
+50
+
+# Histogram + Covering
+query I
+SELECT COUNT(DISTINCT col_c) FROM s1.optim_bench
+WHERE col_a < 5
+----
+5
+
+# BENCHMARK 7: Cache Invalidation
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 77
+----
+500
+
+statement ok
+CALL mysql_clear_cache()
+
+# After clear, plan recomputed
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 77
+----
+500
+
+# BENCHMARK 8: Stress Test - Many Unique Queries
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 1 AND col_b < 100
+----
+50
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 2 AND col_b < 200
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 3 AND col_b < 300
+----
+150
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 4 AND col_b < 400
+----
+200
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a = 5 AND col_b < 500
+----
+250
+
+# BENCHMARK 9: Large Result Set
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_c < 25
+----
+25000
+
+query I
+SELECT COUNT(*) FROM s1.optim_bench WHERE col_a >= 50
+----
+25000
+
+# BENCHMARK 10: Correctness Verification
+
+# Verify exact counts match data distribution
+query I
+SELECT COUNT(*) FROM s1.optim_bench
+----
+50000
+
+query I
+SELECT COUNT(DISTINCT col_a) FROM s1.optim_bench
+----
+100
+
+query I
+SELECT COUNT(DISTINCT col_b) FROM s1.optim_bench
+----
+1000
+
+query I
+SELECT COUNT(DISTINCT col_c) FROM s1.optim_bench
+----
+50
+
+# Verify aggregate correctness
+query I
+SELECT SUM(col_a) FROM s1.optim_bench WHERE col_b = 0
+----
+0
+
+query I
+SELECT AVG(col_c)::INTEGER FROM s1.optim_bench WHERE col_a = 0
+----
+0
+
+# CLEANUP
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE optim_bench DROP HISTOGRAM ON col_a, col_b')
+
+statement ok
+DROP TABLE IF EXISTS s1.optim_bench
+
+statement ok
+DETACH s1

@@ -1,0 +1,179 @@
+# name: test/sql/federation_optimizer.test
+# description: Test federation optimizer components (statistics, predicate analyzer, cost model)
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create tables with indexes for optimizer testing
+
+statement ok
+DROP TABLE IF EXISTS s1.optimizer_test;
+
+statement ok
+CREATE TABLE s1.optimizer_test(
+    id INTEGER PRIMARY KEY,
+    indexed_col INTEGER,
+    non_indexed_col INTEGER,
+    text_col VARCHAR(100),
+    nullable_col INTEGER
+);
+
+statement ok
+CREATE INDEX idx_optimizer_indexed ON s1.optimizer_test(indexed_col);
+
+statement ok
+INSERT INTO s1.optimizer_test
+SELECT
+    range as id,
+    range % 100 as indexed_col,
+    range % 1000 as non_indexed_col,
+    CONCAT('text_', range) as text_col,
+    CASE WHEN range % 10 = 0 THEN NULL ELSE range END as nullable_col
+FROM range(1000);
+
+# Basic Filter Pushdown Tests
+
+# Test 1: Equality filter on primary key
+query II
+SELECT id, indexed_col FROM s1.optimizer_test WHERE id = 500
+----
+500	0
+
+# Test 2: Equality filter on indexed column
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col = 50
+----
+10
+
+# Test 3: Equality filter on non-indexed column
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE non_indexed_col = 500
+----
+1
+
+# Test 4: Range filter on primary key
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id >= 990
+----
+10
+
+# Test 5: Range filter on indexed column
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col < 5
+----
+50
+
+# Comparison Operator Tests
+
+# Test 6: Less than
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id < 10
+----
+10
+
+# Test 7: Greater than
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id > 995
+----
+4
+
+# Test 8: Less than or equal
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id <= 5
+----
+6
+
+# Test 9: Greater than or equal
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id >= 995
+----
+5
+
+# Test 10: Not equal
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col != 0
+----
+990
+
+# NULL Handling Tests
+
+# Test 11: IS NULL filter
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE nullable_col IS NULL
+----
+100
+
+# Test 12: IS NOT NULL filter
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE nullable_col IS NOT NULL
+----
+900
+
+# Conjunction Tests (AND/OR)
+
+# Test 13: AND conjunction
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col = 50 AND id > 500
+----
+5
+
+# Test 14: Multiple AND conditions
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col = 50 AND non_indexed_col >= 50 AND id < 800
+----
+8
+
+# IN Filter Tests
+
+# Test 15: IN filter on indexed column
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col IN (1, 2, 3)
+----
+30
+
+# Test 16: IN filter on primary key
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id IN (100, 200, 300, 400, 500)
+----
+5
+
+# String Filter Tests
+
+# Test 17: String equality
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE text_col = 'text_500'
+----
+1
+
+# Test 18: String comparison
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE text_col > 'text_99'
+----
+10
+
+# Combined Selectivity Tests
+
+# Test 19: High selectivity filter
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE id = 1
+----
+1
+
+# Test 20: Low selectivity filter
+query I
+SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col < 100
+----
+1000
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.optimizer_test;

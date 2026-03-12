@@ -1,0 +1,218 @@
+# name: test/sql/federation_strategy_verification.test
+# description: Verify federation optimizer strategy selection and plan cache behavior
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup
+
+statement ok
+DROP TABLE IF EXISTS s1.strategy_test;
+
+statement ok
+CREATE TABLE s1.strategy_test(
+    id INTEGER PRIMARY KEY,
+    indexed_val INTEGER,
+    non_indexed_val INTEGER,
+    data VARCHAR(100)
+);
+
+statement ok
+CREATE INDEX idx_strategy_val ON s1.strategy_test(indexed_val);
+
+statement ok
+INSERT INTO s1.strategy_test
+SELECT
+    range as id,
+    range % 100 as indexed_val,
+    range % 1000 as non_indexed_val,
+    CONCAT('data_', range) as data
+FROM range(10000);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE strategy_test');
+
+# Section 1: Strategy verification - PUSH_ALL for pushable filters
+
+# Test 1: PK point lookup
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT id FROM s1.strategy_test WHERE id = 5000
+----
+5000
+
+query TI
+SELECT strategy, filters_pushed FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+PUSH_ALL	1
+
+# Test 2: Indexed range scan
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.strategy_test WHERE indexed_val < 10
+----
+1000
+
+# Test 3: IN filter
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+SELECT * FROM s1.strategy_test WHERE indexed_val IN (1, 2, 3)
+
+query TI
+SELECT strategy, filters_pushed FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+PUSH_ALL	1
+
+# Test 4: Two pushable filters
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+SELECT * FROM s1.strategy_test WHERE id > 1000 AND indexed_val < 50
+
+query TI
+SELECT strategy, filters_pushed FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+PUSH_ALL	2
+
+# Test 5: Three pushable filters
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+SELECT * FROM s1.strategy_test WHERE id > 1000 AND indexed_val < 50 AND non_indexed_val = 5
+
+query TI
+SELECT strategy, filters_pushed FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+PUSH_ALL	3
+
+# Section 2: Cache behavior
+
+# Test 6: Cache hit - run same query pattern twice
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT id FROM s1.strategy_test WHERE id = 1
+----
+1
+
+query I
+SELECT id FROM s1.strategy_test WHERE id = 1
+----
+1
+
+query I
+SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+1
+
+# Test 7: Cache clear removes all entries
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+0
+
+# Section 3: Negative cases
+
+# Test 8: Pushdown disabled - no plan cache entries
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=false;
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT id FROM s1.strategy_test WHERE id = 5000
+----
+5000
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+0
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+# Test 9: No filters - no plan cache entry
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.strategy_test
+----
+10000
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+0
+
+# Section 4: Filters local count verification
+
+# Test 10: All filters pushed means 0 local
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT id FROM s1.strategy_test WHERE id = 42 AND indexed_val = 42
+----
+42
+
+query II
+SELECT filters_pushed, filters_local FROM mysql_debug_execution_plan() WHERE table_name='strategy_test'
+----
+2	0
+
+# Section 5: HYBRID/local filter execution correctness
+
+# Test 11: Selective indexed + non-selective non-indexed filter
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.strategy_test WHERE indexed_val = 5 AND non_indexed_val > 200
+----
+80
+
+# Test 12: Correctness with local filter - verify actual values
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.strategy_test WHERE indexed_val = 1 AND non_indexed_val >= 500
+----
+50
+
+# Test 13: Non-selective filter on non-indexed column only
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT COUNT(*) FROM s1.strategy_test WHERE non_indexed_val > 100
+----
+8990
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.strategy_test;

@@ -9,10 +9,12 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "network_calibration.hpp"
 #include "storage/mysql_statistics.hpp"
 #include "storage/mysql_predicate_analyzer.hpp"
 
 #include <cmath>
+#include <limits>
 
 namespace duckdb {
 
@@ -26,7 +28,11 @@ struct OperationCost {
 	}
 
 	double Total() const {
-		return cpu_cost + io_cost + network_cost;
+		double result = cpu_cost + io_cost + network_cost;
+		if (!std::isfinite(result)) {
+			return std::numeric_limits<double>::max();
+		}
+		return result;
 	}
 
 	bool operator<(const OperationCost &other) const {
@@ -60,6 +66,12 @@ inline const char *ExecutionStrategyToString(ExecutionStrategy strategy) {
 	}
 }
 
+struct ComparisonCosts {
+	OperationCost push_all_cost;
+	OperationCost local_all_cost;
+	OperationCost hybrid_cost;
+};
+
 struct ExecutionPlan {
 	ExecutionStrategy strategy = ExecutionStrategy::PUSH_ALL_FILTERS;
 	OperationCost estimated_cost;
@@ -67,28 +79,13 @@ struct ExecutionPlan {
 	vector<idx_t> local_filter_indices;
 	idx_t estimated_rows_from_mysql = 0;
 	idx_t estimated_final_rows = 0;
+	ComparisonCosts comparison_costs;
+	double combined_selectivity = 0.0;
+	string partition_clause;
+	string recommended_index;
 #ifndef NDEBUG
 	string reasoning;
 #endif
-};
-
-struct NetworkCalibration {
-	static constexpr double DEFAULT_LATENCY_MS = 1.0;
-	static constexpr double DEFAULT_BANDWIDTH_MBPS = 100.0;
-	static constexpr double MBPS_TO_BYTES_PER_SEC = 125000.0;
-	static constexpr double DEFAULT_COMPRESSION_RATIO = 0.7;
-
-	double latency_ms = DEFAULT_LATENCY_MS;
-	double bandwidth_mbps = DEFAULT_BANDWIDTH_MBPS;
-	bool is_calibrated = false;
-	bool calibration_failed = false;
-	bool has_network_compression = false;
-	double network_compression_ratio = DEFAULT_COMPRESSION_RATIO;
-
-	double ByteTransferTime(idx_t bytes) const {
-		double transfer_seconds = static_cast<double>(bytes) / (bandwidth_mbps * MBPS_TO_BYTES_PER_SEC);
-		return (latency_ms / 1000.0) + transfer_seconds;
-	}
 };
 
 class CostModel {
@@ -113,12 +110,12 @@ protected:
 struct CostModelParameters {
 	double cpu_cost_per_row = 0.1;
 	double io_cost_per_byte = 0.000001;
-	double network_cost_per_byte = 0.00001;
 	double mysql_overhead = 10.0;
 	double local_filter_cost = 0.001;
-	double index_lookup_cost = 0.5;
+	double local_aggregate_cost_per_row = 0.003;
 	double seq_scan_cost_factor = 0.8;
 	double network_round_trip_cost = 1.0;
+	static constexpr idx_t INNODB_PAGE_SIZE = 16384;
 };
 
 class DefaultCostModel : public CostModel {
@@ -134,6 +131,9 @@ public:
 
 	ExecutionPlan ComparePlans(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result,
 	                           const vector<string> &columns) const override;
+
+	bool ShouldPushAggregate(const MySQLTableStats &stats, const vector<string> &columns, idx_t effective_row_count,
+	                         idx_t num_groups, idx_t num_aggregates) const;
 
 	const CostModelParameters &GetParameters() const {
 		return params_;
@@ -164,6 +164,8 @@ private:
 	idx_t EstimateRowWidth(const MySQLTableStats &stats, const vector<string> &columns) const;
 	idx_t EstimateResultRows(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result) const;
 	idx_t EstimateResultRows(const MySQLTableStats &stats, double selectivity) const;
+	double EstimateIndexIOCost(const MySQLTableStats &stats, const vector<string> &filter_columns, idx_t result_rows,
+	                           optional_ptr<const MySQLIndexInfo> covering_index) const;
 
 	OperationCost CalculatePushAllCost(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result,
 	                                   const vector<string> &columns) const;
@@ -172,6 +174,11 @@ private:
 	OperationCost CalculateHybridCost(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result,
 	                                  const vector<string> &columns, vector<idx_t> &pushed_indices,
 	                                  vector<idx_t> &local_indices, double &out_pushed_selectivity) const;
+
+	OperationCost AggregatePushedCost(const MySQLTableStats &stats, const vector<string> &columns,
+	                                  idx_t effective_row_count, idx_t num_groups, idx_t num_aggregates) const;
+	OperationCost AggregateLocalCost(const MySQLTableStats &stats, const vector<string> &columns,
+	                                 idx_t effective_row_count) const;
 };
 
 } // namespace duckdb

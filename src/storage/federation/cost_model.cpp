@@ -29,6 +29,75 @@ idx_t DefaultCostModel::EstimateResultRows(const MySQLTableStats &stats, double 
 	return std::max(estimated, static_cast<idx_t>(1));
 }
 
+double DefaultCostModel::EstimateIndexIOCost(const MySQLTableStats &stats, const vector<string> &filter_columns,
+                                             idx_t result_rows,
+                                             optional_ptr<const MySQLIndexInfo> covering_index) const {
+	if (stats.estimated_row_count == 0 || result_rows == 0) {
+		return 0.0;
+	}
+
+	double per_page_cost = params_.io_cost_per_byte * static_cast<double>(CostModelParameters::INNODB_PAGE_SIZE);
+	double total_rows = static_cast<double>(stats.estimated_row_count);
+	double selectivity = static_cast<double>(result_rows) / total_rows;
+
+	auto scan_index = covering_index ? covering_index : stats.FindBestIndex(filter_columns);
+	if (!scan_index) {
+		idx_t row_width = stats.avg_row_length > 0 ? stats.avg_row_length : 100;
+		double total_bytes = total_rows * static_cast<double>(row_width);
+		return selectivity * total_bytes * params_.io_cost_per_byte * params_.seq_scan_cost_factor;
+	}
+
+	idx_t leaf_page_count = scan_index->leaf_pages;
+	if (leaf_page_count == 0) {
+		leaf_page_count = scan_index->index_size_pages;
+	}
+	if (leaf_page_count == 0 && stats.clustered_index_size_pages > 0) {
+		leaf_page_count = std::max(static_cast<idx_t>(1),
+		                           static_cast<idx_t>(static_cast<double>(stats.clustered_index_size_pages) * 0.15));
+	}
+	if (leaf_page_count == 0 && stats.data_length > 0) {
+		leaf_page_count =
+		    std::max(static_cast<idx_t>(1),
+		             static_cast<idx_t>(static_cast<double>(stats.data_length) /
+		                                static_cast<double>(CostModelParameters::INNODB_PAGE_SIZE) * 0.15));
+	}
+	if (leaf_page_count == 0) {
+		leaf_page_count = std::max(
+		    static_cast<idx_t>(1),
+		    static_cast<idx_t>(total_rows * 20.0 / static_cast<double>(CostModelParameters::INNODB_PAGE_SIZE)));
+	}
+
+	double index_pages_to_read = selectivity * static_cast<double>(leaf_page_count);
+
+	double btree_depth = 1.0;
+	if (total_rows > 1.0) {
+		btree_depth = std::ceil(std::log(total_rows) / std::log(500.0));
+		btree_depth = std::max(1.0, std::min(btree_depth, 6.0));
+	}
+	index_pages_to_read = std::max(index_pages_to_read, btree_depth);
+
+	double index_io = index_pages_to_read * per_page_cost;
+
+	if (!covering_index) {
+		idx_t clustered_pages = stats.clustered_index_size_pages;
+		if (clustered_pages == 0 && stats.avg_row_length > 0) {
+			clustered_pages = static_cast<idx_t>(total_rows * static_cast<double>(stats.avg_row_length) /
+			                                     static_cast<double>(CostModelParameters::INNODB_PAGE_SIZE));
+			clustered_pages = std::max(clustered_pages, static_cast<idx_t>(1));
+		}
+		double bookmark_pages;
+		if (clustered_pages > 0) {
+			double cp = static_cast<double>(clustered_pages);
+			bookmark_pages = cp * (1.0 - std::exp(-static_cast<double>(result_rows) / cp));
+		} else {
+			bookmark_pages = static_cast<double>(result_rows);
+		}
+		index_io += bookmark_pages * per_page_cost;
+	}
+
+	return index_io;
+}
+
 OperationCost DefaultCostModel::MySQLScanCost(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result,
                                               const vector<string> &columns) const {
 	OperationCost cost;
@@ -52,16 +121,7 @@ OperationCost DefaultCostModel::MySQLScanCost(const MySQLTableStats &stats, cons
 	auto covering_index = stats.FindCoveringIndex(columns, filter_columns);
 
 	if (uses_index) {
-		cost.io_cost = static_cast<double>(result_rows) * params_.index_lookup_cost;
-		if (covering_index) {
-			double covering_factor = 0.3;
-			if (covering_index->index_size_pages > 0 && stats.clustered_index_size_pages > 0) {
-				covering_factor = static_cast<double>(covering_index->index_size_pages) /
-				                  static_cast<double>(stats.clustered_index_size_pages);
-				covering_factor = std::max(0.05, std::min(covering_factor, 1.0));
-			}
-			cost.io_cost *= covering_factor;
-		}
+		cost.io_cost = EstimateIndexIOCost(stats, filter_columns, result_rows, covering_index);
 	} else {
 		double total_bytes = static_cast<double>(stats.estimated_row_count) * static_cast<double>(row_width);
 		cost.io_cost = total_bytes * params_.io_cost_per_byte * params_.seq_scan_cost_factor;
@@ -185,6 +245,53 @@ OperationCost DefaultCostModel::CalculateHybridCost(const MySQLTableStats &stats
 	return scan_cost + transfer_cost + local_cost;
 }
 
+OperationCost DefaultCostModel::AggregatePushedCost(const MySQLTableStats &stats, const vector<string> &columns,
+                                                    idx_t effective_row_count, idx_t num_groups,
+                                                    idx_t num_aggregates) const {
+	OperationCost cost;
+
+	cost.cpu_cost = params_.mysql_overhead;
+	idx_t row_width = EstimateRowWidth(stats, columns);
+	double total_bytes = static_cast<double>(stats.estimated_row_count) * static_cast<double>(row_width);
+	cost.io_cost = total_bytes * params_.io_cost_per_byte * params_.seq_scan_cost_factor;
+
+	cost.cpu_cost += static_cast<double>(effective_row_count) * params_.cpu_cost_per_row * 2.0;
+
+	idx_t result_rows = std::max(num_groups, static_cast<idx_t>(1));
+	idx_t agg_row_width = (num_groups > 0 ? 8 : 0) + num_aggregates * 8;
+	agg_row_width = std::max(agg_row_width, static_cast<idx_t>(8));
+	auto transfer = TransferCost(result_rows, agg_row_width, stats.IsInnoDBCompressed());
+	cost += transfer;
+
+	return cost;
+}
+
+OperationCost DefaultCostModel::AggregateLocalCost(const MySQLTableStats &stats, const vector<string> &columns,
+                                                   idx_t effective_row_count) const {
+	OperationCost cost;
+
+	cost.cpu_cost = params_.mysql_overhead;
+	idx_t row_width = EstimateRowWidth(stats, columns);
+	double total_bytes = static_cast<double>(stats.estimated_row_count) * static_cast<double>(row_width);
+	cost.io_cost = total_bytes * params_.io_cost_per_byte * params_.seq_scan_cost_factor;
+
+	cost.cpu_cost += static_cast<double>(effective_row_count) * params_.cpu_cost_per_row;
+
+	auto transfer = TransferCost(effective_row_count, row_width, stats.IsInnoDBCompressed());
+	cost += transfer;
+
+	cost.cpu_cost += static_cast<double>(effective_row_count) * params_.local_aggregate_cost_per_row;
+
+	return cost;
+}
+
+bool DefaultCostModel::ShouldPushAggregate(const MySQLTableStats &stats, const vector<string> &columns,
+                                           idx_t effective_row_count, idx_t num_groups, idx_t num_aggregates) const {
+	auto pushed = AggregatePushedCost(stats, columns, effective_row_count, num_groups, num_aggregates);
+	auto local = AggregateLocalCost(stats, columns, effective_row_count);
+	return pushed.Total() < local.Total();
+}
+
 ExecutionPlan DefaultCostModel::ComparePlans(const MySQLTableStats &stats, const FilterAnalysisResult &filter_result,
                                              const vector<string> &columns) const {
 	ExecutionPlan plan;
@@ -207,10 +314,14 @@ ExecutionPlan DefaultCostModel::ComparePlans(const MySQLTableStats &stats, const
 	auto hybrid_cost =
 	    CalculateHybridCost(stats, filter_result, columns, hybrid_pushed, hybrid_local, hybrid_pushed_selectivity);
 
+	auto local_all_cost = CalculateLocalAllCost(stats, filter_result, columns);
+
+	plan.comparison_costs.push_all_cost = push_all_cost;
+	plan.comparison_costs.local_all_cost = local_all_cost;
+	plan.comparison_costs.hybrid_cost = hybrid_cost;
+
 	ExecutionStrategy best_strategy = ExecutionStrategy::PUSH_ALL_FILTERS;
 	OperationCost best_cost = push_all_cost;
-
-	auto local_all_cost = CalculateLocalAllCost(stats, filter_result, columns);
 	if (local_all_cost < best_cost) {
 		best_strategy = ExecutionStrategy::EXECUTE_ALL_LOCALLY;
 		best_cost = local_all_cost;

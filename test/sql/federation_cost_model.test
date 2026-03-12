@@ -12,9 +12,7 @@ SET GLOBAL mysql_experimental_filter_pushdown=true;
 statement ok
 ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
 
-# ==============================================================================
 # Test Setup: Create tables of varying sizes for cost estimation
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.cost_small;
@@ -51,9 +49,7 @@ SELECT
     REPEAT('x', 50)
 FROM range(100000);
 
-# ==============================================================================
 # Small Table Tests (low network cost)
-# ==============================================================================
 
 # Test 1: Full scan on small table (low cost, filter may execute locally)
 query I
@@ -67,9 +63,7 @@ SELECT id, val FROM s1.cost_small WHERE id = 50
 ----
 50	0
 
-# ==============================================================================
 # Large Table Tests (high network cost benefit from pushdown)
-# ==============================================================================
 
 # Test 3: Highly selective filter on indexed column (should push)
 query I
@@ -95,12 +89,9 @@ SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val < 500
 ----
 50000
 
-# ==============================================================================
 # Cost Comparison Scenarios
-# ==============================================================================
 
 # Test 7: Index lookup vs sequential scan comparison
-# Highly selective (should use index)
 query I
 SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val = 999
 ----
@@ -112,9 +103,7 @@ SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val >= 0
 ----
 100000
 
-# ==============================================================================
 # Network Cost Reduction Tests
-# ==============================================================================
 
 # Test 9: Filter reduces data transfer significantly
 query I
@@ -128,9 +117,7 @@ SELECT COUNT(*) FROM s1.cost_large WHERE indexed_val = 500 AND id > 50000
 ----
 50
 
-# ==============================================================================
 # Column Projection with Pushdown
-# ==============================================================================
 
 # Test 11: Select only needed columns with filter
 query I
@@ -150,9 +137,7 @@ SELECT id, indexed_val FROM s1.cost_large WHERE id IN (1000, 2000, 3000) ORDER B
 2000	0
 3000	0
 
-# ==============================================================================
 # Cleanup
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.cost_small;

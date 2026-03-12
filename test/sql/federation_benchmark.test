@@ -1,0 +1,331 @@
+# name: test/sql/federation_benchmark.test
+# description: Benchmark tests to validate federation optimizer performance improvements
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# SETUP: Create benchmark table with 10000 rows
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_data
+
+statement ok
+CREATE TABLE s1.benchmark_data (
+    id INTEGER PRIMARY KEY,
+    category INTEGER,
+    status VARCHAR(20),
+    amount DECIMAL(10,2),
+    description VARCHAR(200),
+    created_date DATE
+)
+
+statement ok
+CREATE INDEX idx_bench_category ON s1.benchmark_data(category)
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_bench_status ON benchmark_data(status(20))')
+
+statement ok
+INSERT INTO s1.benchmark_data
+SELECT
+    i as id,
+    i % 100 as category,
+    CASE WHEN i % 3 = 0 THEN 'active' WHEN i % 3 = 1 THEN 'pending' ELSE 'closed' END as status,
+    (i % 1000) + (i % 100) * 0.01 as amount,
+    CONCAT('Item description for id ', CAST(i AS VARCHAR)) as description,
+    DATE '2024-01-01' + INTERVAL (i % 365) DAY as created_date
+FROM generate_series(1, 10000) AS t(i)
+
+# BENCHMARK 1: Point Lookup (0.01% selectivity)
+
+query IITRI
+SELECT id, category, status, amount, description FROM s1.benchmark_data
+WHERE id = 5000
+----
+5000	0	closed	0.00	Item description for id 5000
+
+# BENCHMARK 2: Indexed Range Scan (1% selectivity)
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category = 50
+----
+100
+
+# Verify first and last ids for category 50
+query I
+SELECT MIN(id) FROM s1.benchmark_data WHERE category = 50
+----
+50
+
+query I
+SELECT MAX(id) FROM s1.benchmark_data WHERE category = 50
+----
+9950
+
+# BENCHMARK 3: String Equality on Indexed Column (33% selectivity)
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE status = 'active'
+----
+3333
+
+# BENCHMARK 4: Hybrid Execution - Indexed + Function Filter
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category = 25
+  AND LENGTH(description) < 30
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category = 25
+  AND LENGTH(description) < 27
+----
+1
+
+# BENCHMARK 5: Hybrid with Multiple Local Filters
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category = 10
+  AND amount > 500
+  AND MOD(id, 7) = 0
+----
+7
+
+# BENCHMARK 6: IN Filter (5% selectivity)
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category IN (10, 20, 30, 40, 50)
+----
+500
+
+# BENCHMARK 7: Range Scan (10% selectivity)
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE id BETWEEN 1 AND 1000
+----
+1000
+
+# BENCHMARK 8: Compound Filter - All Pushable
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category < 10
+  AND status = 'active'
+----
+333
+
+# BENCHMARK 9: Low Selectivity - Verify LOCAL_ALL is Chosen
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE category > 0
+  AND MOD(id, 1000) = 1
+----
+10
+
+# BENCHMARK 10: Date Range with Function Filter
+
+query I
+SELECT COUNT(*) FROM s1.benchmark_data
+WHERE created_date BETWEEN '2024-01-01' AND '2024-01-31'
+  AND LENGTH(description) > 25
+----
+858
+
+# BENCHMARK 11: Aggregation with Selective Filter
+
+query R
+SELECT AVG(amount) FROM s1.benchmark_data
+WHERE category = 75
+----
+525.75
+
+query R
+SELECT SUM(amount) FROM s1.benchmark_data
+WHERE category = 75
+----
+52575.00
+
+# BENCHMARK 12: JOIN with Pushed Filter
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_lookup
+
+statement ok
+CREATE TABLE s1.benchmark_lookup (
+    category INTEGER PRIMARY KEY,
+    category_name VARCHAR(50)
+)
+
+statement ok
+INSERT INTO s1.benchmark_lookup
+SELECT i, CONCAT('Category ', CAST(i AS VARCHAR))
+FROM generate_series(0, 99) AS t(i)
+
+query I
+SELECT COUNT(*)
+FROM s1.benchmark_data d
+JOIN s1.benchmark_lookup l ON d.category = l.category
+WHERE d.category = 50
+  AND LENGTH(d.description) < 30
+----
+100
+
+# BENCHMARK 13: Partition Pruning - RANGE Partitioned Table
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_partitioned
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE benchmark_partitioned (
+    id INT NOT NULL,
+    order_year INT NOT NULL,
+    category INT,
+    amount DECIMAL(10,2),
+    description VARCHAR(200),
+    PRIMARY KEY (id, order_year)
+) PARTITION BY RANGE (order_year) (
+    PARTITION p2021 VALUES LESS THAN (2022),
+    PARTITION p2022 VALUES LESS THAN (2023),
+    PARTITION p2023 VALUES LESS THAN (2024),
+    PARTITION p2024 VALUES LESS THAN (2025)
+)')
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.benchmark_partitioned
+SELECT
+    i as id,
+    2021 + (i % 4) as order_year,
+    i % 100 as category,
+    (i % 1000) + (i % 100) * 0.01 as amount,
+    CONCAT('Order description for id ', CAST(i AS VARCHAR)) as description
+FROM generate_series(1, 10000) AS t(i)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE benchmark_partitioned')
+
+# Partition key equality - scans only p2024 (2500 rows instead of 10000)
+query I
+SELECT COUNT(*) FROM s1.benchmark_partitioned
+WHERE order_year = 2024
+----
+2500
+
+# Partition key range - scans p2023 and p2024 (5000 rows instead of 10000)
+query I
+SELECT COUNT(*) FROM s1.benchmark_partitioned
+WHERE order_year >= 2023
+----
+5000
+
+# Partition key + additional filter
+query I
+SELECT COUNT(*) FROM s1.benchmark_partitioned
+WHERE order_year = 2024 AND category = 3
+----
+100
+
+# BENCHMARK 14: Partition Pruning with Hybrid Execution
+
+# Partition filter pushed, LENGTH filter executed locally
+query I
+SELECT COUNT(*) FROM s1.benchmark_partitioned
+WHERE order_year = 2023
+  AND LENGTH(description) > 27
+----
+2475
+
+# BENCHMARK 15: LIST Partitioned Table
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_list_partitioned
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE benchmark_list_partitioned (
+    id INT NOT NULL,
+    region VARCHAR(10) NOT NULL,
+    amount DECIMAL(10,2),
+    PRIMARY KEY (id, region)
+) PARTITION BY LIST COLUMNS(region) (
+    PARTITION p_na VALUES IN (''US'', ''CA''),
+    PARTITION p_eu VALUES IN (''UK'', ''DE'', ''FR''),
+    PARTITION p_ap VALUES IN (''JP'', ''AU'')
+)')
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.benchmark_list_partitioned
+SELECT
+    i as id,
+    CASE i % 7
+        WHEN 0 THEN 'US'
+        WHEN 1 THEN 'CA'
+        WHEN 2 THEN 'UK'
+        WHEN 3 THEN 'DE'
+        WHEN 4 THEN 'FR'
+        WHEN 5 THEN 'JP'
+        ELSE 'AU'
+    END as region,
+    (i % 1000) * 1.5 as amount
+FROM generate_series(1, 7000) AS t(i)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE benchmark_list_partitioned')
+
+# Single region - scans only p_na (US rows)
+query I
+SELECT COUNT(*) FROM s1.benchmark_list_partitioned
+WHERE region = 'US'
+----
+1000
+
+# IN list spanning single partition - scans only p_eu
+query I
+SELECT COUNT(*) FROM s1.benchmark_list_partitioned
+WHERE region IN ('UK', 'DE', 'FR')
+----
+3000
+
+# Cross-partition IN list - scans p_na and p_ap
+query I
+SELECT COUNT(*) FROM s1.benchmark_list_partitioned
+WHERE region IN ('US', 'JP')
+----
+2000
+
+# CLEANUP
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_list_partitioned
+
+statement ok
+DROP TABLE IF EXISTS s1.benchmark_partitioned
+
+statement ok
+DROP TABLE s1.benchmark_lookup
+
+statement ok
+DROP TABLE s1.benchmark_data

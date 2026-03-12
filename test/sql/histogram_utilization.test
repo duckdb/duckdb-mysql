@@ -2,13 +2,6 @@
 # description: Test MySQL 8.0+ histogram statistics utilization for selectivity estimation
 # group: [sql]
 
-#
-# This test validates that when MySQL 8.0+ histograms are available,
-# they are fetched and used for more accurate selectivity estimation.
-#
-# NOTE: This test requires MySQL 8.0+ (MariaDB does not support COLUMN_STATISTICS).
-# The test will still pass on older versions, but histogram features won't be exercised.
-
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
@@ -21,10 +14,7 @@ SET GLOBAL mysql_experimental_filter_pushdown=true
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
-# ==============================================================================
 # Test Setup: Create table with skewed data distribution
-# This is ideal for histogram-based selectivity estimation
-# ==============================================================================
 
 statement ok
 DROP TABLE IF EXISTS s1.histogram_test
@@ -36,9 +26,6 @@ CREATE TABLE s1.histogram_test(
     uniform_val INTEGER
 )
 
-# Insert 10000 rows with skewed distribution:
-# - skewed_val: 90% of values are 0, 10% are 1-99
-# - uniform_val: uniformly distributed 0-999
 statement ok
 INSERT INTO s1.histogram_test
 SELECT
@@ -50,39 +37,27 @@ FROM range(10000)
 statement ok
 CALL mysql_execute('s1', 'ANALYZE TABLE histogram_test')
 
-# ==============================================================================
 # Test 1: Try to create histogram (MySQL 8.0+ only)
-# This may fail on older MySQL versions - that's expected
-# ==============================================================================
 
 statement ok
 CALL mysql_execute('s1', 'ANALYZE TABLE histogram_test UPDATE HISTOGRAM ON skewed_val, uniform_val WITH 100 BUCKETS')
 
-# Clear cache to force re-fetch of statistics including histograms
 statement ok
 CALL mysql_clear_cache()
 
-# ==============================================================================
 # Test 2: Query on skewed column - histogram should improve estimation
-# Without histogram: default selectivity ~10%
-# With histogram: should recognize that skewed_val=0 matches ~90% of rows
-# ==============================================================================
 
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val = 0
 ----
 9010
 
-# Rare value query - histogram should recognize low frequency
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val = 50
 ----
 10
 
-# ==============================================================================
 # Test 3: Range queries on histogram column
-# Histogram should provide cumulative frequency information
-# ==============================================================================
 
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val < 10
@@ -94,10 +69,7 @@ SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val >= 90
 ----
 100
 
-# ==============================================================================
 # Test 4: Uniform distribution column
-# Histogram should show even distribution
-# ==============================================================================
 
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE uniform_val < 100
@@ -109,9 +81,7 @@ SELECT COUNT(*) FROM s1.histogram_test WHERE uniform_val BETWEEN 400 AND 599
 ----
 2000
 
-# ==============================================================================
 # Test 5: Combined filters - histogram assists selectivity calculation
-# ==============================================================================
 
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val = 0 AND uniform_val < 500
@@ -123,9 +93,7 @@ SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val > 0 AND uniform_val < 10
 ----
 90
 
-# ==============================================================================
 # Test 6: IN filter with histogram data
-# ==============================================================================
 
 query I
 SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val IN (0, 1, 2)
@@ -137,10 +105,7 @@ SELECT COUNT(*) FROM s1.histogram_test WHERE skewed_val IN (50, 51, 52, 53, 54)
 ----
 50
 
-# ==============================================================================
 # Test 7: Verify correct results regardless of histogram usage
-# The cost model may choose different strategies, but results must be correct
-# ==============================================================================
 
 query I
 SELECT SUM(id) FROM s1.histogram_test WHERE skewed_val = 0
@@ -157,9 +122,7 @@ SELECT COUNT(DISTINCT uniform_val) FROM s1.histogram_test WHERE skewed_val < 5
 ----
 905
 
-# ==============================================================================
 # Cleanup
-# ==============================================================================
 
 statement ok
 CALL mysql_execute('s1', 'ANALYZE TABLE histogram_test DROP HISTOGRAM ON skewed_val, uniform_val')

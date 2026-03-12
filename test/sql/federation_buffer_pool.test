@@ -1,0 +1,69 @@
+# name: test/sql/federation_buffer_pool.test
+# description: Test buffer pool awareness in cost model
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.bp_test
+
+statement ok
+CREATE TABLE s1.bp_test(
+    id INTEGER PRIMARY KEY,
+    val INTEGER,
+    data VARCHAR(200)
+)
+
+statement ok
+CREATE INDEX idx_bp_val ON s1.bp_test(val)
+
+statement ok
+INSERT INTO s1.bp_test
+SELECT range, range % 100, REPEAT('x', 100) FROM range(10000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE bp_test')
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT id FROM s1.bp_test WHERE val = 50 LIMIT 1
+----
+50
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name = 'bp_test'
+----
+1
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan()
+WHERE table_name = 'bp_test'
+  AND total_cost > 0
+----
+1
+
+query I
+SELECT COUNT(*) FROM mysql_debug_execution_plan()
+WHERE table_name = 'bp_test'
+  AND total_cost > 0
+  AND total_cost < 1000000
+----
+1
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.bp_test
+
+statement ok
+DETACH s1

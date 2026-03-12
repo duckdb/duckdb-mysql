@@ -1,0 +1,202 @@
+# name: test/sql/predicate_reordering.test
+# description: Test predicate reordering to match composite index column order
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create table with composite index
+
+statement ok
+DROP TABLE IF EXISTS s1.predicate_order_test
+
+statement ok
+CREATE TABLE s1.predicate_order_test(
+    id INTEGER PRIMARY KEY,
+    col_a INTEGER NOT NULL,
+    col_b INTEGER NOT NULL,
+    col_c INTEGER NOT NULL,
+    col_d INTEGER NOT NULL,
+    data VARCHAR(100)
+)
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_abc ON predicate_order_test(col_a, col_b, col_c)')
+
+statement ok
+INSERT INTO s1.predicate_order_test
+SELECT
+    range as id,
+    range % 10 as col_a,
+    range % 100 as col_b,
+    range % 1000 as col_c,
+    range % 50 as col_d,
+    CONCAT('row_', range) as data
+FROM range(10000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE predicate_order_test')
+
+statement ok
+CALL mysql_clear_cache()
+
+# Test 1: Predicates in index order (a, b, c) - should use full index
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_a = 5 AND col_b = 55 AND col_c = 555
+----
+10
+
+query I
+SELECT MIN(id) FROM s1.predicate_order_test
+WHERE col_a = 5 AND col_b = 55 AND col_c = 555
+----
+555
+
+# Test 2: Predicates in reverse order (c, b, a) - reordering should help
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_c = 555 AND col_b = 55 AND col_a = 5
+----
+10
+
+query I
+SELECT MAX(id) FROM s1.predicate_order_test
+WHERE col_c = 555 AND col_b = 55 AND col_a = 5
+----
+9555
+
+# Test 3: Partial index match (a, b) with predicates out of order
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_b = 25 AND col_a = 5
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_a = 5 AND col_b = 25
+----
+100
+
+# Test 4: Mix of indexed and non-indexed columns
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_d = 25 AND col_a = 5
+----
+200
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_b = 25 AND col_d = 25 AND col_a = 5
+----
+100
+
+# Test 5: Range predicates with reordering
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_c < 100 AND col_a = 5
+----
+100
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_b >= 50 AND col_a = 5
+----
+500
+
+# Test 6: Multiple tables with different index structures
+
+statement ok
+DROP TABLE IF EXISTS s1.predicate_order_test2
+
+statement ok
+CREATE TABLE s1.predicate_order_test2(
+    id INTEGER PRIMARY KEY,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    z INTEGER NOT NULL
+)
+
+statement ok
+CALL mysql_execute('s1', 'CREATE INDEX idx_yx ON predicate_order_test2(y, x)')
+
+statement ok
+INSERT INTO s1.predicate_order_test2
+SELECT range as id, range % 100 as x, range % 10 as y, range % 50 as z
+FROM range(1000)
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE predicate_order_test2')
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test2
+WHERE x = 55 AND y = 5
+----
+10
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test2
+WHERE y = 5 AND x = 55
+----
+10
+
+# Test 7: Verify correct results with complex predicates
+
+query I
+SELECT SUM(id) FROM s1.predicate_order_test
+WHERE col_c = 123 AND col_b = 23 AND col_a = 3
+----
+46230
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_a IN (1, 2, 3) AND col_b < 50
+----
+1500
+
+# Test 8: Three-column predicate with various orderings
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_a = 7 AND col_b = 77 AND col_c = 777
+----
+10
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_b = 77 AND col_c = 777 AND col_a = 7
+----
+10
+
+query I
+SELECT COUNT(*) FROM s1.predicate_order_test
+WHERE col_c = 777 AND col_a = 7 AND col_b = 77
+----
+10
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.predicate_order_test
+
+statement ok
+DROP TABLE IF EXISTS s1.predicate_order_test2
+
+statement ok
+DETACH s1

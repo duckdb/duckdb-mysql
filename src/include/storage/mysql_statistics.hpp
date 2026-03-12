@@ -13,6 +13,8 @@
 #include "duckdb/planner/table_filter.hpp"
 
 #include <chrono>
+#include <deque>
+#include <functional>
 #include <mutex>
 
 namespace duckdb {
@@ -68,6 +70,7 @@ struct MySQLIndexInfo {
 	idx_t cardinality = DConstants::INVALID_INDEX;
 	string index_type;
 	idx_t index_size_pages = 0;
+	idx_t leaf_pages = 0;
 	vector<idx_t> prefix_distinct_counts;
 
 	bool CoversColumns(const vector<string> &required_columns) const;
@@ -132,14 +135,78 @@ struct MySQLTableStats {
 struct CachedTableStats {
 	MySQLTableStats stats;
 	std::chrono::steady_clock::time_point cached_at;
+	idx_t eviction_seq = 0;
+};
+
+struct CachedCostConstants {
+	double io_block_read_cost = 1.0;
+	double memory_block_read_cost = 0.25;
+	double row_evaluate_cost = 0.1;
+	bool loaded = false;
+	std::chrono::steady_clock::time_point cached_at;
+};
+
+struct CachedBufferPoolRate {
+	double hit_rate = -1.0;
+	bool loaded = false;
+	std::chrono::steady_clock::time_point cached_at;
+};
+
+struct CachedVersionInfo {
+	string mysql_version;
+	bool has_histogram_support = false;
+	bool detected = false;
+};
+
+struct StatsEvictionEntry {
+	string key;
+	idx_t seq;
+};
+
+class MySQLStatsCache {
+public:
+	static constexpr int64_t TABLE_STATS_TTL_SECONDS = 300;
+	static constexpr int64_t COST_CONSTANTS_TTL_SECONDS = 1800;
+	static constexpr int64_t BUFFER_POOL_TTL_SECONDS = 300;
+	static constexpr idx_t MAX_TABLE_STATS_ENTRIES = 1000;
+
+	using InvalidationCallback = std::function<void(const string &schema, const string &table)>;
+
+	void SetInvalidationCallback(InvalidationCallback callback);
+
+	bool GetTableStats(const string &schema, const string &table, MySQLTableStats &out);
+	void StoreTableStats(const string &schema, const string &table, const MySQLTableStats &stats);
+
+	bool GetCostConstants(CachedCostConstants &out);
+	void StoreCostConstants(const CachedCostConstants &constants);
+
+	bool GetBufferPoolHitRate(double &out);
+	void StoreBufferPoolHitRate(double hit_rate);
+
+	bool GetVersionInfo(string &version, bool &has_histogram_support);
+	void StoreVersionInfo(const string &version, bool has_histogram_support);
+
+	void Clear();
+	void Invalidate(const string &schema, const string &table);
+
+private:
+	InvalidationCallback invalidation_callback_;
+	mutable std::mutex mutex_;
+	case_insensitive_map_t<CachedTableStats> table_stats_;
+	std::deque<StatsEvictionEntry> eviction_queue_;
+	idx_t next_eviction_seq_ = 0;
+	CachedCostConstants cost_constants_;
+	CachedBufferPoolRate buffer_pool_;
+	CachedVersionInfo version_info_;
+
+	static string MakeCacheKey(const string &schema, const string &table);
+	void EvictOldest();
+	void CompactEvictionQueue();
 };
 
 class MySQLStatisticsCollector {
 public:
-	explicit MySQLStatisticsCollector(MySQLConnection &connection);
-
-	static constexpr int64_t STATS_CACHE_TTL_SECONDS = 300;
-	static constexpr idx_t MAX_STATS_CACHE_SIZE = 1000;
+	MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache);
 
 	MySQLTableStats GetTableStats(const string &schema, const string &table);
 	bool HasUsableIndex(const string &schema, const string &table, const vector<string> &columns);
@@ -169,13 +236,9 @@ public:
 	double EstimateSelectivity(const string &schema, const string &table, const string &column,
 	                           ExpressionType comparison, const Value &value);
 
-	void ClearCache();
-	void ClearCache(const string &schema, const string &table);
-
 private:
-	mutable std::mutex mutex_;
 	reference<MySQLConnection> connection_;
-	case_insensitive_map_t<CachedTableStats> stats_cache_;
+	reference<MySQLStatsCache> shared_cache_;
 	bool has_histogram_support_ = false;
 	bool version_detected_ = false;
 	bool stats_expiry_set_ = false;
@@ -190,7 +253,6 @@ private:
 	void FetchPartitionInfo(const string &schema, const string &table, MySQLTableStats &stats);
 	void FetchHistograms(const string &schema, const string &table, MySQLTableStats &stats);
 
-	string GetCacheKey(const string &schema, const string &table) const;
 	double GetDefaultSelectivity(ExpressionType comparison) const;
 	double EstimateSelectivityFromCardinality(idx_t cardinality, idx_t total_rows) const;
 	static double ComputeStalenessScore(const MySQLTableStats &stats);

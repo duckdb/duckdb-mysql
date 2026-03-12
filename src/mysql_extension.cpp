@@ -131,6 +131,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 	MySQLQueryFunction query_function;
 	loader.RegisterFunction(query_function);
 
+	MySQLExplainFederatedFunction explain_federated_function;
+	loader.RegisterFunction(explain_federated_function);
+
+	MySQLDebugExecutionPlanFunction debug_plan_function;
+	loader.RegisterFunction(debug_plan_function);
+
 	SecretType secret_type;
 	secret_type.name = "mysql";
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
@@ -196,6 +202,34 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("mysql_push_threshold_no_index",
 	                          "Selectivity threshold for pushing filters without index support (default: 0.3)",
 	                          LogicalType::DOUBLE, Value::DOUBLE(0.3), ValidateUnitInterval);
+	config.AddExtensionOption("mysql_hint_injection_enabled",
+	                          "Inject MySQL optimizer hints when statistics appear stale (default: false)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
+	config.AddExtensionOption("mysql_hint_staleness_threshold",
+	                          "Staleness score threshold for injecting optimizer hints (default: 0.5)",
+	                          LogicalType::DOUBLE, Value::DOUBLE(0.5), ValidateUnitInterval);
+	config.AddExtensionOption("mysql_adaptive_replan_enabled",
+	                          "Enable adaptive execution strategy based on actual vs estimated rows (default: true)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_explain_validation_enabled",
+	                          "Validate MySQL execution plans with EXPLAIN (default: false)", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(false));
+	config.AddExtensionOption("mysql_query_timeout_enabled",
+	                          "Add MAX_EXECUTION_TIME hint to MySQL queries for safety (default: true)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_query_timeout_min_ms", "Minimum query timeout in milliseconds (default: 5000)",
+	                          LogicalType::BIGINT, Value::BIGINT(5000));
+	config.AddExtensionOption("mysql_query_timeout_max_ms", "Maximum query timeout in milliseconds (default: 300000)",
+	                          LogicalType::BIGINT, Value::BIGINT(300000));
+	config.AddExtensionOption("mysql_sql_buffer_result",
+	                          "Add SQL_BUFFER_RESULT for large result sets to release row locks faster (default: true)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_aggregate_pushdown_enabled",
+	                          "Push aggregate functions (COUNT, SUM, etc.) to MySQL (default: true)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_order_pushdown_enabled",
+	                          "Push ORDER BY and LIMIT clauses to MySQL (default: true)", LogicalType::BOOLEAN,
+	                          Value::BOOLEAN(true));
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	OptimizerExtension::Register(config, std::move(mysql_optimizer));

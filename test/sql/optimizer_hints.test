@@ -1,0 +1,127 @@
+# name: test/sql/optimizer_hints.test
+# description: Test MySQL optimizer hint injection for stale statistics
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH loader
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create table with indexes
+
+statement ok
+DROP TABLE IF EXISTS s1.hint_test;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE hint_test (
+    id INT NOT NULL PRIMARY KEY,
+    category VARCHAR(50),
+    status VARCHAR(20),
+    amount DECIMAL(10,2),
+    created_at DATETIME,
+    INDEX idx_category (category),
+    INDEX idx_status (status),
+    INDEX idx_created (created_at)
+)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.hint_test
+SELECT id,
+       CASE WHEN id % 5 = 0 THEN 'A' WHEN id % 5 = 1 THEN 'B' WHEN id % 5 = 2 THEN 'C' WHEN id % 5 = 3 THEN 'D' ELSE 'E' END,
+       CASE WHEN id % 3 = 0 THEN 'active' WHEN id % 3 = 1 THEN 'pending' ELSE 'closed' END,
+       id * 2.5,
+       '2024-01-01'::TIMESTAMP + INTERVAL (id) HOUR
+FROM range(1, 10001) t(id);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE hint_test');
+
+# Test 1: Hint injection disabled by default
+
+statement ok
+SET mysql_hint_injection_enabled = false;
+
+query II
+SELECT COUNT(*), SUM(amount) FROM s1.hint_test WHERE category = 'A';
+----
+2000	25012500.00
+
+# Test 2: Enable hint injection with low threshold (testing the mechanism)
+
+statement ok
+SET mysql_hint_injection_enabled = true;
+
+statement ok
+SET mysql_hint_staleness_threshold = 0.1;
+
+query II
+SELECT COUNT(*), SUM(amount) FROM s1.hint_test WHERE category = 'B';
+----
+2000	24992500.00
+
+# Test 3: Multiple filter columns
+
+query II
+SELECT COUNT(*), SUM(amount) FROM s1.hint_test WHERE category = 'A' AND status = 'active';
+----
+666	8329162.50
+
+# Test 4: Higher staleness threshold (normal production setting)
+
+statement ok
+SET mysql_hint_staleness_threshold = 0.5;
+
+query II
+SELECT COUNT(*), SUM(amount) FROM s1.hint_test WHERE status = 'pending';
+----
+3334	41679167.50
+
+# Test 5: Index with special characters in name
+
+statement ok
+DROP TABLE IF EXISTS s1.special_idx_test;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE special_idx_test (
+    id INT NOT NULL PRIMARY KEY,
+    data VARCHAR(100),
+    INDEX `idx-with-dashes` (data)
+)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.special_idx_test VALUES (1, 'test1'), (2, 'test2'), (3, 'test3');
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE special_idx_test');
+
+query IT
+SELECT * FROM s1.special_idx_test WHERE data = 'test2';
+----
+2	test2
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.hint_test;
+
+statement ok
+DROP TABLE IF EXISTS s1.special_idx_test;

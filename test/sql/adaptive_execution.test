@@ -1,0 +1,122 @@
+# name: test/sql/adaptive_execution.test
+# description: Test adaptive execution strategy with plan cache feedback
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH loader
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+# Test Setup: Create table for adaptive testing
+
+statement ok
+DROP TABLE IF EXISTS s1.adaptive_test;
+
+statement ok
+CALL mysql_execute('s1', '
+CREATE TABLE adaptive_test (
+    id INT NOT NULL PRIMARY KEY,
+    category INT,
+    value DECIMAL(10,2),
+    INDEX idx_category (category)
+)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.adaptive_test
+SELECT id, id % 10, id * 1.5 FROM range(1, 10001) t(id);
+
+statement ok
+CALL mysql_execute('s1', 'ANALYZE TABLE adaptive_test');
+
+# Test 1: Adaptive replan enabled (default)
+
+statement ok
+SET mysql_adaptive_replan_enabled = true;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 5;
+----
+1000	7500000.00
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 5;
+----
+1000	7500000.00
+
+# Test 2: Different selectivity patterns
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category IN (1, 2, 3);
+----
+3000	22486500.00
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category BETWEEN 0 AND 4;
+----
+5000	37492500.00
+
+# Test 3: Adaptive replan disabled
+
+statement ok
+SET mysql_adaptive_replan_enabled = false;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 7;
+----
+1000	7503000.00
+
+# Test 4: Re-enable and verify queries still work
+
+statement ok
+SET mysql_adaptive_replan_enabled = true;
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 8;
+----
+1000	7504500.00
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 9;
+----
+1000	7506000.00
+
+# Test 5: Repeated queries with adaptive enabled
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 0;
+----
+1000	7507500.00
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 0;
+----
+1000	7507500.00
+
+# Test 6: Verify plan cache is cleared on mysql_clear_cache
+
+statement ok
+CALL mysql_clear_cache();
+
+query II
+SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 5;
+----
+1000	7500000.00
+
+# Cleanup
+
+statement ok
+DROP TABLE IF EXISTS s1.adaptive_test;

@@ -1,0 +1,114 @@
+# name: test/sql/federation_hybrid_execution.test
+# description: Test true hybrid filter execution - filter splitting between MySQL and DuckDB
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET GLOBAL mysql_experimental_filter_pushdown=true;
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.hybrid_test
+
+statement ok
+CREATE TABLE s1.hybrid_test (
+    id INTEGER PRIMARY KEY,
+    indexed_val INTEGER,
+    data VARCHAR(100)
+)
+
+statement ok
+CREATE INDEX idx_hybrid_val ON s1.hybrid_test(indexed_val)
+
+statement ok
+INSERT INTO s1.hybrid_test
+SELECT i, i % 100, CONCAT('value_', CAST(i AS VARCHAR))
+FROM generate_series(1, 1000) AS t(i)
+
+# Test 1: Basic hybrid split - indexed filter pushed, function filter local
+query III
+SELECT id, indexed_val, data FROM s1.hybrid_test
+WHERE indexed_val = 50
+  AND LENGTH(data) < 9
+ORDER BY id
+----
+50	50	value_50
+
+# Test 2: Verify more complex local filter
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE indexed_val = 5
+  AND MOD(id, 200) = 5
+----
+5
+
+# Test 3: Verify pushed filter actually reduces transfer
+query III
+SELECT id, indexed_val, data FROM s1.hybrid_test
+WHERE id = 500
+  AND LENGTH(data) > 5
+----
+500	0	value_500
+
+# Test 4: All filters pushable - should use PUSH_ALL, not HYBRID
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE id < 100 AND indexed_val < 50
+----
+49
+
+# Test 5: Test with NULL values
+statement ok
+UPDATE s1.hybrid_test SET indexed_val = NULL WHERE id = 50
+
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE indexed_val IS NULL
+  AND LENGTH(data) < 10
+----
+1
+
+statement ok
+UPDATE s1.hybrid_test SET indexed_val = 50 WHERE id = 50
+
+# Test 6: Multiple local filters
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE indexed_val = 10
+  AND LENGTH(data) > 7
+  AND MOD(id, 2) = 0
+----
+10
+
+# Test 7: IN filter pushed, function filter local
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE indexed_val IN (1, 2, 3)
+  AND LENGTH(data) BETWEEN 7 AND 8
+----
+3
+
+# Test 8: Empty result from pushed filter
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE indexed_val = 999
+  AND LENGTH(data) < 5
+----
+0
+
+# Test 9: All rows match pushed filter
+query I
+SELECT COUNT(*) FROM s1.hybrid_test
+WHERE id > 0
+  AND MOD(id, 100) = 1
+----
+10
+
+# Cleanup
+statement ok
+DROP TABLE s1.hybrid_test
