@@ -4,6 +4,8 @@
 
 require mysql_scanner
 
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
 # This test verifies that the thread-local connection cache works correctly
 # for same-thread connection reuse scenarios
 

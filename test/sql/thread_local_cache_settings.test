@@ -4,6 +4,8 @@
 
 require mysql_scanner
 
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
 # Test 1: First attach - thread local cache is enabled by default
 statement ok
 ATTACH 'host=localhost user=root port=3306 database=mysql' AS s1 (TYPE mysql);
