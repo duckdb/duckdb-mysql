@@ -109,7 +109,7 @@ protected:
 
 struct CostModelParameters {
 	double cpu_cost_per_row = 0.1;
-	double io_cost_per_byte = 0.000001;
+	double io_cost_per_byte = 1.0 / INNODB_PAGE_SIZE;
 	double mysql_overhead = 10.0;
 	double local_filter_cost = 0.001;
 	double local_aggregate_cost_per_row = 0.003;

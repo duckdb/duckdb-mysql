@@ -12,6 +12,8 @@
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
+#include "storage/mysql_transaction.hpp"
+#include "storage/mysql_predicate_analyzer.hpp"
 
 namespace duckdb {
 
@@ -454,9 +456,25 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					cost_model.SetNetworkCalibration(catalog.GetConnectionPool().GetNetworkCalibration());
 
 					double filter_selectivity = 1.0;
-					for (auto &entry : get->table_filters.filters) {
-						(void)entry;
-						filter_selectivity *= 0.3;
+					if (!get->table_filters.filters.empty()) {
+						try {
+							auto &transaction = MySQLTransaction::Get(context, bind_data->table.catalog);
+							auto &con = transaction.GetConnection();
+							MySQLStatisticsCollector stats_collector(con, catalog.GetStatsCache());
+							PredicateAnalyzer analyzer(stats_collector, bind_data->table.schema.name,
+							                           bind_data->table.name);
+							vector<column_t> col_ids;
+							for (auto &cid : get->GetColumnIds()) {
+								col_ids.push_back(cid.GetPrimaryIndex());
+							}
+							auto analysis = analyzer.AnalyzeFilters(col_ids, &get->table_filters, bind_data->names);
+							filter_selectivity = analysis.combined_selectivity;
+						} catch (...) {
+							for (auto &entry : get->table_filters.filters) {
+								(void)entry;
+								filter_selectivity *= 0.3;
+							}
+						}
 					}
 					idx_t effective_row_count =
 					    static_cast<idx_t>(static_cast<double>(table_stats.estimated_row_count) * filter_selectivity);

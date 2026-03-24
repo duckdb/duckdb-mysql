@@ -278,7 +278,28 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 	if (context.TryGetCurrentSetting("mysql_query_timeout_enabled", timeout_val)) {
 		timeout_enabled = BooleanValue::Get(timeout_val);
 	}
-	if (timeout_enabled && fed.execution_plan.estimated_cost.Total() > 0) {
+	string cached_version;
+	bool cached_histogram;
+	bool version_supports_timeout = true;
+	if (shared_cache.GetVersionInfo(cached_version, cached_histogram)) {
+		bool is_mariadb = StringUtil::Contains(StringUtil::Lower(cached_version), "mariadb");
+		if (is_mariadb) {
+			version_supports_timeout = false;
+		} else {
+			auto dot = cached_version.find('.');
+			if (dot != string::npos) {
+				int major = 0;
+				try {
+					major = std::stoi(cached_version.substr(0, dot));
+				} catch (...) {
+				}
+				if (major < 8) {
+					version_supports_timeout = false;
+				}
+			}
+		}
+	}
+	if (timeout_enabled && version_supports_timeout && fed.execution_plan.estimated_cost.Total() > 0) {
 		idx_t min_timeout = MIN_QUERY_TIMEOUT_MS;
 		idx_t max_timeout = MAX_QUERY_TIMEOUT_MS;
 		Value min_val, max_val;
