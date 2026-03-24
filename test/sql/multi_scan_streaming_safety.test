@@ -1,0 +1,111 @@
+# name: test/sql/multi_scan_streaming_safety.test
+# description: Regression test for SIGABRT/double-free when multiple MySQL scans share a connection
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+DROP TABLE IF EXISTS s1.ms_orders;
+
+statement ok
+DROP TABLE IF EXISTS s1.ms_customers;
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE ms_customers (id INT NOT NULL PRIMARY KEY, name VARCHAR(50))');
+
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE ms_orders (id INT NOT NULL PRIMARY KEY, customer_id INT, amount INT)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+INSERT INTO s1.ms_customers VALUES (1, 'alice'), (2, 'bob'), (3, 'carol');
+
+statement ok
+INSERT INTO s1.ms_orders VALUES (1, 1, 100), (2, 1, 200), (3, 2, 150), (4, 3, 300), (5, 2, 50);
+
+query III
+SELECT c.name, agg.total_amount, agg.order_count
+FROM s1.ms_customers c
+JOIN (
+    SELECT customer_id, SUM(amount) AS total_amount, COUNT(*) AS order_count
+    FROM s1.ms_orders
+    GROUP BY customer_id
+) agg ON c.id = agg.customer_id
+ORDER BY c.name;
+----
+alice	300	2
+bob	200	2
+carol	300	1
+
+query III
+SELECT c.name, agg.total_amount, agg.order_count
+FROM s1.ms_customers c
+JOIN (
+    SELECT customer_id, SUM(amount) AS total_amount, COUNT(*) AS order_count
+    FROM s1.ms_orders
+    GROUP BY customer_id
+    HAVING COUNT(*) > 1
+) agg ON c.id = agg.customer_id
+ORDER BY c.name;
+----
+alice	300	2
+bob	200	2
+
+query II
+SELECT c.name, o.amount
+FROM s1.ms_customers c
+JOIN s1.ms_orders o ON c.id = o.customer_id
+ORDER BY c.name, o.amount;
+----
+alice	100
+alice	200
+bob	50
+bob	150
+carol	300
+
+query II
+SELECT a.id, b.id
+FROM s1.ms_orders a
+JOIN s1.ms_orders b ON a.customer_id = b.customer_id
+WHERE a.id < b.id
+ORDER BY a.id, b.id;
+----
+1	2
+3	5
+
+query II
+SELECT c.name, (SELECT COUNT(*) FROM s1.ms_orders o WHERE o.customer_id = c.id) AS order_count
+FROM s1.ms_customers c
+ORDER BY c.name;
+----
+alice	2
+bob	2
+carol	1
+
+query II
+SELECT c.name, c.id
+FROM s1.ms_customers c
+JOIN (SELECT 1 AS id UNION ALL SELECT 2 AS id) local_t ON c.id = local_t.id
+ORDER BY c.name;
+----
+alice	1
+bob	2
+
+query II
+SELECT id, amount FROM s1.ms_orders ORDER BY id LIMIT 2;
+----
+1	100
+2	200
+
+statement ok
+DROP TABLE IF EXISTS s1.ms_orders;
+
+statement ok
+DROP TABLE IF EXISTS s1.ms_customers;
