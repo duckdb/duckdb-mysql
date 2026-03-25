@@ -473,7 +473,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		InjectQueryHints(context, select, fed, bind_data, con, mysql_catalog.GetStatsCache());
 	}
 
-	auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
+	auto query_result = con.Query(select, bind_data.streaming);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
 
 	if (bind_data.use_predicate_analyzer) {
@@ -637,7 +637,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		params = StructValue::GetChildren(struct_val);
 	}
 
-	MySQLResultStreaming streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+	MySQLResultStreaming streaming = MySQLResultStreaming::ALLOW_STREAMING;
 	auto streaming_it = input.named_parameters.find("stream_results");
 	if (streaming_it != input.named_parameters.end()) {
 		Value &bool_val = streaming_it->second;
