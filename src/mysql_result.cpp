@@ -82,9 +82,6 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 }
 
 MySQLResult::~MySQLResult() {
-	if (stmt) {
-		mysql_stmt_free_result(stmt.get());
-	}
 	bool stream_active =
 	    streaming == MySQLResultStreaming::ALLOW_STREAMING || streaming == MySQLResultStreaming::REQUIRE_STREAMING;
 	if (stream_active && !exhausted) {
