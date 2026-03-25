@@ -76,8 +76,8 @@ jobs:
             autoconf-archive \
             automake \
             ccache \
-            mysql
-          brew services start mysql
+            mariadb
+          brew services start mariadb
 
       - name: Cache Key
         id: cache_key
@@ -102,9 +102,9 @@ jobs:
         with:
           vcpkgGitCommitId: ce613c41372b23b1f51333815feb3edd87ef8a8b
 
-      - name: Setup MySQL
+      - name: Setup MariaDB
         run: |
-          mysql -u root -e "SET GLOBAL net_read_timeout=600; SET GLOBAL net_write_timeout=600; SET GLOBAL wait_timeout=28800; SET GLOBAL max_allowed_packet=67108864;"
+          mysql -u root -e "SELECT @@version"
           mysql -u root < test/test_data.sql
           mysql -u root -e "SELECT 42"
 
@@ -118,7 +118,7 @@ jobs:
         env:
           LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
           MYSQL_TEST_DATABASE_AVAILABLE: 1
-          ORACLE_MYSQL_SERVER: 1
+          MARIADB_SERVER: 1
         run: |
           make test
 
