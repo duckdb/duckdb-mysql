@@ -105,8 +105,16 @@ jobs:
 
       - name: Setup MariaDB
         run: |
+          brew services stop mariadb
+          echo "[mysqld]" | sudo tee -a /opt/homebrew/etc/my.cnf
+          echo "skip-ssl" | sudo tee -a /opt/homebrew/etc/my.cnf
+          brew services start mariadb
+          sleep 3
           sudo mariadb -e "SELECT @@version"
           sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
+          echo "[client]" >> ~/.my.cnf
+          echo "default-character-set = utf8mb4" >> ~/.my.cnf
+          mysql -u root -e "SET GLOBAL net_read_timeout=600; SET GLOBAL net_write_timeout=600; SET GLOBAL wait_timeout=28800; SET GLOBAL max_allowed_packet=67108864;" || true
           mysql -u root < test/test_data.sql
           mysql -u root -e "SELECT 42"
 
