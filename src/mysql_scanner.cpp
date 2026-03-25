@@ -369,13 +369,13 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
 		InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
 		try {
-			auto query_result = con.Query(select, bind_data.streaming);
+			auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
 			return make_uniq<MySQLGlobalState>(std::move(query_result));
 		} catch (std::bad_alloc &) {
 			throw;
 		} catch (std::exception &) {
 			string fallback = build_aggregate_query();
-			auto query_result = con.Query(fallback, bind_data.streaming);
+			auto query_result = con.Query(fallback, MySQLResultStreaming::FORCE_MATERIALIZATION);
 			return make_uniq<MySQLGlobalState>(std::move(query_result));
 		}
 	}

@@ -15,6 +15,7 @@ namespace duckdb {
 using MySQLStatementPtr = duckdb::unique_ptr<MYSQL_STMT, void (*)(MYSQL_STMT *)>;
 
 inline void MySQLStatementDelete(MYSQL_STMT *stmt) {
+	mysql_stmt_free_result(stmt);
 	mysql_stmt_close(stmt);
 }
 
