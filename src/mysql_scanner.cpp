@@ -473,7 +473,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		InjectQueryHints(context, select, fed, bind_data, con, mysql_catalog.GetStatsCache());
 	}
 
-	auto query_result = con.Query(select, bind_data.streaming);
+	auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
 
 	if (bind_data.use_predicate_analyzer) {

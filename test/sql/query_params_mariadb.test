@@ -26,7 +26,7 @@ SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS SIGNED) col1, CAST(? AS SIGNED) col2',
   params=row(TRUE, FALSE))
 ----
-1	0	BIGINT
+1	0	INTEGER
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
