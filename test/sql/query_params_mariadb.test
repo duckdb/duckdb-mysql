@@ -26,35 +26,35 @@ SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS SIGNED) col1, CAST(? AS SIGNED) col2',
   params=row(TRUE, FALSE))
 ----
-1	0	INTEGER
+1	0	BIGINT
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS SIGNED) col1, CAST(? AS SIGNED) col2, CAST(? AS SIGNED) col3',
   params=row(42::TINYINT, -127::TINYINT, 127::TINYINT))
 ----
-42	-127	127	INTEGER
+42	-127	127	BIGINT
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS UNSIGNED) col1, CAST(? AS UNSIGNED) col2, CAST(? AS UNSIGNED) col3',
   params=row(42::UTINYINT, 0::UTINYINT, 255::UTINYINT))
 ----
-42	0	255	UINTEGER
+42	0	255	UBIGINT
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS SIGNED) col1, CAST(? AS SIGNED) col2, CAST(? AS SIGNED) col3',
   params=row(42::SMALLINT, -32767::SMALLINT, 32767::SMALLINT))
 ----
-42	-32767	32767	INTEGER
+42	-32767	32767	BIGINT
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS UNSIGNED) col1, CAST(? AS UNSIGNED) col2, CAST(? AS UNSIGNED) col3',
   params=row(42::USMALLINT, 0::USMALLINT, 65535::USMALLINT))
 ----
-42	0	65535	UINTEGER
+42	0	65535	UBIGINT
 
 query IIII
 SELECT *, typeof(col1) FROM mysql_query('s',
@@ -68,7 +68,7 @@ SELECT *, typeof(col1) FROM mysql_query('s',
   'SELECT CAST(? AS UNSIGNED) col1, CAST(? AS UNSIGNED) col2, CAST(? AS UNSIGNED) col3',
   params=row(42::UINTEGER, 0::UINTEGER, 4294967295::UINTEGER))
 ----
-42	0	4294967295	UINTEGER
+42	0	4294967295	UBIGINT
 
 # query IIII
 # SELECT *, typeof(col1) FROM mysql_query('s',
