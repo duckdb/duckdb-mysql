@@ -62,6 +62,7 @@ jobs:
       VCPKG_TARGET_TRIPLET: arm64-osx-release
       VCPKG_HOST_TRIPLET: arm64-osx-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      MYSQL_PWD: root
 
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +105,8 @@ jobs:
 
       - name: Setup MariaDB
         run: |
-          mysql -u root -e "SELECT @@version"
+          sudo mariadb -e "SELECT @@version"
+          sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
           mysql -u root < test/test_data.sql
           mysql -u root -e "SELECT 42"
 
