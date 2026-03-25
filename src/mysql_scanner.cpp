@@ -637,7 +637,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		params = StructValue::GetChildren(struct_val);
 	}
 
-	MySQLResultStreaming streaming = MySQLResultStreaming::ALLOW_STREAMING;
+	MySQLResultStreaming streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 	auto streaming_it = input.named_parameters.find("stream_results");
 	if (streaming_it != input.named_parameters.end()) {
 		Value &bool_val = streaming_it->second;
