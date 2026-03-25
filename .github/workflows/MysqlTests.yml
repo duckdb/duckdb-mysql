@@ -105,11 +105,6 @@ jobs:
 
       - name: Setup MariaDB
         run: |
-          brew services stop mariadb
-          echo "[mysqld]" | sudo tee -a /opt/homebrew/etc/my.cnf
-          echo "skip-ssl" | sudo tee -a /opt/homebrew/etc/my.cnf
-          brew services start mariadb
-          sleep 3
           sudo mariadb -e "SELECT @@version"
           sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
           echo "[client]" >> ~/.my.cnf
@@ -217,6 +212,7 @@ jobs:
         LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         MARIADB_SERVER: 1
+        MARIADB_SSL_DISABLED: 1
       run: |
         make test
 
