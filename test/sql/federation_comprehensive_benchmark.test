@@ -586,7 +586,7 @@ C	1
 
 # 8f: ORDER BY on aggregate + LIMIT
 query II
-SELECT category, COUNT(*) cnt FROM s1.bench_agg GROUP BY category ORDER BY cnt DESC LIMIT 2;
+SELECT category, COUNT(*) cnt FROM s1.bench_agg GROUP BY category ORDER BY cnt DESC, category ASC LIMIT 2;
 ----
 A	4
 B	3
