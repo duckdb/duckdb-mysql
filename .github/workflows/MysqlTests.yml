@@ -62,8 +62,6 @@ jobs:
       VCPKG_TARGET_TRIPLET: arm64-osx-release
       VCPKG_HOST_TRIPLET: arm64-osx-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-      MYSQL_PWD: root
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,8 +75,8 @@ jobs:
             autoconf-archive \
             automake \
             ccache \
-            mariadb
-          brew services start mariadb
+            mysql
+          brew services start mysql
 
       - name: Cache Key
         id: cache_key
@@ -103,12 +101,8 @@ jobs:
         with:
           vcpkgGitCommitId: ce613c41372b23b1f51333815feb3edd87ef8a8b
 
-      - name: Setup MariaDB
+      - name: Setup MySQL
         run: |
-          sudo mariadb -e "SELECT @@version"
-          sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
-          echo "[client]" >> ~/.my.cnf
-          echo "default-character-set = utf8mb4" >> ~/.my.cnf
           mysql -u root < test/test_data.sql
           mysql -u root -e "SELECT 42"
 
@@ -122,7 +116,7 @@ jobs:
         env:
           LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
           MYSQL_TEST_DATABASE_AVAILABLE: 1
-          MARIADB_SERVER: 1
+          ORACLE_MYSQL_SERVER: 1
         run: |
           make test
 
@@ -210,7 +204,6 @@ jobs:
         LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         MARIADB_SERVER: 1
-        MARIADB_SSL_DISABLED: 1
       run: |
         make test
 

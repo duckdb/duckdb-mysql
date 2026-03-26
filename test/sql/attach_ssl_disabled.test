@@ -6,7 +6,7 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MARIADB_SSL_DISABLED
+require-env MARIADB_SERVER
 
 # invalid ssl mode
 statement error
