@@ -25,11 +25,13 @@ MySQLConnection::~MySQLConnection() {
 MySQLConnection::MySQLConnection(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
 	std::swap(type_config, other.type_config);
+	std::swap(connection_string, other.connection_string);
 }
 
 MySQLConnection &MySQLConnection::operator=(MySQLConnection &&other) noexcept {
 	std::swap(connection, other.connection);
 	std::swap(type_config, other.type_config);
+	std::swap(connection_string, other.connection_string);
 	return *this;
 }
 

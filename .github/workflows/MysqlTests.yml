@@ -62,7 +62,6 @@ jobs:
       VCPKG_TARGET_TRIPLET: arm64-osx-release
       VCPKG_HOST_TRIPLET: arm64-osx-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -186,9 +185,9 @@ jobs:
       run: |
         sudo mariadb -e "select @@version"
         sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
-        echo "[client]" >> ~/.my.cnf 
+        echo "[client]" >> ~/.my.cnf
         echo "default-character-set = utf8mb4" >> ~/.my.cnf
-        mysql -u root < test/test_data.sql 
+        mysql -u root < test/test_data.sql
         mysql -u root -e "SELECT 42"
 
     - name: Setup vcpkg

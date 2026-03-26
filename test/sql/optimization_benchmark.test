@@ -6,6 +6,8 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require-env ORACLE_MYSQL_SERVER
+
 statement ok
 SET GLOBAL mysql_experimental_filter_pushdown=true
 

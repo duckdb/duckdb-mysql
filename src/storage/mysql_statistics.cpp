@@ -618,9 +618,11 @@ void MySQLStatisticsCollector::EnsureFreshStats() {
 		return;
 	}
 	stats_expiry_set_ = true;
+	if (!has_histogram_support_) {
+		return;
+	}
 	try {
-		connection_.get().Query("SET SESSION information_schema_stats_expiry = 0",
-		                        MySQLResultStreaming::FORCE_MATERIALIZATION);
+		connection_.get().Execute("SET SESSION information_schema_stats_expiry = 0");
 	} catch (const std::exception &) {
 	}
 }
