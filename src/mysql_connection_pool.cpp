@@ -8,11 +8,10 @@ namespace duckdb {
 //===--------------------------------------------------------------------===//
 // MySQLConnectionPool
 //===--------------------------------------------------------------------===//
-MySQLConnectionPool::MySQLConnectionPool(string connection_string_p, string attach_path_p,
-                                         MySQLTypeConfig type_config_p, idx_t max_connections_p, idx_t timeout_ms_p)
-    : dbconnector::pool::ConnectionPool<MySQLConnection>(max_connections_p, timeout_ms_p),
+MySQLConnectionPool::MySQLConnectionPool(ClientContext &context, string connection_string_p, string attach_path_p)
+    : dbconnector::pool::ConnectionPool<MySQLConnection>(CreateConfig(context)),
       connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
-      type_config(std::move(type_config_p)) {
+      type_config(MySQLTypeConfig(context)) {
 }
 
 MySQLConnectionPool::~MySQLConnectionPool() = default;
@@ -158,6 +157,47 @@ void MySQLConnectionPool::CalibrateNetwork(MySQLConnection &conn) {
 		network_calibration.bandwidth_mbps = bandwidth_mbps;
 		network_calibration.is_calibrated = true;
 	}
+}
+
+idx_t MySQLConnectionPool::DefaultPoolSize() noexcept {
+	unsigned int hw = std::thread::hardware_concurrency();
+	idx_t detected = (hw == 0) ? 4u : static_cast<idx_t>(hw);
+	return detected < 8u ? detected : 8u;
+}
+
+static idx_t ReadUBigIntOption(ClientContext &ctx, const std::string &name, idx_t default_val) {
+	Value val;
+	if (ctx.TryGetCurrentSetting(name, val)) {
+		return UBigIntValue::Get(val);
+	}
+	return default_val;
+}
+
+static bool ReadBooleanOption(ClientContext &ctx, const std::string &name, bool default_val) {
+	Value val;
+	if (ctx.TryGetCurrentSetting(name, val)) {
+		return BooleanValue::Get(val);
+	}
+	return default_val;
+}
+
+dbconnector::pool::ConnectionPoolConfig MySQLConnectionPool::CreateConfig(ClientContext &ctx) {
+	idx_t pool_size = ReadUBigIntOption(ctx, "mysql_pool_size", MySQLConnectionPool::DefaultPoolSize());
+	idx_t pool_timeout_ms = ReadUBigIntOption(ctx, "mysql_pool_wait_timeout_millis", 30000);
+	bool thread_local_cache_enabled = ReadBooleanOption(ctx, "mysql_pool_enable_thread_local_cache", true);
+	idx_t pool_connection_max_lifetime_ms = ReadUBigIntOption(ctx, "mysql_pool_connection_max_lifetime_millis", 0);
+	idx_t pool_connection_idle_timeout_ms = ReadUBigIntOption(ctx, "mysql_pool_connection_idle_timeout_millis", 0);
+	bool pool_enable_reaper_thread = ReadBooleanOption(ctx, "mysql_pool_enable_reaper_thread", false);
+
+	dbconnector::pool::ConnectionPoolConfig config;
+	config.max_connections = pool_size;
+	config.wait_timeout_millis = pool_timeout_ms;
+	config.tl_cache_enabled = thread_local_cache_enabled;
+	config.max_lifetime_millis = pool_connection_max_lifetime_ms;
+	config.idle_timeout_millis = pool_connection_idle_timeout_ms;
+	config.start_reaper_thread = pool_enable_reaper_thread;
+
+	return config;
 }
 
 } // namespace duckdb

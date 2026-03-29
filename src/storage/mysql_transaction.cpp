@@ -77,7 +77,7 @@ void MySQLTransaction::EnsureConnection() {
 		pooled_connection = pool.ForceAcquire();
 		break;
 	case MySQLPoolAcquireMode::WAIT:
-		pooled_connection = pool.Acquire();
+		pooled_connection = pool.WaitAcquire();
 		break;
 	case MySQLPoolAcquireMode::TRY:
 		pooled_connection = pool.TryAcquire();

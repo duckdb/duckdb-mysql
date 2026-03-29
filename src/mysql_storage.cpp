@@ -9,22 +9,6 @@
 
 namespace duckdb {
 
-static idx_t ReadUBigIntOption(ClientContext &ctx, const std::string &name, idx_t default_val) {
-	Value val;
-	if (ctx.TryGetCurrentSetting(name, val)) {
-		return UBigIntValue::Get(val);
-	}
-	return default_val;
-}
-
-static bool ReadBooleanOption(ClientContext &ctx, const std::string &name, bool default_val) {
-	Value val;
-	if (ctx.TryGetCurrentSetting(name, val)) {
-		return BooleanValue::Get(val);
-	}
-	return default_val;
-}
-
 static unique_ptr<Catalog> MySQLAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                        AttachedDatabase &db, const string &name, AttachInfo &info,
                                        AttachOptions &attach_options) {
@@ -45,25 +29,7 @@ static unique_ptr<Catalog> MySQLAttach(optional_ptr<StorageExtensionInfo> storag
 	string attach_path = info.path;
 	auto connection_string = MySQLCatalog::GetConnectionString(context, attach_path, secret_name);
 
-	idx_t pool_size = ReadUBigIntOption(context, "mysql_pool_size", MySQLConnectionPool::DefaultPoolSize());
-	idx_t pool_timeout_ms =
-	    ReadUBigIntOption(context, "mysql_pool_timeout_ms", MySQLConnectionPool::DEFAULT_POOL_TIMEOUT_MS);
-	bool thread_local_cache_enabled = ReadBooleanOption(context, "mysql_pool_thread_local_cache", true);
-	idx_t pool_connection_max_lifetime_seconds =
-	    ReadUBigIntOption(context, "mysql_pool_connection_max_lifetime_seconds", 0);
-	idx_t pool_connection_idle_timeout_seconds =
-	    ReadUBigIntOption(context, "mysql_pool_connection_idle_timeout_seconds", 0);
-	bool pool_enable_reaper_thread = ReadBooleanOption(context, "mysql_pool_enable_reaper_thread", false);
-
-	MySQLTypeConfig type_config;
-	auto pool =
-	    make_shared_ptr<MySQLConnectionPool>(connection_string, attach_path, type_config, pool_size, pool_timeout_ms);
-	pool->SetThreadLocalCacheEnabled(thread_local_cache_enabled);
-	pool->SetMaxLifetimeSeconds(pool_connection_max_lifetime_seconds);
-	pool->SetIdleTimeoutSeconds(pool_connection_idle_timeout_seconds);
-	if (pool_enable_reaper_thread) {
-		pool->EnsureReaperRunning();
-	}
+	auto pool = make_shared_ptr<MySQLConnectionPool>(context, connection_string, attach_path);
 
 	return make_uniq<MySQLCatalog>(db, std::move(connection_string), std::move(attach_path), attach_options.access_mode,
 	                               std::move(pool));
