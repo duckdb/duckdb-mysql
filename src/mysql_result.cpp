@@ -82,8 +82,7 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 }
 
 MySQLResult::~MySQLResult() {
-	bool stream_active =
-	    streaming == MySQLResultStreaming::ALLOW_STREAMING || streaming == MySQLResultStreaming::REQUIRE_STREAMING;
+	bool stream_active = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	if (stream_active && !exhausted) {
 		TryCancelQuery();
 	}

@@ -200,4 +200,50 @@ dbconnector::pool::ConnectionPoolConfig MySQLConnectionPool::CreateConfig(Client
 	return config;
 }
 
+MySQLPooledConnection MySQLConnectionPool::Acquire(MySQLPoolAcquireMode acquire_mode, const std::string &time_zone) {
+	MySQLPooledConnection pc;
+	switch (acquire_mode) {
+	case MySQLPoolAcquireMode::FORCE:
+		pc = ForceAcquire();
+		break;
+	case MySQLPoolAcquireMode::WAIT:
+		pc = WaitAcquire();
+		break;
+	case MySQLPoolAcquireMode::TRY:
+		pc = TryAcquire();
+		if (!pc) {
+			throw IOException("Connection pool exhausted: no connections available (try mode)");
+		}
+		break;
+	}
+
+	if (!time_zone.empty()) {
+		try {
+			pc->Execute("SET TIME_ZONE = ?", {Value(time_zone)});
+		} catch (...) {
+			pc.Invalidate();
+			throw;
+		}
+	}
+
+	return pc;
+}
+
+MySQLPoolAcquireMode MySQLConnectionPool::GetAcquireMode(ClientContext &context) {
+	Value mode_val;
+	if (context.TryGetCurrentSetting("mysql_pool_acquire_mode", mode_val)) {
+		auto mode_str = StringUtil::Lower(mode_val.ToString());
+		if (mode_str == "force") {
+			return MySQLPoolAcquireMode::FORCE;
+		} else if (mode_str == "wait") {
+			return MySQLPoolAcquireMode::WAIT;
+		} else if (mode_str == "try") {
+			return MySQLPoolAcquireMode::TRY;
+		} else {
+			throw IOException("Invalid unsupported acquire mode: '%s'", mode_str);
+		}
+	}
+	return MySQLPoolAcquireMode::FORCE;
+}
+
 } // namespace duckdb

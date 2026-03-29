@@ -746,13 +746,6 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 					bind_data.streaming = result_streaming;
 				}
 			}
-			if (MySQLCatalog::IsMySQLQuery(get.function.name)) {
-				auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
-				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
-				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
-					bind_data.streaming = result_streaming;
-				}
-			}
 		}
 	}
 

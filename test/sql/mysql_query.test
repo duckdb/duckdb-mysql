@@ -212,12 +212,21 @@ SELECT * FROM mysql_query('simple', 'SELECT ?',
 ----
 foo
 
-statement error
+query I
+SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=FALSE)
+UNION ALL
+SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
+----
+42
+43
+
+query I
 SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
 UNION ALL
-SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=TRUE)
+SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
 ----
-Unable to stream results
+42
+43
 
 query I
 SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=NULL)
@@ -228,12 +237,4 @@ SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=NULL)
 43
 
 statement ok
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple2 (TYPE MYSQL_SCANNER)
-
-query I
-SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
-UNION ALL
-SELECT * FROM mysql_query('simple2', 'SELECT 43 col1', stream_results=TRUE)
-----
-42
-43
+DETACH simple;
