@@ -4,9 +4,6 @@
 
 require mysql_scanner
 
-statement ok
-SET threads = 1
-
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 statement ok
@@ -16,10 +13,10 @@ statement ok
 DETACH s
 
 statement ok
-SET mysql_pool_thread_local_cache = FALSE
+SET mysql_pool_enable_thread_local_cache = FALSE
 
 statement ok
-SET mysql_pool_connection_idle_timeout_seconds = 1
+SET mysql_pool_connection_idle_timeout_millis = 1000
 
 statement ok
 SET mysql_pool_enable_reaper_thread = TRUE

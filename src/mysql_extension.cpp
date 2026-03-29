@@ -178,15 +178,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption(
 	    "mysql_pool_size", "Maximum number of connections per MySQL catalog (default: min(cpu_count, 8))",
 	    LogicalType::UBIGINT, Value::UBIGINT(MySQLConnectionPool::DefaultPoolSize()), ValidatePoolSize);
-	config.AddExtensionOption("mysql_pool_timeout_ms",
+	config.AddExtensionOption("mysql_pool_wait_timeout_millis",
 	                          "Timeout in milliseconds when waiting for a connection from the pool (default: 30000)",
 	                          LogicalType::UBIGINT, Value::UBIGINT(30000));
-	config.AddExtensionOption("mysql_pool_connection_max_lifetime_seconds",
+	config.AddExtensionOption("mysql_pool_connection_max_lifetime_millis",
 	                          "Maximum age of a pooled connection in seconds since it was first opened. When exceeded, "
 	                          "the connection is closed instead of being returned to the cache (default: 0 - disabled)",
 	                          LogicalType::UBIGINT, Value::UBIGINT(0));
 	config.AddExtensionOption(
-	    "mysql_pool_connection_idle_timeout_seconds",
+	    "mysql_pool_connection_idle_timeout_millis",
 	    "Maximum time in seconds a connection can sit idle in the cache before being closed (default: 0 - disabled)",
 	    LogicalType::UBIGINT, Value::UBIGINT(0));
 	config.AddExtensionOption("mysql_pool_enable_reaper_thread",
@@ -199,7 +199,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    "'wait' (block until available), 'try' (fail immediately if unavailable) (default: force)",
 	    LogicalType::VARCHAR, Value("force"), ValidatePoolAcquireMode);
 	config.AddExtensionOption(
-	    "mysql_pool_thread_local_cache",
+	    "mysql_pool_enable_thread_local_cache",
 	    "Enable thread-local connection caching for faster same-thread connection reuse (default: true)",
 	    LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	config.AddExtensionOption("mysql_compression_aware_costs",
