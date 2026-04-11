@@ -327,18 +327,13 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 	}
 
 	if (!get.table_filters.filters.empty()) {
-		auto &column_ids = get.GetColumnIds();
 		string where_clause;
 		for (auto &entry : get.table_filters.filters) {
-			auto scan_col_idx = entry.first;
-			if (scan_col_idx >= column_ids.size()) {
-				continue;
+			auto table_col_idx = entry.first;
+			if (table_col_idx >= bind_data.names.size()) {
+				return false;
 			}
-			auto actual_col_idx = column_ids[scan_col_idx].GetPrimaryIndex();
-			if (actual_col_idx >= bind_data.names.size()) {
-				continue;
-			}
-			auto column_name = MySQLUtils::WriteIdentifier(bind_data.names[actual_col_idx]);
+			auto column_name = MySQLUtils::WriteIdentifier(bind_data.names[table_col_idx]);
 			auto new_filter = MySQLFilterPushdown::TransformFilter(column_name, *entry.second);
 			if (new_filter.empty()) {
 				return false;
@@ -764,13 +759,6 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 			auto &get = logical_get.get();
 			if (MySQLCatalog::IsMySQLScan(get.function.name)) {
 				auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
-				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
-					bind_data.streaming = result_streaming;
-				}
-			}
-			if (MySQLCatalog::IsMySQLQuery(get.function.name)) {
-				auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
 				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
 				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
 					bind_data.streaming = result_streaming;

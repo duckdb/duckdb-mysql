@@ -43,7 +43,7 @@ struct MySQLConnectionParameters {
 	string ssl_key;
 };
 
-enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION, REQUIRE_STREAMING };
+enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION };
 
 enum class MySQLConnectorInterface { UNINITIALIZED, BASIC, PREPARED_STATEMENT };
 

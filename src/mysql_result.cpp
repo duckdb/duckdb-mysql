@@ -82,8 +82,7 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
 }
 
 MySQLResult::~MySQLResult() {
-	bool stream_active =
-	    streaming == MySQLResultStreaming::ALLOW_STREAMING || streaming == MySQLResultStreaming::REQUIRE_STREAMING;
+	bool stream_active = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	if (stream_active && !exhausted) {
 		TryCancelQuery();
 	}
@@ -252,16 +251,15 @@ const vector<MySQLField> &MySQLResult::Fields() {
 }
 
 bool MySQLResult::TryCancelQuery() {
+	if (connection_string.empty()) {
+		return false;
+	}
 	try {
-		// open a new connection
 		auto con = MySQLConnection::Open(type_config, connection_string, "");
-
-		// execute KILL QUERY [connection_id] to kill the running query
 		string kill_query = "KILL QUERY " + to_string(connection_id);
 		con.Execute(kill_query);
-
 		return true;
-	} catch (...) {
+	} catch (std::exception &) {
 		return false;
 	}
 }

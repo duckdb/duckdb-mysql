@@ -18,8 +18,6 @@ class MySQLTableEntry;
 
 enum class MySQLTransactionState { TRANSACTION_NOT_YET_STARTED, TRANSACTION_STARTED, TRANSACTION_FINISHED };
 
-enum class MySQLPoolAcquireMode : uint8_t { FORCE, WAIT, TRY };
-
 class MySQLTransaction : public Transaction {
 public:
 	MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context);
@@ -40,7 +38,7 @@ private:
 	void EnsureConnection();
 
 	MySQLCatalog &catalog;
-	PooledConnection<MySQLConnection> pooled_connection;
+	MySQLPooledConnection pooled_connection;
 	bool transactions_enabled = true;
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	AccessMode access_mode;

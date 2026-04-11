@@ -8,22 +8,20 @@
 
 #pragma once
 
-#include "generic_connection_pool.hpp"
+#include "dbconnector/pool.hpp"
+
 #include "mysql_connection.hpp"
 #include "network_calibration.hpp"
 
 namespace duckdb {
 
-class MySQLConnectionPool : public GenericConnectionPool<MySQLConnection> {
-public:
-	static idx_t DefaultPoolSize() noexcept {
-		unsigned int hw = std::thread::hardware_concurrency();
-		idx_t detected = (hw == 0) ? 4u : static_cast<idx_t>(hw);
-		return detected < 8u ? detected : 8u;
-	}
+enum class MySQLPoolAcquireMode : uint8_t { FORCE, WAIT, TRY };
 
-	MySQLConnectionPool(string connection_string, string attach_path, MySQLTypeConfig type_config,
-	                    idx_t max_connections = DefaultPoolSize(), idx_t timeout_ms = DEFAULT_POOL_TIMEOUT_MS);
+using MySQLPooledConnection = dbconnector::pool::PooledConnection<MySQLConnection>;
+
+class MySQLConnectionPool : public dbconnector::pool::ConnectionPool<MySQLConnection> {
+public:
+	MySQLConnectionPool(ClientContext &context, string connection_string, string attach_path);
 	~MySQLConnectionPool() override;
 
 	void UpdateTypeConfig(MySQLTypeConfig new_config);
@@ -31,14 +29,18 @@ public:
 	NetworkCalibration GetNetworkCalibration() const;
 	void EnsureCalibrated(MySQLConnection &conn);
 	void SetNetworkCompression(bool enabled, double ratio = NetworkCalibration::DEFAULT_COMPRESSION_RATIO);
+	static idx_t DefaultPoolSize() noexcept;
+	MySQLPooledConnection Acquire(MySQLPoolAcquireMode acquire_mode, const std::string &time_zone = std::string());
+	static MySQLPoolAcquireMode GetAcquireMode(ClientContext &context);
 
 protected:
-	unique_ptr<MySQLConnection> CreateNewConnection() override;
+	std::unique_ptr<MySQLConnection> CreateNewConnection() override;
 	bool CheckConnectionHealthy(MySQLConnection &conn) override;
 	void ResetConnection(MySQLConnection &conn) override;
 
 private:
 	void CalibrateNetwork(MySQLConnection &conn);
+	static dbconnector::pool::ConnectionPoolConfig CreateConfig(ClientContext &ctx);
 
 	const string connection_string;
 	const string attach_path;

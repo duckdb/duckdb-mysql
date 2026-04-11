@@ -1,0 +1,59 @@
+# name: test/sql/connection_pool_reaper_idle_timeout.test
+# description: Test the reaper thread for connection pool
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_pool_enable_thread_local_cache = FALSE
+
+statement ok
+SET mysql_pool_connection_idle_timeout_millis = 1000
+
+statement ok
+SET mysql_pool_enable_reaper_thread = TRUE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS sleeper (TYPE MYSQL_SCANNER)
+
+statement ok
+FROM mysql_execute('s', 'DROP TABLE IF EXISTS reaper_test_tab1')
+
+statement ok
+FROM mysql_execute('s', 'CREATE TABLE reaper_test_tab1(id BIGINT)')
+
+statement ok
+FROM mysql_execute('s', 'INSERT INTO reaper_test_tab1 VALUES(CONNECTION_ID())')
+
+query I
+FROM mysql_query('s', 'SELECT count(*) FROM reaper_test_tab1 WHERE id = CONNECTION_ID()')
+----
+1
+
+statement ok
+FROM mysql_query('sleeper', 'SELECT sleep(1.2)')
+
+query I
+FROM mysql_query('s', 'SELECT count(*) FROM reaper_test_tab1 WHERE id = CONNECTION_ID()')
+----
+0
+
+statement ok
+FROM mysql_execute('s', 'DROP TABLE reaper_test_tab1')
+
+statement ok
+DETACH s
+
+statement ok
+DETACH sleeper

@@ -17,7 +17,7 @@ SELECT current_setting('mysql_pool_size')::INTEGER BETWEEN 1 AND 8
 true
 
 query I
-SELECT current_setting('mysql_pool_timeout_ms')
+SELECT current_setting('mysql_pool_wait_timeout_millis')
 ----
 30000
 
@@ -48,10 +48,10 @@ DETACH s2
 
 # Test custom timeout
 statement ok
-SET mysql_pool_timeout_ms = 60000
+SET mysql_pool_wait_timeout_millis = 60000
 
 query I
-SELECT current_setting('mysql_pool_timeout_ms')
+SELECT current_setting('mysql_pool_wait_timeout_millis')
 ----
 60000
 
@@ -60,4 +60,4 @@ statement ok
 SET mysql_pool_size = 4
 
 statement ok
-SET mysql_pool_timeout_ms = 30000
+SET mysql_pool_wait_timeout_millis = 30000
