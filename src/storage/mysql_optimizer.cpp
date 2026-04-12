@@ -1,5 +1,6 @@
 #include "storage/mysql_optimizer.hpp"
 #include "storage/mysql_catalog.hpp"
+#include "mysql_connection_pool.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_limit.hpp"
 #include "duckdb/planner/operator/logical_order.hpp"
@@ -12,7 +13,6 @@
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
-#include "storage/mysql_transaction.hpp"
 #include "storage/mysql_predicate_analyzer.hpp"
 
 namespace duckdb {
@@ -460,9 +460,9 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					double filter_selectivity = 1.0;
 					if (!get->table_filters.filters.empty()) {
 						try {
-							auto &transaction = MySQLTransaction::Get(context, bind_data->table.catalog);
-							auto &con = transaction.GetConnection();
-							MySQLStatisticsCollector stats_collector(con, catalog.GetStatsCache());
+							auto acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
+							auto pooled_con = catalog.GetConnectionPool().Acquire(acquire_mode);
+							MySQLStatisticsCollector stats_collector(pooled_con.GetConnection(), catalog.GetStatsCache());
 							PredicateAnalyzer analyzer(stats_collector, bind_data->table.schema.name,
 							                           bind_data->table.name);
 							vector<column_t> col_ids;
@@ -472,16 +472,11 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 							auto analysis = analyzer.AnalyzeFilters(col_ids, &get->table_filters, bind_data->names);
 							filter_selectivity = analysis.combined_selectivity;
 						} catch (const std::exception &e) {
-#ifndef NDEBUG
 							Printer::Print(StringUtil::Format(
-							    "MySQL federation: predicate analysis failed for %s.%s, using heuristic "
-							    "selectivity (%s)",
+							    "MySQL federation: predicate analysis failed for %s.%s, using fallback "
+							    "selectivity 0.3 (%s)",
 							    bind_data->table.schema.name, bind_data->table.name, e.what()));
-#endif
-							for (auto &entry : get->table_filters.filters) {
-								(void)entry;
-								filter_selectivity *= 0.3;
-							}
+							filter_selectivity = 0.3;
 						}
 					}
 					idx_t effective_row_count =

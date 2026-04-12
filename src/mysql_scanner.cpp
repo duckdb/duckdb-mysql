@@ -288,7 +288,7 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 	}
 	string cached_version;
 	bool cached_histogram = false;
-	bool version_supports_timeout = false;
+	bool version_supports_timeout = true;
 	if (shared_cache.GetVersionInfo(cached_version, cached_histogram)) {
 		bool is_mariadb = StringUtil::Contains(StringUtil::Lower(cached_version), "mariadb");
 		if (is_mariadb) {
@@ -301,8 +301,8 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 					major = std::stoi(cached_version.substr(0, dot));
 				} catch (...) {
 				}
-				if (major >= 8) {
-					version_supports_timeout = true;
+				if (major < 8) {
+					version_supports_timeout = false;
 				}
 			}
 		}
