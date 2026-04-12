@@ -462,7 +462,8 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 						try {
 							auto acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
 							auto pooled_con = catalog.GetConnectionPool().Acquire(acquire_mode);
-							MySQLStatisticsCollector stats_collector(pooled_con.GetConnection(), catalog.GetStatsCache());
+							MySQLStatisticsCollector stats_collector(pooled_con.GetConnection(),
+							                                         catalog.GetStatsCache());
 							PredicateAnalyzer analyzer(stats_collector, bind_data->table.schema.name,
 							                           bind_data->table.name);
 							vector<column_t> col_ids;
