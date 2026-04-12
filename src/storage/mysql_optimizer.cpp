@@ -449,6 +449,13 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					}
 					DefaultCostModel cost_model(cost_params);
 					cost_model.SetNetworkCalibration(catalog.GetConnectionPool().GetNetworkCalibration());
+					Value compression_aware_val, compression_ratio_val;
+					if (context.TryGetCurrentSetting("mysql_compression_aware_costs", compression_aware_val)) {
+						cost_model.SetCompressionAwareCosts(BooleanValue::Get(compression_aware_val));
+					}
+					if (context.TryGetCurrentSetting("mysql_compression_ratio", compression_ratio_val)) {
+						cost_model.SetCompressionRatio(compression_ratio_val.GetValue<double>());
+					}
 
 					double filter_selectivity = 1.0;
 					if (!get->table_filters.filters.empty()) {
@@ -464,7 +471,13 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 							}
 							auto analysis = analyzer.AnalyzeFilters(col_ids, &get->table_filters, bind_data->names);
 							filter_selectivity = analysis.combined_selectivity;
-						} catch (...) {
+						} catch (const std::exception &e) {
+#ifndef NDEBUG
+							Printer::Print(StringUtil::Format(
+							    "MySQL federation: predicate analysis failed for %s.%s, using heuristic "
+							    "selectivity (%s)",
+							    bind_data->table.schema.name, bind_data->table.name, e.what()));
+#endif
 							for (auto &entry : get->table_filters.filters) {
 								(void)entry;
 								filter_selectivity *= 0.3;

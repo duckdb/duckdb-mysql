@@ -515,6 +515,12 @@ bool MySQLStatsCache::GetVersionInfo(string &version, bool &has_histogram_suppor
 	if (!version_info_.detected) {
 		return false;
 	}
+	auto elapsed = std::chrono::steady_clock::now() - version_info_.cached_at;
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+	if (seconds >= VERSION_TTL_SECONDS) {
+		version_info_.detected = false;
+		return false;
+	}
 	version = version_info_.mysql_version;
 	has_histogram_support = version_info_.has_histogram_support;
 	return true;
@@ -525,6 +531,7 @@ void MySQLStatsCache::StoreVersionInfo(const string &version, bool has_histogram
 	version_info_.mysql_version = version;
 	version_info_.has_histogram_support = has_histogram_support;
 	version_info_.detected = true;
+	version_info_.cached_at = std::chrono::steady_clock::now();
 }
 
 void MySQLStatsCache::Clear() {
