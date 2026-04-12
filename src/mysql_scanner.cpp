@@ -394,7 +394,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 
 		string select = build_aggregate_query();
 		FederationState agg_fed;
-		agg_fed.adaptive_estimated_rows = SQL_BUFFER_RESULT_ROW_THRESHOLD + 1;
+		agg_fed.adaptive_estimated_rows = 0;
 		agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
 		InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
 		try {
