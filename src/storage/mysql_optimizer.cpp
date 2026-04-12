@@ -1,6 +1,5 @@
 #include "storage/mysql_optimizer.hpp"
 #include "storage/mysql_catalog.hpp"
-#include "mysql_connection_pool.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_limit.hpp"
 #include "duckdb/planner/operator/logical_order.hpp"
@@ -13,7 +12,6 @@
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
-#include "storage/mysql_predicate_analyzer.hpp"
 
 namespace duckdb {
 
@@ -459,24 +457,26 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 
 					double filter_selectivity = 1.0;
 					if (!get->table_filters.filters.empty()) {
-						try {
-							auto acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
-							auto pooled_con = catalog.GetConnectionPool().Acquire(acquire_mode);
-							MySQLStatisticsCollector stats_collector(pooled_con.GetConnection(),
-							                                         catalog.GetStatsCache());
-							PredicateAnalyzer analyzer(stats_collector, bind_data->table.schema.name,
-							                           bind_data->table.name);
-							vector<column_t> col_ids;
-							for (auto &cid : get->GetColumnIds()) {
-								col_ids.push_back(cid.GetPrimaryIndex());
+						MySQLTableStats cached_filter_stats;
+						if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name,
+						                                          cached_filter_stats)) {
+							for (const auto &entry : get->table_filters.filters) {
+								column_t col_idx = entry.first;
+								if (col_idx >= bind_data->names.size()) {
+									continue;
+								}
+								const string &col_name = bind_data->names[col_idx];
+								auto it = cached_filter_stats.column_distinct_count.find(col_name);
+								if (it != cached_filter_stats.column_distinct_count.end() && it->second > 0 &&
+								    cached_filter_stats.estimated_row_count > 0) {
+									double col_sel = 1.0 / static_cast<double>(std::min(
+									                           it->second, cached_filter_stats.estimated_row_count));
+									filter_selectivity *= col_sel;
+								} else {
+									filter_selectivity *= 0.3;
+								}
 							}
-							auto analysis = analyzer.AnalyzeFilters(col_ids, &get->table_filters, bind_data->names);
-							filter_selectivity = analysis.combined_selectivity;
-						} catch (const std::exception &e) {
-							Printer::Print(StringUtil::Format(
-							    "MySQL federation: predicate analysis failed for %s.%s, using fallback "
-							    "selectivity 0.3 (%s)",
-							    bind_data->table.schema.name, bind_data->table.name, e.what()));
+						} else {
 							filter_selectivity = 0.3;
 						}
 					}
