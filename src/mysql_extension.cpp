@@ -186,10 +186,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "exceeded, the connection is closed instead of being returned to the cache (default: 0 - "
 	                          "disabled)",
 	                          LogicalType::UBIGINT, Value::UBIGINT(0));
-	config.AddExtensionOption(
-	    "mysql_pool_connection_idle_timeout_millis",
-	    "Maximum time in milliseconds a connection can sit idle in the cache before being closed (default: 0 - disabled)",
-	    LogicalType::UBIGINT, Value::UBIGINT(0));
+	config.AddExtensionOption("mysql_pool_connection_idle_timeout_millis",
+	                          "Maximum time in milliseconds a connection can sit idle in the cache before being closed "
+	                          "(default: 0 - disabled)",
+	                          LogicalType::UBIGINT, Value::UBIGINT(0));
 	config.AddExtensionOption("mysql_pool_enable_reaper_thread",
 	                          "Whether to run a dedicated thread that periodically scans the pool and removes expired "
 	                          "connections (default: false)",

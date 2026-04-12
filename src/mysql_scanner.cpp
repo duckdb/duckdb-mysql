@@ -456,7 +456,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 				ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
 				                                filter_cols, sels);
 
-				ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names, cache_key);
+				ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names,
+				                     cache_key);
 				ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
 
 				filter_string = BuildFilterString(fed);
