@@ -1227,9 +1227,10 @@ MySQLStatisticsCollector::MySQLCostConstants MySQLStatisticsCollector::FetchMySQ
 
 	if (!have_cached_bp) {
 		try {
-			auto bp_result = connection_.get().Query("SHOW GLOBAL STATUS WHERE variable_name IN "
-			                                         "('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
-			                                         MySQLResultStreaming::FORCE_MATERIALIZATION);
+			auto bp_result = connection_.get().Query(
+			    "SELECT variable_name, variable_value FROM performance_schema.global_status "
+			    "WHERE variable_name IN ('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
+			    MySQLResultStreaming::FORCE_MATERIALIZATION);
 			idx_t read_requests = 0, reads = 0;
 			while (!bp_result->Exhausted()) {
 				auto &chunk = bp_result->NextChunk();
