@@ -156,6 +156,7 @@ struct CachedVersionInfo {
 	string mysql_version;
 	bool has_histogram_support = false;
 	bool detected = false;
+	std::chrono::steady_clock::time_point cached_at;
 };
 
 struct StatsEvictionEntry {
@@ -168,6 +169,7 @@ public:
 	static constexpr int64_t TABLE_STATS_TTL_SECONDS = 300;
 	static constexpr int64_t COST_CONSTANTS_TTL_SECONDS = 1800;
 	static constexpr int64_t BUFFER_POOL_TTL_SECONDS = 300;
+	static constexpr int64_t VERSION_TTL_SECONDS = 3600;
 	static constexpr idx_t MAX_TABLE_STATS_ENTRIES = 1000;
 
 	using InvalidationCallback = std::function<void(const string &schema, const string &table)>;

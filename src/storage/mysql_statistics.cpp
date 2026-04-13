@@ -515,6 +515,12 @@ bool MySQLStatsCache::GetVersionInfo(string &version, bool &has_histogram_suppor
 	if (!version_info_.detected) {
 		return false;
 	}
+	auto elapsed = std::chrono::steady_clock::now() - version_info_.cached_at;
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+	if (seconds >= VERSION_TTL_SECONDS) {
+		version_info_.detected = false;
+		return false;
+	}
 	version = version_info_.mysql_version;
 	has_histogram_support = version_info_.has_histogram_support;
 	return true;
@@ -525,6 +531,7 @@ void MySQLStatsCache::StoreVersionInfo(const string &version, bool has_histogram
 	version_info_.mysql_version = version;
 	version_info_.has_histogram_support = has_histogram_support;
 	version_info_.detected = true;
+	version_info_.cached_at = std::chrono::steady_clock::now();
 }
 
 void MySQLStatsCache::Clear() {
@@ -1220,9 +1227,10 @@ MySQLStatisticsCollector::MySQLCostConstants MySQLStatisticsCollector::FetchMySQ
 
 	if (!have_cached_bp) {
 		try {
-			auto bp_result = connection_.get().Query("SHOW GLOBAL STATUS WHERE variable_name IN "
-			                                         "('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
-			                                         MySQLResultStreaming::FORCE_MATERIALIZATION);
+			auto bp_result = connection_.get().Query(
+			    "SELECT variable_name, variable_value FROM performance_schema.global_status "
+			    "WHERE variable_name IN ('Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads')",
+			    MySQLResultStreaming::FORCE_MATERIALIZATION);
 			idx_t read_requests = 0, reads = 0;
 			while (!bp_result->Exhausted()) {
 				auto &chunk = bp_result->NextChunk();

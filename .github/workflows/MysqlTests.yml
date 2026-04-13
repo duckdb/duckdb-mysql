@@ -103,6 +103,7 @@ jobs:
 
       - name: Setup MySQL
         run: |
+          mysql -u root -e "SET GLOBAL wait_timeout = 28800; SET GLOBAL interactive_timeout = 28800; SET GLOBAL net_read_timeout = 300; SET GLOBAL net_write_timeout = 300"
           mysql -u root < test/test_data.sql
           mysql -u root -e "SELECT 42"
 
@@ -179,6 +180,7 @@ jobs:
         sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
         echo "[client]" >> ~/.my.cnf
         echo "default-character-set = utf8mb4" >> ~/.my.cnf
+        mysql -u root -e "SET GLOBAL wait_timeout = 28800; SET GLOBAL interactive_timeout = 28800; SET GLOBAL net_read_timeout = 300; SET GLOBAL net_write_timeout = 300"
         mysql -u root < test/test_data.sql
         mysql -u root -e "SELECT 42"
 

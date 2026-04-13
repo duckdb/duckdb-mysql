@@ -93,7 +93,7 @@ static void ConfigurePredicateAnalyzer(ClientContext &context, PredicateAnalyzer
 	}
 }
 
-static void ResolveExecutionPlan(FederationState &fed, const MySQLBindData &bind_data,
+static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, const MySQLBindData &bind_data,
                                  MySQLStatisticsCollector &stats_collector, MySQLCatalog &mysql_catalog,
                                  MySQLConnection &con, const vector<string> &column_names,
                                  const ExecutionPlanCacheKey &cache_key) {
@@ -119,6 +119,13 @@ static void ResolveExecutionPlan(FederationState &fed, const MySQLBindData &bind
 		DefaultCostModel cost_model(cost_params);
 		mysql_catalog.GetConnectionPool().EnsureCalibrated(con);
 		cost_model.SetNetworkCalibration(mysql_catalog.GetConnectionPool().GetNetworkCalibration());
+		Value compression_aware_val, compression_ratio_val;
+		if (context.TryGetCurrentSetting("mysql_compression_aware_costs", compression_aware_val)) {
+			cost_model.SetCompressionAwareCosts(BooleanValue::Get(compression_aware_val));
+		}
+		if (context.TryGetCurrentSetting("mysql_compression_ratio", compression_ratio_val)) {
+			cost_model.SetCompressionRatio(compression_ratio_val.GetValue<double>());
+		}
 		fed.execution_plan = cost_model.ComparePlans(table_stats, fed.filter_analysis, column_names);
 
 		fed.execution_plan.combined_selectivity = fed.filter_analysis.combined_selectivity;
@@ -279,15 +286,36 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 	if (context.TryGetCurrentSetting("mysql_query_timeout_enabled", timeout_val)) {
 		timeout_enabled = BooleanValue::Get(timeout_val);
 	}
-	if (timeout_enabled && fed.execution_plan.estimated_cost.Total() > 0) {
+	string cached_version;
+	bool cached_histogram = false;
+	bool version_supports_timeout = true;
+	if (shared_cache.GetVersionInfo(cached_version, cached_histogram)) {
+		bool is_mariadb = StringUtil::Contains(StringUtil::Lower(cached_version), "mariadb");
+		if (is_mariadb) {
+			version_supports_timeout = false;
+		} else {
+			auto dot = cached_version.find('.');
+			if (dot != string::npos) {
+				int major = 0;
+				try {
+					major = std::stoi(cached_version.substr(0, dot));
+				} catch (...) {
+				}
+				if (major < 8) {
+					version_supports_timeout = false;
+				}
+			}
+		}
+	}
+	if (timeout_enabled && version_supports_timeout && fed.execution_plan.estimated_cost.Total() > 0) {
 		idx_t min_timeout = MIN_QUERY_TIMEOUT_MS;
 		idx_t max_timeout = MAX_QUERY_TIMEOUT_MS;
 		Value min_val, max_val;
 		if (context.TryGetCurrentSetting("mysql_query_timeout_min_ms", min_val)) {
-			min_timeout = static_cast<idx_t>(BigIntValue::Get(min_val));
+			min_timeout = UBigIntValue::Get(min_val);
 		}
 		if (context.TryGetCurrentSetting("mysql_query_timeout_max_ms", max_val)) {
-			max_timeout = static_cast<idx_t>(BigIntValue::Get(max_val));
+			max_timeout = UBigIntValue::Get(max_val);
 		}
 		double cost_total = fed.execution_plan.estimated_cost.Total();
 		idx_t timeout_ms = min_timeout;
@@ -366,7 +394,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 
 		string select = build_aggregate_query();
 		FederationState agg_fed;
-		agg_fed.adaptive_estimated_rows = SQL_BUFFER_RESULT_ROW_THRESHOLD + 1;
+		agg_fed.adaptive_estimated_rows = 0;
 		agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
 		InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
 		try {
@@ -428,7 +456,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 				ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
 				                                filter_cols, sels);
 
-				ResolveExecutionPlan(fed, bind_data, stats_collector, mysql_catalog, con, column_names, cache_key);
+				ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names,
+				                     cache_key);
 				ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
 
 				filter_string = BuildFilterString(fed);

@@ -182,13 +182,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "Timeout in milliseconds when waiting for a connection from the pool (default: 30000)",
 	                          LogicalType::UBIGINT, Value::UBIGINT(30000));
 	config.AddExtensionOption("mysql_pool_connection_max_lifetime_millis",
-	                          "Maximum age of a pooled connection in seconds since it was first opened. When exceeded, "
-	                          "the connection is closed instead of being returned to the cache (default: 0 - disabled)",
+	                          "Maximum age in milliseconds of a pooled connection since it was first opened. When "
+	                          "exceeded, the connection is closed instead of being returned to the cache (default: 0 - "
+	                          "disabled)",
 	                          LogicalType::UBIGINT, Value::UBIGINT(0));
-	config.AddExtensionOption(
-	    "mysql_pool_connection_idle_timeout_millis",
-	    "Maximum time in seconds a connection can sit idle in the cache before being closed (default: 0 - disabled)",
-	    LogicalType::UBIGINT, Value::UBIGINT(0));
+	config.AddExtensionOption("mysql_pool_connection_idle_timeout_millis",
+	                          "Maximum time in milliseconds a connection can sit idle in the cache before being closed "
+	                          "(default: 0 - disabled)",
+	                          LogicalType::UBIGINT, Value::UBIGINT(0));
 	config.AddExtensionOption("mysql_pool_enable_reaper_thread",
 	                          "Whether to run a dedicated thread that periodically scans the pool and removes expired "
 	                          "connections (default: false)",
@@ -230,9 +231,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "Add MAX_EXECUTION_TIME hint to MySQL queries for safety (default: true)",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	config.AddExtensionOption("mysql_query_timeout_min_ms", "Minimum query timeout in milliseconds (default: 5000)",
-	                          LogicalType::BIGINT, Value::BIGINT(5000));
+	                          LogicalType::UBIGINT, Value::UBIGINT(5000));
 	config.AddExtensionOption("mysql_query_timeout_max_ms", "Maximum query timeout in milliseconds (default: 300000)",
-	                          LogicalType::BIGINT, Value::BIGINT(300000));
+	                          LogicalType::UBIGINT, Value::UBIGINT(300000));
 	config.AddExtensionOption("mysql_sql_buffer_result",
 	                          "Add SQL_BUFFER_RESULT for large result sets to release row locks faster (default: true)",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));

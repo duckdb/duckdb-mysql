@@ -447,11 +447,38 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					}
 					DefaultCostModel cost_model(cost_params);
 					cost_model.SetNetworkCalibration(catalog.GetConnectionPool().GetNetworkCalibration());
+					Value compression_aware_val, compression_ratio_val;
+					if (context.TryGetCurrentSetting("mysql_compression_aware_costs", compression_aware_val)) {
+						cost_model.SetCompressionAwareCosts(BooleanValue::Get(compression_aware_val));
+					}
+					if (context.TryGetCurrentSetting("mysql_compression_ratio", compression_ratio_val)) {
+						cost_model.SetCompressionRatio(compression_ratio_val.GetValue<double>());
+					}
 
 					double filter_selectivity = 1.0;
-					for (auto &entry : get->table_filters.filters) {
-						(void)entry;
-						filter_selectivity *= 0.3;
+					if (!get->table_filters.filters.empty()) {
+						MySQLTableStats cached_filter_stats;
+						if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name,
+						                                          cached_filter_stats)) {
+							for (const auto &entry : get->table_filters.filters) {
+								column_t col_idx = entry.first;
+								if (col_idx >= bind_data->names.size()) {
+									continue;
+								}
+								const string &col_name = bind_data->names[col_idx];
+								auto it = cached_filter_stats.column_distinct_count.find(col_name);
+								if (it != cached_filter_stats.column_distinct_count.end() && it->second > 0 &&
+								    cached_filter_stats.estimated_row_count > 0) {
+									double col_sel = 1.0 / static_cast<double>(std::min(
+									                           it->second, cached_filter_stats.estimated_row_count));
+									filter_selectivity *= col_sel;
+								} else {
+									filter_selectivity *= 0.3;
+								}
+							}
+						} else {
+							filter_selectivity = 0.3;
+						}
 					}
 					idx_t effective_row_count =
 					    static_cast<idx_t>(static_cast<double>(table_stats.estimated_row_count) * filter_selectivity);
