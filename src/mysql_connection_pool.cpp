@@ -159,12 +159,6 @@ void MySQLConnectionPool::CalibrateNetwork(MySQLConnection &conn) {
 	}
 }
 
-idx_t MySQLConnectionPool::DefaultPoolSize() noexcept {
-	unsigned int hw = std::thread::hardware_concurrency();
-	idx_t detected = (hw == 0) ? 4u : static_cast<idx_t>(hw);
-	return detected < 8u ? detected : 8u;
-}
-
 static idx_t ReadUBigIntOption(ClientContext &ctx, const std::string &name, idx_t default_val) {
 	Value val;
 	if (ctx.TryGetCurrentSetting(name, val)) {
@@ -182,34 +176,30 @@ static bool ReadBooleanOption(ClientContext &ctx, const std::string &name, bool 
 }
 
 dbconnector::pool::ConnectionPoolConfig MySQLConnectionPool::CreateConfig(ClientContext &ctx) {
-	idx_t pool_size = ReadUBigIntOption(ctx, "mysql_pool_size", MySQLConnectionPool::DefaultPoolSize());
-	idx_t pool_timeout_ms = ReadUBigIntOption(ctx, "mysql_pool_wait_timeout_millis", 30000);
-	bool thread_local_cache_enabled = ReadBooleanOption(ctx, "mysql_pool_enable_thread_local_cache", true);
-	idx_t pool_connection_max_lifetime_ms = ReadUBigIntOption(ctx, "mysql_pool_connection_max_lifetime_millis", 0);
-	idx_t pool_connection_idle_timeout_ms = ReadUBigIntOption(ctx, "mysql_pool_connection_idle_timeout_millis", 0);
-	bool pool_enable_reaper_thread = ReadBooleanOption(ctx, "mysql_pool_enable_reaper_thread", false);
-
 	dbconnector::pool::ConnectionPoolConfig config;
-	config.max_connections = pool_size;
-	config.wait_timeout_millis = pool_timeout_ms;
-	config.tl_cache_enabled = thread_local_cache_enabled;
-	config.max_lifetime_millis = pool_connection_max_lifetime_ms;
-	config.idle_timeout_millis = pool_connection_idle_timeout_ms;
-	config.start_reaper_thread = pool_enable_reaper_thread;
+	config.max_connections = ReadUBigIntOption(ctx, "mysql_pool_size", config.max_connections);
+	config.wait_timeout_millis = ReadUBigIntOption(ctx, "mysql_pool_wait_timeout_millis", config.wait_timeout_millis);
+	config.tl_cache_enabled = ReadBooleanOption(ctx, "mysql_pool_enable_thread_local_cache", config.tl_cache_enabled);
+	config.max_lifetime_millis =
+	    ReadUBigIntOption(ctx, "mysql_pool_connection_max_lifetime_millis", config.max_lifetime_millis);
+	config.idle_timeout_millis =
+	    ReadUBigIntOption(ctx, "mysql_pool_connection_idle_timeout_millis", config.idle_timeout_millis);
+	config.start_reaper_thread = ReadBooleanOption(ctx, "mysql_pool_enable_reaper_thread", config.start_reaper_thread);
 
 	return config;
 }
 
-MySQLPooledConnection MySQLConnectionPool::Acquire(MySQLPoolAcquireMode acquire_mode, const std::string &time_zone) {
+MySQLPooledConnection MySQLConnectionPool::Acquire(dbconnector::pool::AcquireMode acquire_mode,
+                                                   const std::string &time_zone) {
 	MySQLPooledConnection pc;
 	switch (acquire_mode) {
-	case MySQLPoolAcquireMode::FORCE:
+	case dbconnector::pool::AcquireMode::FORCE:
 		pc = ForceAcquire();
 		break;
-	case MySQLPoolAcquireMode::WAIT:
+	case dbconnector::pool::AcquireMode::WAIT:
 		pc = WaitAcquire();
 		break;
-	case MySQLPoolAcquireMode::TRY:
+	case dbconnector::pool::AcquireMode::TRY:
 		pc = TryAcquire();
 		if (!pc) {
 			throw IOException("Connection pool exhausted: no connections available (try mode)");
@@ -229,21 +219,13 @@ MySQLPooledConnection MySQLConnectionPool::Acquire(MySQLPoolAcquireMode acquire_
 	return pc;
 }
 
-MySQLPoolAcquireMode MySQLConnectionPool::GetAcquireMode(ClientContext &context) {
+dbconnector::pool::AcquireMode MySQLConnectionPool::GetAcquireMode(ClientContext &context) {
 	Value mode_val;
 	if (context.TryGetCurrentSetting("mysql_pool_acquire_mode", mode_val)) {
 		auto mode_str = StringUtil::Lower(mode_val.ToString());
-		if (mode_str == "force") {
-			return MySQLPoolAcquireMode::FORCE;
-		} else if (mode_str == "wait") {
-			return MySQLPoolAcquireMode::WAIT;
-		} else if (mode_str == "try") {
-			return MySQLPoolAcquireMode::TRY;
-		} else {
-			throw IOException("Invalid unsupported acquire mode: '%s'", mode_str);
-		}
+		return dbconnector::pool::AcquireModeHelpers::FromString(mode_str);
 	}
-	return MySQLPoolAcquireMode::FORCE;
+	return dbconnector::pool::AcquireMode::FORCE;
 }
 
 } // namespace duckdb

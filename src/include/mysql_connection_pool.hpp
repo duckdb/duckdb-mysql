@@ -15,8 +15,6 @@
 
 namespace duckdb {
 
-enum class MySQLPoolAcquireMode : uint8_t { FORCE, WAIT, TRY };
-
 using MySQLPooledConnection = dbconnector::pool::PooledConnection<MySQLConnection>;
 
 class MySQLConnectionPool : public dbconnector::pool::ConnectionPool<MySQLConnection> {
@@ -30,8 +28,9 @@ public:
 	void EnsureCalibrated(MySQLConnection &conn);
 	void SetNetworkCompression(bool enabled, double ratio = NetworkCalibration::DEFAULT_COMPRESSION_RATIO);
 	static idx_t DefaultPoolSize() noexcept;
-	MySQLPooledConnection Acquire(MySQLPoolAcquireMode acquire_mode, const std::string &time_zone = std::string());
-	static MySQLPoolAcquireMode GetAcquireMode(ClientContext &context);
+	MySQLPooledConnection Acquire(dbconnector::pool::AcquireMode acquire_mode,
+	                              const std::string &time_zone = std::string());
+	static dbconnector::pool::AcquireMode GetAcquireMode(ClientContext &context);
 
 protected:
 	std::unique_ptr<MySQLConnection> CreateNewConnection() override;
