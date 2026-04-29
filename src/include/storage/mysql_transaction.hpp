@@ -43,7 +43,7 @@ private:
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	AccessMode access_mode;
 	string time_zone;
-	MySQLPoolAcquireMode acquire_mode = MySQLPoolAcquireMode::FORCE;
+	dbconnector::pool::AcquireMode acquire_mode = dbconnector::pool::AcquireMode::FORCE;
 };
 
 } // namespace duckdb

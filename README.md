@@ -178,13 +178,13 @@ SELECT * FROM mysql_db.tmp;
 | mysql_time_as_time                 | Whether or not to convert MySQL's TIME columns to DuckDB's TIME | false  |
 | mysql_incomplete_dates_as_nulls    | Whether to return DATEs with zero month or day as NULLs        | false   |
 | mysql_enable_transactions          | Whether to run `START TRANSACTION`/`COMMIT`/`ROLLBACK` on MySQL connections | true   |
-| mysql_pool_size                    | Maximum number of connections per MySQL catalog (default: )    | min(cpu_count, 8) |
+| mysql_pool_size                    | Maximum number of connections per MySQL catalog (default: )    | 4 <= cpu_count * 1.5 <= 32 |
 | mysql_pool_wait_timeout_millis              | Timeout in milliseconds when waiting for a connection from the pool | 30000 |
 | mysql_pool_acquire_mode            | How to acquire connections from the pool: 'force' (always connect, ignore pool limit), 'wait' (block until available), 'try' (fail immediately if unavailable) | "force" |
-| mysql_pool_enable_thread_local_cache      | Enable thread-local connection caching for faster same-thread connection reuse | true |
+| mysql_pool_enable_thread_local_cache      | Enable thread-local connection caching for faster same-thread connection reuse | false |
 | mysql_pool_connection_max_lifetime_millis  | Maximum age of a pooled connection in milliseconds since it was first opened. When exceeded, the connection is closed instead of being returned to the cache| 0: disabled |
-| mysql_pool_connection_idle_timeout_millis | Maximum time in milliseconds a connection can sit idle in the cache before being closed | 0: disabled |
-| mysql_pool_enable_reaper_thread    | Whether to run a dedicated thread that periodically scans the pool and removes expired connections | false |
+| mysql_pool_connection_idle_timeout_millis | Maximum time in milliseconds a connection can sit idle in the cache before being closed | 60000 |
+| mysql_pool_enable_reaper_thread    | Whether to run a dedicated thread that periodically scans the pool and removes expired connections | true |
 | mysql_compression_aware_costs      | Apply compression ratios when estimating transfer costs        | true    |
 | mysql_compression_ratio            | Compression ratio for transfer cost estimation                 | 0.7     |
 | mysql_push_threshold_with_index    | Selectivity threshold for pushing filters with index support   | 0.5     |
