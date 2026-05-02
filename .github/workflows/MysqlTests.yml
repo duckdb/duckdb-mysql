@@ -10,122 +10,27 @@ defaults:
 jobs:
   format-check:
     name: Format Check
-    runs-on: ubuntu-22.04
-    env:
-      CC: gcc-10
-      CXX: g++-10
-      GEN: ninja
-
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           submodules: 'true'
 
       - name: Install
-        shell: bash
         run: |
-          sudo apt-get update -y -q -o=Dpkg::Use-Pty=0
-          sudo apt-get install -y -q -o=Dpkg::Use-Pty=0 \
-            ninja-build \
-            clang-format-11
-          sudo pip3 install \
-            cmake-format \
-            'black==24.*' \
-            cxxheaderparser \
-            pcpp \
-            clang_format==11.0.1
-
-      - name: List Installed Packages
-        shell: bash
-        run: pip3 freeze
+          pip3 install           \
+            black==25.1.0        \
+            clang_format==11.0.1 \
+            cmake-format==0.6.13
 
       - name: Format Check
-        shell: bash
         run: |
+          python -m pip show black
+          python -m pip show cmake_format
+          python -m pip show clang_format
           clang-format --version
           clang-format --dump-config
-          black --version
           make format-check
-
-  macos:
-    name: MacOS (aarch64)
-    runs-on: macos-latest
-    needs: format-check
-
-    env:
-      GEN: ninja
-      CC: 'ccache clang'
-      CXX: 'ccache clang++'
-      CCACHE_DIR: ${{ github.workspace }}/ccache
-      OSX_BUILD_ARCH: arm64
-      VCPKG_TARGET_TRIPLET: arm64-osx-release
-      VCPKG_HOST_TRIPLET: arm64-osx-release
-      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: 'true'
-
-      - name: Install
-        run: |
-          brew install -q \
-            autoconf \
-            autoconf-archive \
-            automake \
-            ccache \
-            mysql
-          brew services start mysql
-
-      - name: Cache Key
-        id: cache_key
-        working-directory: ./duckdb
-        run: |
-          DUCKDB_VERSION=$(git rev-parse --short HEAD)
-          KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
-          echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
-
-      - name: Restore Cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}/ccache
-          key: ${{ steps.cache_key.outputs.value }}
-
-      - uses: actions/setup-python@v2
-        with:
-          python-version: '3.14'
-
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11.1
-        with:
-          vcpkgGitCommitId: ce613c41372b23b1f51333815feb3edd87ef8a8b
-
-      - name: Setup MySQL
-        run: |
-          mysql -u root -e "SET GLOBAL wait_timeout = 28800; SET GLOBAL interactive_timeout = 28800; SET GLOBAL net_read_timeout = 300; SET GLOBAL net_write_timeout = 300"
-          mysql -u root < test/test_data.sql
-          mysql -u root -e "SELECT 42"
-
-      - name: Build extension
-        shell: bash
-        run: |
-          make release
-
-      - name: Save Cache
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}/ccache
-          key: ${{ steps.cache_key.outputs.value }}
-
-      - name: Test Extension
-        shell: bash
-        env:
-          LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
-          MYSQL_TEST_DATABASE_AVAILABLE: 1
-          ORACLE_MYSQL_SERVER: 1
-        run: |
-          make test
 
   linux:
     name: Linux (amd64)
@@ -187,7 +92,7 @@ jobs:
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11.1
       with:
-        vcpkgGitCommitId: ce613c41372b23b1f51333815feb3edd87ef8a8b
+        vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
 
     - name: Build extension
       run: |
@@ -195,6 +100,175 @@ jobs:
 
     - name: Save Cache
       uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ steps.cache_key.outputs.value }}
+
+    - name: Test extension
+      env: 
+        LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
+        MYSQL_TEST_DATABASE_AVAILABLE: 1
+        MARIADB_SERVER: 1
+      run: |
+        make test
+
+  macos:
+    name: MacOS (aarch64)
+    runs-on: macos-latest
+    needs: linux
+
+    env:
+      GEN: ninja
+      CC: 'ccache clang'
+      CXX: 'ccache clang++'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      OSX_BUILD_ARCH: arm64
+      VCPKG_TARGET_TRIPLET: arm64-osx-release
+      VCPKG_HOST_TRIPLET: arm64-osx-release
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+
+      - name: Install
+        run: |
+          brew install -q \
+            autoconf \
+            autoconf-archive \
+            automake \
+            ccache \
+            mysql
+          brew services start mysql
+
+      - name: Cache Key
+        id: cache_key
+        working-directory: ./duckdb
+        run: |
+          DUCKDB_VERSION=$(git rev-parse --short HEAD)
+          KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
+          echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/ccache
+          key: ${{ steps.cache_key.outputs.value }}
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.14'
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11.1
+        with:
+          vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
+
+      - name: Setup MySQL
+        run: |
+          mysql -u root -e "SET GLOBAL wait_timeout = 28800; SET GLOBAL interactive_timeout = 28800; SET GLOBAL net_read_timeout = 300; SET GLOBAL net_write_timeout = 300"
+          mysql -u root < test/test_data.sql
+          mysql -u root -e "SELECT 42"
+
+      - name: Build extension
+        shell: bash
+        run: |
+          make release
+
+      - name: Save Cache
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/ccache
+          key: ${{ steps.cache_key.outputs.value }}
+
+      - name: Test Extension
+        shell: bash
+        env:
+          LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
+          MYSQL_TEST_DATABASE_AVAILABLE: 1
+          ORACLE_MYSQL_SERVER: 1
+        run: |
+          make test
+
+  linux-relassert:
+    name: Linux RelAssert
+    needs: linux
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        threadsan: [0, 1]
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CC: 'ccache gcc'
+      CXX: 'ccache g++'
+      CCACHE_DIR: ${{ github.workspace }}/ccache
+      VCPKG_TARGET_TRIPLET: x64-linux-release
+      VCPKG_HOST_TRIPLET: x64-linux-release
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      MYSQL_PWD: root
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: 'true'
+
+    - name: Install required ubuntu packages
+      run: |
+        sudo apt-get update -y -q -o=Dpkg::Use-Pty=0
+        sudo apt-get install -y -q -o=Dpkg::Use-Pty=0 \
+          build-essential \
+          ccache \
+          cmake \
+          mariadb-server \
+          pkg-config \
+          zip
+
+    - name: Cache Key
+      id: cache_key
+      working-directory: ./duckdb
+      run: |
+        DUCKDB_VERSION=$(git rev-parse --short HEAD)
+        KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"-relassert-${{ matrix.threadsan }}
+        echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
+
+    - name: Restore Cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ github.workspace }}/ccache
+        key: ${{ steps.cache_key.outputs.value }}
+
+    - name: Setup MariaDB
+      run: |
+        sudo mariadb -e "select @@version"
+        sudo mariadb -e "ALTER USER root@localhost IDENTIFIED BY 'root'"
+        echo "[client]" >> ~/.my.cnf
+        echo "default-character-set = utf8mb4" >> ~/.my.cnf
+        mysql -u root -e "SET GLOBAL wait_timeout = 28800; SET GLOBAL interactive_timeout = 28800; SET GLOBAL net_read_timeout = 300; SET GLOBAL net_write_timeout = 300"
+        mysql -u root < test/test_data.sql
+        mysql -u root -e "SELECT 42"
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11.1
+      with:
+        vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
+
+    - name: Build extension
+      env:
+        THREADSAN: ${{ matrix.threadsan }}
+      run: |
+        make relassert
+        cat ./build/relassert/src/CMakeFiles/duckdb.dir/flags.make
+        cd build
+        ln -s relassert release
+
+    - name: Save Cache
+      uses: actions/cache/save@v5
       with:
         path: ${{ github.workspace }}/ccache
         key: ${{ steps.cache_key.outputs.value }}
