@@ -38,7 +38,7 @@ SET mysql_pool_acquire_mode = 'force'
 
 # Reset for next test
 statement ok
-SET mysql_pool_size = 4
+RESET mysql_pool_size
 
 # Now test the other direction: set non-force mode first, then try pool_size=0
 statement ok
@@ -51,10 +51,10 @@ requires mysql_pool_acquire_mode='force'
 
 # Reset
 statement ok
-SET mysql_pool_acquire_mode = 'force'
+RESET mysql_pool_acquire_mode
 
 statement ok
-SET mysql_pool_size = 4
+RESET mysql_pool_size
 
 # -------------------------------------------------------
 # Test 2: pool_size=0 creates a fresh connection each time
@@ -106,7 +106,7 @@ DETACH nop
 
 # Reset
 statement ok
-SET mysql_pool_size = 4
+RESET mysql_pool_size
 
 # -------------------------------------------------------
 # Test 3: ForceAcquire with pool_size=0 does NOT reuse connections
@@ -179,7 +179,7 @@ DETACH nop2
 
 # Reset
 statement ok
-SET mysql_pool_size = 4
+RESET mysql_pool_size
 
 statement ok
-SET mysql_pool_acquire_mode = 'force'
+RESET mysql_pool_acquire_mode
