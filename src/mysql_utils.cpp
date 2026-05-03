@@ -308,18 +308,22 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
 
 			if (!result) {
+				string second_attempt_error = mysql_error(mysql);
+				mysql_close(mysql);
 				throw IOException("Failed to connect to MySQL database with parameters "
 				                  "\"%s\": %s. First attempted host: %s. "
 				                  "Retry with 127.0.0.1 also failed.",
-				                  attach_path, mysql_error(mysql), attempted_host.c_str());
+				                  attach_path, second_attempt_error, attempted_host.c_str());
 			}
 		} else {
+			mysql_close(mysql);
 			throw IOException("Failed to connect to MySQL database with parameters "
 			                  "\"%s\": %s. Attempted host: %s",
 			                  attach_path, original_error.c_str(), attempted_host.c_str());
 		}
 	}
 	if (mysql_set_character_set(mysql, "utf8mb4") != 0) {
+		mysql_close(mysql);
 		throw IOException("Failed to set MySQL character set");
 	}
 	D_ASSERT(mysql == result);
