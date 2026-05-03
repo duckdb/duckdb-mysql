@@ -12,7 +12,7 @@ ATTACH 'host=localhost user=root port=0 database=mysql' AS s_default (TYPE MYSQL
 
 # Test that pool settings exist and have sensible defaults
 query I
-SELECT current_setting('mysql_pool_size')::INTEGER BETWEEN 1 AND 8
+SELECT current_setting('mysql_pool_size')::INTEGER BETWEEN 4 AND 32
 ----
 true
 
@@ -57,7 +57,7 @@ SELECT current_setting('mysql_pool_wait_timeout_millis')
 
 # Reset to defaults
 statement ok
-SET mysql_pool_size = 4
+RESET mysql_pool_size
 
 statement ok
-SET mysql_pool_wait_timeout_millis = 30000
+RESET mysql_pool_wait_timeout_millis

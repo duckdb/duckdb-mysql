@@ -57,3 +57,12 @@ DETACH s
 
 statement ok
 DETACH sleeper
+
+statement ok
+RESET mysql_pool_enable_thread_local_cache
+
+statement ok
+RESET mysql_pool_connection_max_lifetime_millis
+
+statement ok
+RESET mysql_pool_enable_reaper_thread
