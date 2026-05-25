@@ -52,7 +52,7 @@ class PredicateAnalyzer {
 public:
 	PredicateAnalyzer(MySQLStatisticsCollector &stats, const string &schema, const string &table);
 
-	PredicateAnalysis AnalyzeFilter(const string &column_name, TableFilter &filter);
+	PredicateAnalysis AnalyzeFilter(const string &column_name, const TableFilter &filter);
 	FilterAnalysisResult AnalyzeFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
 	                                    const vector<string> &names);
 
@@ -75,11 +75,11 @@ private:
 	double push_threshold_with_index_ = DEFAULT_PUSH_THRESHOLD_WITH_INDEX;
 	double push_threshold_no_index_ = DEFAULT_PUSH_THRESHOLD_NO_INDEX;
 
-	bool CanPushFilter(TableFilter &filter) const;
+	bool CanPushFilter(const TableFilter &filter) const;
 	bool IsPushableFilterType(TableFilterType type) const;
-	double EstimateFilterSelectivity(const string &column_name, TableFilter &filter);
+	double EstimateFilterSelectivity(const string &column_name, const TableFilter &filter);
 	PushdownDecision MakePushdownDecision(double selectivity, bool has_index) const;
-	string TransformFilterToMySQL(const string &column_name, TableFilter &filter) const;
+	string TransformFilterToMySQL(const string &column_name, const TableFilter &filter) const;
 	string TransformComparisonOperator(ExpressionType type) const;
 	string CreateConjunction(const vector<string> &predicates, const string &op) const;
 	void ReorderPredicatesForIndex(vector<PredicateAnalysis> &analyses, vector<string> &pushed_predicates) const;

@@ -149,8 +149,8 @@ static void ResolvePartitionPruning(FederationState &fed, const MySQLBindData &b
 		if (!analysis.is_partition_key || !analysis.ShouldPush()) {
 			continue;
 		}
-		for (const auto &entry : filters->filters) {
-			column_t col_idx = entry.first;
+		for (const auto &entry : *filters) {
+			column_t col_idx = entry.GetIndex();
 			if (col_idx >= column_ids.size()) {
 				continue;
 			}
@@ -161,9 +161,9 @@ static void ResolvePartitionPruning(FederationState &fed, const MySQLBindData &b
 			if (!StringUtil::CIEquals(bind_data.names[actual_col_idx], analysis.column_name)) {
 				continue;
 			}
-			auto &filter = *entry.second;
-			if (filter.filter_type == TableFilterType::CONSTANT_COMPARISON) {
-				auto &cf = filter.Cast<ConstantFilter>();
+			auto &filter = entry.Filter();
+			if (filter.filter_type == TableFilterType::LEGACY_CONSTANT_COMPARISON) {
+				auto &cf = filter.Cast<LegacyConstantFilter>();
 				auto matching = part_info.GetMatchingPartitions(cf.constant, cf.comparison_type);
 				if (!matching.empty() && matching.size() < part_info.partitions.size()) {
 					vector<string> escaped;
@@ -227,9 +227,10 @@ static void BuildLocalFilterExpression(FederationState &fed, const MySQLBindData
 		}
 		const auto &analysis = fed.filter_analysis.analyses[filter_idx];
 		column_t output_col_idx = analysis.column_index;
+		ProjectionIndex proj_output_col_idx(output_col_idx);
 
-		auto it = filters->filters.find(output_col_idx);
-		if (it == filters->filters.end()) {
+		auto filter = filters->TryGetFilterByColumnIndex(proj_output_col_idx);
+		if (!filter) {
 			continue;
 		}
 		if (output_col_idx >= column_ids.size()) {
@@ -239,7 +240,7 @@ static void BuildLocalFilterExpression(FederationState &fed, const MySQLBindData
 		auto &col = bind_data.table.GetColumn(LogicalIndex(actual_table_col));
 
 		auto col_ref = make_uniq<BoundReferenceExpression>(col.GetType(), output_col_idx);
-		auto expr = it->second->ToExpression(*col_ref);
+		auto expr = filter->ToExpression(*col_ref);
 		if (expr) {
 			local_exprs.push_back(std::move(expr));
 		}
@@ -361,6 +362,27 @@ static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &
 	}
 }
 
+static string BuildAggregateQuery(const MySQLBindData &bind_data) {
+	string sql = "SELECT " + bind_data.aggregate_select_list;
+	sql += " FROM ";
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	sql += ".";
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	if (!bind_data.aggregate_where_clause.empty()) {
+		sql += " WHERE " + bind_data.aggregate_where_clause;
+	}
+	if (!bind_data.group_by_clause.empty()) {
+		sql += bind_data.group_by_clause;
+	}
+	if (!bind_data.order_by_clause.empty()) {
+		sql += bind_data.order_by_clause;
+	}
+	if (!bind_data.limit.empty()) {
+		sql += bind_data.limit;
+	}
+	return sql;
+}
+
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
 	const auto &bind_data = input.bind_data->Cast<MySQLBindData>();
@@ -371,42 +393,21 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
 
 	if (bind_data.has_aggregate_pushdown) {
-		auto build_aggregate_query = [&]() {
-			string sql = "SELECT " + bind_data.aggregate_select_list;
-			sql += " FROM ";
-			sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
-			sql += ".";
-			sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
-			if (!bind_data.aggregate_where_clause.empty()) {
-				sql += " WHERE " + bind_data.aggregate_where_clause;
-			}
-			if (!bind_data.group_by_clause.empty()) {
-				sql += bind_data.group_by_clause;
-			}
-			if (!bind_data.order_by_clause.empty()) {
-				sql += bind_data.order_by_clause;
-			}
-			if (!bind_data.limit.empty()) {
-				sql += bind_data.limit;
-			}
-			return sql;
-		};
+		string select = BuildAggregateQuery(bind_data);
 
-		string select = build_aggregate_query();
-		FederationState agg_fed;
-		agg_fed.adaptive_estimated_rows = 0;
-		agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
-		InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
-		try {
-			auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			return make_uniq<MySQLGlobalState>(std::move(query_result));
-		} catch (std::bad_alloc &) {
-			throw;
-		} catch (std::exception &) {
-			string fallback = build_aggregate_query();
-			auto query_result = con.Query(fallback, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			return make_uniq<MySQLGlobalState>(std::move(query_result));
+		Value hint_injection_enabled_val;
+		bool hint_injection_enabled = false;
+		if (context.TryGetCurrentSetting("mysql_hint_injection_enabled", hint_injection_enabled_val)) {
+			hint_injection_enabled = BooleanValue::Get(hint_injection_enabled_val);
 		}
+		if (hint_injection_enabled) {
+			FederationState agg_fed;
+			agg_fed.adaptive_estimated_rows = 0;
+			agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
+			InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
+		}
+		auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
+		return make_uniq<MySQLGlobalState>(std::move(query_result));
 	}
 
 	string select;
@@ -430,7 +431,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 
 	string filter_string;
 
-	if (bind_data.use_predicate_analyzer && input.filters && !input.filters->filters.empty()) {
+	if (bind_data.use_predicate_analyzer && input.filters && input.filters->HasFilters()) {
 		try {
 			MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache());
 			PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
@@ -579,7 +580,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 				throw BinderException(error);
 			}
 		}
-		output.SetCardinality(res_chunk.size());
+		output.SetChildCardinality(res_chunk.size());
 
 		if (gstate.local_filter_executor) {
 			SelectionVector sel(output.size());

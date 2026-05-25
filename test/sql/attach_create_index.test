@@ -10,16 +10,16 @@ statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
 statement ok
-CREATE OR REPLACE TABLE s.test(i INTEGER);
+CREATE OR REPLACE TABLE s.test_index(i INTEGER);
 
 statement ok
-INSERT INTO s.test VALUES (1), (2), (3);
+INSERT INTO s.test_index VALUES (1), (2), (3);
 
 statement ok
-CREATE INDEX i_index ON s.test(i);
+CREATE INDEX i_index ON s.test_index(i);
 
 query I
-SELECT * FROM s.test WHERE i=2
+SELECT * FROM s.test_index WHERE i=2
 ----
 2
 
@@ -40,35 +40,35 @@ statement ok
 DROP INDEX IF EXISTS s.i_index;
 
 statement ok
-DROP TABLE s.test;
+DROP TABLE s.test_index;
 
 # multi-dimensional index
 statement ok
-CREATE TABLE s.test(i INTEGER, j INTEGER);
+CREATE TABLE s.test_index(i INTEGER, j INTEGER);
 
 statement ok
-INSERT INTO s.test VALUES (1, 10), (2, 20), (3, 30);
+INSERT INTO s.test_index VALUES (1, 10), (2, 20), (3, 30);
 
 statement ok
-CREATE INDEX i_index ON s.test(i, j);
+CREATE INDEX i_index ON s.test_index(i, j);
 
 query II
-SELECT * FROM s.test WHERE i=2 AND j=20
+SELECT * FROM s.test_index WHERE i=2 AND j=20
 ----
 2	20
 
 statement ok
-DROP TABLE s.test CASCADE
+DROP TABLE s.test_index CASCADE
 
 # index with a function
 statement ok
-CREATE TABLE s.test(s VARCHAR);
+CREATE TABLE s.test_index(s VARCHAR);
 
 statement ok
-INSERT INTO s.test VALUES ('HELLO'), ('hello')
+INSERT INTO s.test_index VALUES ('HELLO'), ('hello')
 
 # cannot create index on blob or text columns
 statement error
-CREATE UNIQUE INDEX i_index ON s.test(LOWER(s))
+CREATE UNIQUE INDEX i_index ON s.test_index(LOWER(s))
 ----
 <REGEX>:.*(that returns a BLOB or TEXT|MariaDB).*

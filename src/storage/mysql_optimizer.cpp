@@ -41,7 +41,7 @@ void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
 
 static bool TraceColumnToGet(Expression &expr, LogicalOperator &child, LogicalGet &get, MySQLBindData &bind_data,
                              string &out) {
-	if (expr.expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 		return false;
 	}
 	auto &col_ref = expr.Cast<BoundColumnRefExpression>();
@@ -60,7 +60,7 @@ static bool TraceColumnToGet(Expression &expr, LogicalOperator &child, LogicalGe
 			return false;
 		}
 		auto &proj_expr = *proj.expressions[binding.column_index];
-		if (proj_expr.expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+		if (proj_expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 			return false;
 		}
 		auto &inner_ref = proj_expr.Cast<BoundColumnRefExpression>();
@@ -168,12 +168,12 @@ static bool CanPushAggregate(LogicalAggregate &aggr) {
 		return false;
 	}
 	for (auto &group : aggr.groups) {
-		if (group->expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+		if (group->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 			return false;
 		}
 	}
 	for (auto &expr : aggr.expressions) {
-		if (expr->expression_class != ExpressionClass::BOUND_AGGREGATE) {
+		if (expr->GetExpressionClass() != ExpressionClass::BOUND_AGGREGATE) {
 			return false;
 		}
 		auto &agg_expr = expr->Cast<BoundAggregateExpression>();
@@ -186,14 +186,14 @@ static bool CanPushAggregate(LogicalAggregate &aggr) {
 		if (agg_expr.order_bys && !agg_expr.order_bys->orders.empty()) {
 			return false;
 		}
-		if (PUSHABLE_AGGREGATES.find(agg_expr.function.name) == PUSHABLE_AGGREGATES.end()) {
+		if (PUSHABLE_AGGREGATES.find(agg_expr.function.GetName()) == PUSHABLE_AGGREGATES.end()) {
 			return false;
 		}
-		if (agg_expr.function.name != "count_star") {
+		if (agg_expr.function.GetName() != "count_star") {
 			if (agg_expr.children.size() != 1) {
 				return false;
 			}
-			if (agg_expr.children[0]->expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+			if (agg_expr.children[0]->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 				return false;
 			}
 		}
@@ -213,7 +213,7 @@ static bool TraceBindingToMySQLColumn(ColumnBinding binding, LogicalOperator &ch
 			return false;
 		}
 		auto &proj_expr = *proj.expressions[binding.column_index];
-		if (proj_expr.expression_class != ExpressionClass::BOUND_COLUMN_REF) {
+		if (proj_expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 			return false;
 		}
 		auto &inner_ref = proj_expr.Cast<BoundColumnRefExpression>();
@@ -275,7 +275,7 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 		string fragment;
 		string alias = "_agg_" + to_string(agg_idx);
 
-		if (agg_expr.function.name == "count_star") {
+		if (agg_expr.function.GetName() == "count_star") {
 			fragment = "COUNT(*) AS " + MySQLUtils::WriteIdentifier(alias);
 		} else {
 			auto &child_ref = agg_expr.children[0]->Cast<BoundColumnRefExpression>();
@@ -286,15 +286,15 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 			}
 			string quoted_col = MySQLUtils::WriteIdentifier(col_name);
 			string func_upper;
-			if (agg_expr.function.name == "count") {
+			if (agg_expr.function.GetName() == "count") {
 				func_upper = "COUNT";
-			} else if (agg_expr.function.name == "sum") {
+			} else if (agg_expr.function.GetName() == "sum") {
 				func_upper = "SUM";
-			} else if (agg_expr.function.name == "avg") {
+			} else if (agg_expr.function.GetName() == "avg") {
 				func_upper = "AVG";
-			} else if (agg_expr.function.name == "min") {
+			} else if (agg_expr.function.GetName() == "min") {
 				func_upper = "MIN";
-			} else if (agg_expr.function.name == "max") {
+			} else if (agg_expr.function.GetName() == "max") {
 				func_upper = "MAX";
 			} else {
 				return false;
@@ -313,7 +313,7 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 		}
 
 		select_fragments.push_back(fragment);
-		new_types.push_back(agg_expr.return_type);
+		new_types.push_back(agg_expr.GetReturnType());
 		new_names.push_back(alias);
 		agg_idx++;
 	}
@@ -324,15 +324,17 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 		bind_data.group_by_clause = " GROUP BY " + StringUtil::Join(group_names, ", ");
 	}
 
-	if (!get.table_filters.filters.empty()) {
+	if (get.table_filters.HasFilters()) {
 		string where_clause;
-		for (auto &entry : get.table_filters.filters) {
-			auto table_col_idx = entry.first;
+		for (auto &entry : get.table_filters) {
+			ProjectionIndex proj_idx = entry.GetIndex();
+			ColumnIndex col_idx = get.GetColumnIndex(proj_idx);
+			column_t table_col_idx = col_idx.GetPrimaryIndex();
 			if (table_col_idx >= bind_data.names.size()) {
 				return false;
 			}
 			auto column_name = MySQLUtils::WriteIdentifier(bind_data.names[table_col_idx]);
-			auto new_filter = MySQLFilterPushdown::TransformFilter(column_name, *entry.second);
+			auto new_filter = MySQLFilterPushdown::TransformFilter(column_name, entry.Filter());
 			if (new_filter.empty()) {
 				return false;
 			}
@@ -354,7 +356,7 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 	}
 	get.SetColumnIds(std::move(new_column_ids));
 	get.projection_ids.clear();
-	get.table_filters.filters.clear();
+	get.table_filters.ClearFilters();
 
 	bind_data.has_aggregate_pushdown = true;
 
@@ -369,16 +371,16 @@ struct AggregateRewriteInfo {
 };
 
 static void RewriteExpression(unique_ptr<Expression> &expr, AggregateRewriteInfo &info) {
-	if (expr->expression_class == ExpressionClass::BOUND_COLUMN_REF) {
+	if (expr->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 		auto &col_ref = expr->Cast<BoundColumnRefExpression>();
 		if (col_ref.depth > 0) {
 			return;
 		}
-		if (col_ref.binding.table_index == info.group_index) {
-			col_ref.binding.table_index = info.scan_table_index;
-		} else if (col_ref.binding.table_index == info.aggregate_index) {
-			col_ref.binding.table_index = info.scan_table_index;
-			col_ref.binding.column_index += info.num_groups;
+		if (col_ref.binding.table_index.index == info.group_index) {
+			col_ref.binding.table_index = TableIndex(info.scan_table_index);
+		} else if (col_ref.binding.table_index.index == info.aggregate_index) {
+			col_ref.binding.table_index = TableIndex(info.scan_table_index);
+			col_ref.binding.column_index = ProjectionIndex(col_ref.binding.column_index.GetIndex() + info.num_groups);
 		}
 	}
 	ExpressionIterator::EnumerateChildren(*expr,
@@ -456,16 +458,18 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					}
 
 					double filter_selectivity = 1.0;
-					if (!get->table_filters.filters.empty()) {
+					if (get->table_filters.HasFilters()) {
 						MySQLTableStats cached_filter_stats;
 						if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name,
 						                                          cached_filter_stats)) {
-							for (const auto &entry : get->table_filters.filters) {
-								column_t col_idx = entry.first;
-								if (col_idx >= bind_data->names.size()) {
+							for (const auto &entry : get->table_filters) {
+								ProjectionIndex proj_idx = entry.GetIndex();
+								ColumnIndex col_idx = get->GetColumnIndex(proj_idx);
+								column_t table_col_idx = col_idx.GetPrimaryIndex();
+								if (table_col_idx >= bind_data->names.size()) {
 									continue;
 								}
-								const string &col_name = bind_data->names[col_idx];
+								const string &col_name = bind_data->names[table_col_idx];
 								auto it = cached_filter_stats.column_distinct_count.find(col_name);
 								if (it != cached_filter_stats.column_distinct_count.end() && it->second > 0 &&
 								    cached_filter_stats.estimated_row_count > 0) {
@@ -491,7 +495,7 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 
 					idx_t num_groups = 0;
 					for (auto &group : aggr.groups) {
-						if (group->expression_class == ExpressionClass::BOUND_COLUMN_REF) {
+						if (group->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 							auto &col_ref = group->Cast<BoundColumnRefExpression>();
 							string col_name;
 							LogicalType col_type;
@@ -519,9 +523,9 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 
 				if (TryPushAggregateToMySQL(aggr, *aggr.children[0], *get, *bind_data)) {
 					AggregateRewriteInfo info;
-					info.group_index = aggr.group_index;
-					info.aggregate_index = aggr.aggregate_index;
-					info.scan_table_index = get->table_index;
+					info.group_index = aggr.group_index.index;
+					info.aggregate_index = aggr.aggregate_index.index;
+					info.scan_table_index = get->table_index.index;
 					info.num_groups = aggr.groups.size();
 					rewrites.push_back(info);
 					op->children[i] = std::move(aggr.children[0]);
@@ -534,9 +538,9 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 }
 
 static void CollectBindingRefs(Expression &expr, idx_t target_table_index, unordered_set<idx_t> &referenced) {
-	if (expr.expression_class == ExpressionClass::BOUND_COLUMN_REF) {
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 		auto &ref = expr.Cast<BoundColumnRefExpression>();
-		if (ref.binding.table_index == target_table_index) {
+		if (ref.binding.table_index.index == target_table_index) {
 			referenced.insert(ref.binding.column_index);
 		}
 	}
@@ -545,12 +549,12 @@ static void CollectBindingRefs(Expression &expr, idx_t target_table_index, unord
 }
 
 static void RewriteBindingRefs(Expression &expr, idx_t target_table_index, unordered_map<idx_t, idx_t> &old_to_new) {
-	if (expr.expression_class == ExpressionClass::BOUND_COLUMN_REF) {
+	if (expr.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 		auto &ref = expr.Cast<BoundColumnRefExpression>();
-		if (ref.binding.table_index == target_table_index) {
+		if (ref.binding.table_index.index == target_table_index) {
 			auto it = old_to_new.find(ref.binding.column_index);
 			if (it != old_to_new.end()) {
-				ref.binding.column_index = it->second;
+				ref.binding.column_index = ProjectionIndex(it->second);
 			}
 		}
 	}
@@ -572,7 +576,7 @@ static void PruneProjectionLayer(LogicalProjection &proj, const unordered_set<id
 
 	for (auto *above : above_projs) {
 		for (auto &expr : above->expressions) {
-			RewriteBindingRefs(*expr, proj.table_index, old_to_new);
+			RewriteBindingRefs(*expr, proj.table_index.index, old_to_new);
 		}
 	}
 }
@@ -618,7 +622,7 @@ static void PruneColumnsAfterOrderByRemoval(LogicalOperator &child, LogicalGet &
 
 		unordered_set<idx_t> needed;
 		for (auto &expr : prev_proj.expressions) {
-			CollectBindingRefs(*expr, curr_proj.table_index, needed);
+			CollectBindingRefs(*expr, curr_proj.table_index.index, needed);
 		}
 
 		if (needed.size() < curr_proj.expressions.size()) {
@@ -630,7 +634,7 @@ static void PruneColumnsAfterOrderByRemoval(LogicalOperator &child, LogicalGet &
 	auto &bottom_proj = *proj_chain.back();
 	unordered_set<idx_t> get_referenced;
 	for (auto &expr : bottom_proj.expressions) {
-		CollectBindingRefs(*expr, get.table_index, get_referenced);
+		CollectBindingRefs(*expr, get.table_index.index, get_referenced);
 	}
 
 	auto &column_ids = get.GetColumnIds();
@@ -648,7 +652,7 @@ static void PruneColumnsAfterOrderByRemoval(LogicalOperator &child, LogicalGet &
 
 		for (auto *proj : proj_chain) {
 			for (auto &expr : proj->expressions) {
-				RewriteBindingRefs(*expr, get.table_index, get_old_to_new);
+				RewriteBindingRefs(*expr, get.table_index.index, get_old_to_new);
 			}
 		}
 	}
@@ -695,7 +699,14 @@ void OptimizeOrderByAndLimit(ClientContext &context, unique_ptr<LogicalOperator>
 			if (TryBuildOrderByClause(order.orders, *op->children[0], *get, *bind_data, order_clause)) {
 				bind_data->order_by_clause = order_clause;
 				if (!order.projection_map.empty()) {
-					PruneColumnsAfterOrderByRemoval(*op->children[0], *get, order.projection_map);
+					vector<column_t> indices;
+					indices.reserve(order.projection_map.size());
+					for (auto proj_idx : order.projection_map) {
+						ColumnIndex col_idx = get->GetColumnIndex(proj_idx);
+						column_t table_col_idx = col_idx.GetPrimaryIndex();
+						indices.emplace_back(table_col_idx);
+					}
+					PruneColumnsAfterOrderByRemoval(*op->children[0], *get, indices);
 				}
 				op = std::move(op->children[0]);
 				return;

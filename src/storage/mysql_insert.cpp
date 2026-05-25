@@ -122,7 +122,7 @@ unique_ptr<GlobalSinkState> MySQLInsert::GetGlobalSinkState(ClientContext &conte
 static void MySQLCastBlob(const Vector &input, Vector &result, idx_t count) {
 	static constexpr const char *HEX_TABLE = "0123456789ABCDEF";
 	auto input_data = FlatVector::GetData<string_t>(input);
-	auto result_data = FlatVector::GetData<string_t>(result);
+	auto result_data = FlatVector::GetDataMutable<string_t>(result);
 	for (idx_t r = 0; r < count; r++) {
 		if (FlatVector::IsNull(input, r)) {
 			FlatVector::SetNull(result, r, true);
@@ -212,7 +212,7 @@ SinkResultType MySQLInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 			if (FlatVector::IsNull(gstate.varchar_chunk.data[c], r)) {
 				gstate.insert_values += "NULL";
 			} else {
-				auto data = FlatVector::GetData<string_t>(gstate.varchar_chunk.data[c]);
+				auto data = FlatVector::GetDataMutable<string_t>(gstate.varchar_chunk.data[c]);
 				if (add_quotes[c]) {
 					gstate.insert_values += MySQLUtils::WriteLiteral(data[r].GetString());
 				} else {

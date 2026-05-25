@@ -10,6 +10,9 @@ statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
+SET mysql_aggregate_pushdown_enabled = TRUE
+
+statement ok
 DROP TABLE IF EXISTS s1.agg_test;
 
 statement ok
