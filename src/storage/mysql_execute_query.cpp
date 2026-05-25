@@ -89,7 +89,8 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 		auto &filter = child.Cast<PhysicalFilter>();
 		auto result = ExtractFilters(child.children[0], statement);
 		auto filter_str = filter.expression->ToString();
-		if (result.empty()) {
+		// TODO: FIXME with non-string checks
+		if (result.empty() || result.find("__internal_") != std::string::npos) {
 			return filter_str;
 		} else {
 			return result + " AND " + filter_str;
@@ -97,7 +98,7 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 	} else if (child.type == PhysicalOperatorType::PROJECTION) {
 		auto &proj = child.Cast<PhysicalProjection>();
 		for (auto &expr : proj.select_list) {
-			switch (expr->type) {
+			switch (expr->GetExpressionType()) {
 			case ExpressionType::BOUND_REF:
 			case ExpressionType::BOUND_COLUMN_REF:
 			case ExpressionType::VALUE_CONSTANT:
@@ -115,9 +116,9 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 			return string();
 		}
 		string result;
-		for (auto &entry : table_scan.table_filters->filters) {
-			auto column_index = entry.first;
-			auto &filter = entry.second;
+		for (auto &entry : *table_scan.table_filters) {
+			auto column_index = entry.GetIndex();
+			auto &filter = entry.Filter();
 			string column_name;
 			if (column_index < table_scan.names.size()) {
 				const auto col_id = table_scan.column_ids[column_index].GetPrimaryIndex();
@@ -128,7 +129,7 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 				}
 			}
 			BoundReferenceExpression bound_ref(std::move(column_name), LogicalTypeId::INVALID, 0);
-			auto filter_expr = filter->ToExpression(bound_ref);
+			auto filter_expr = filter.ToExpression(bound_ref);
 			auto filter_str = filter_expr->ToString();
 			if (result.empty()) {
 				result = std::move(filter_str);
@@ -189,11 +190,11 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 		auto &col = op.table.GetColumn(op.table.GetColumns().PhysicalToLogical(op.columns[c]));
 		result += MySQLUtils::WriteIdentifier(col.GetName());
 		result += " = ";
-		if (op.expressions[c]->type == ExpressionType::VALUE_DEFAULT) {
+		if (op.expressions[c]->GetExpressionType() == ExpressionType::VALUE_DEFAULT) {
 			result += "DEFAULT";
 			continue;
 		}
-		if (op.expressions[c]->type != ExpressionType::BOUND_REF) {
+		if (op.expressions[c]->GetExpressionType() != ExpressionType::BOUND_REF) {
 			throw NotImplementedException("MySQL Update not supported - Expected a bound reference expression");
 		}
 		auto &ref = op.expressions[c]->Cast<BoundReferenceExpression>();

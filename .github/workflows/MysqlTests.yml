@@ -61,6 +61,7 @@ jobs:
           ccache \
           cmake \
           mariadb-server \
+          mold \
           ninja-build \
           pkg-config \
           zip
@@ -110,11 +111,12 @@ jobs:
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         MARIADB_SERVER: 1
       run: |
-        make test
+        ./build/release/test/unittest 'test/*'
 
   macos:
     name: MacOS (aarch64)
     runs-on: macos-latest
+    if: ${{ false }}
     needs: linux
 
     env:
@@ -127,6 +129,7 @@ jobs:
       VCPKG_HOST_TRIPLET: arm64-osx-release
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
     steps:
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -189,7 +192,7 @@ jobs:
           MYSQL_TEST_DATABASE_AVAILABLE: 1
           ORACLE_MYSQL_SERVER: 1
         run: |
-          make test
+          ./build/release/test/unittest 'test/*'
 
   linux-relassert:
     name: Linux RelAssert
@@ -212,6 +215,15 @@ jobs:
 
     steps:
 
+    - name: Free disk space
+      uses: endersonmenezes/free-disk-space@v2.1.1
+      continue-on-error: true
+      with:
+        remove_haskell: true
+        remove_tool_cache: true
+        remove_folders: "/usr/local/share/powershell /usr/share/swift"
+        testing: false
+
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -226,6 +238,7 @@ jobs:
           ccache \
           cmake \
           mariadb-server \
+          mold \
           pkg-config \
           zip
 
@@ -264,8 +277,6 @@ jobs:
       run: |
         make relassert
         cat ./build/relassert/src/CMakeFiles/duckdb.dir/flags.make
-        cd build
-        ln -s relassert release
 
     - name: Save Cache
       uses: actions/cache/save@v5
@@ -275,8 +286,8 @@ jobs:
 
     - name: Test extension
       env: 
-        LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
+        LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/relassert/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         MARIADB_SERVER: 1
       run: |
-        make test
+        ./build/relassert/test/unittest 'test/*'

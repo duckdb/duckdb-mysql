@@ -7,10 +7,10 @@ require mysql_scanner
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+SET GLOBAL mysql_simple_filter_pushdown=true;
 
 statement ok
 CREATE OR REPLACE TABLE s1.filter_pushdown(i INTEGER)

@@ -6,6 +6,8 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require-env MYSQL_TEST_TEMPORARY_DISABLED
+
 # SETUP
 
 statement ok

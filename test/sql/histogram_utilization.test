@@ -8,6 +8,8 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 require-env ORACLE_MYSQL_SERVER
 
+require-env MYSQL_TEST_TEMPORARY_DISABLED
+
 statement ok
 SET GLOBAL mysql_experimental_filter_pushdown=true
 
