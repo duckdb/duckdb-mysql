@@ -89,8 +89,7 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 		auto &filter = child.Cast<PhysicalFilter>();
 		auto result = ExtractFilters(child.children[0], statement);
 		auto filter_str = filter.expression->ToString();
-		// TODO: FIXME with non-string checks
-		if (result.empty() || result.find("__internal_") != std::string::npos) {
+		if (result.empty() || result.find("__internal_tablefilter_") == 0) {
 			return filter_str;
 		} else {
 			return result + " AND " + filter_str;
