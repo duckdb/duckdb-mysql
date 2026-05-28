@@ -432,47 +432,36 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	string filter_string;
 
 	if (bind_data.use_predicate_analyzer && input.filters && input.filters->HasFilters()) {
-		try {
-			MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache());
-			PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
-			ConfigurePredicateAnalyzer(context, analyzer);
+		MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache());
+		PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
+		ConfigurePredicateAnalyzer(context, analyzer);
 
-			fed.filter_analysis = analyzer.AnalyzeFilters(input.column_ids, input.filters, bind_data.names);
+		fed.filter_analysis = analyzer.AnalyzeFilters(input.column_ids, input.filters, bind_data.names);
 
-			vector<string> column_names;
-			for (idx_t c = 0; c < input.column_ids.size(); c++) {
-				if (input.column_ids[c] != COLUMN_IDENTIFIER_ROW_ID) {
-					auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
-					column_names.push_back(col.GetName());
-				}
+		vector<string> column_names;
+		for (idx_t c = 0; c < input.column_ids.size(); c++) {
+			if (input.column_ids[c] != COLUMN_IDENTIFIER_ROW_ID) {
+				auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
+				column_names.push_back(col.GetName());
 			}
+		}
 
-			if (!fed.filter_analysis.analyses.empty()) {
-				vector<string> filter_cols;
-				vector<double> sels;
-				for (const auto &analysis : fed.filter_analysis.analyses) {
-					filter_cols.push_back(analysis.column_name);
-					sels.push_back(analysis.estimated_selectivity);
-				}
-				ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
-				                                filter_cols, sels);
-
-				ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names,
-				                     cache_key);
-				ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
-
-				filter_string = BuildFilterString(fed);
-				BuildLocalFilterExpression(fed, bind_data, input.column_ids, input.filters);
-			} else {
-				filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
+		if (!fed.filter_analysis.analyses.empty()) {
+			vector<string> filter_cols;
+			vector<double> sels;
+			for (const auto &analysis : fed.filter_analysis.analyses) {
+				filter_cols.push_back(analysis.column_name);
+				sels.push_back(analysis.estimated_selectivity);
 			}
-		} catch (std::bad_alloc &) {
-			throw;
-		} catch (std::exception &e) {
-#ifndef NDEBUG
-			Printer::Print(StringUtil::Format("MySQL federation: falling back to simple pushdown (%s)", e.what()));
-#endif
-			fed = FederationState();
+			ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
+			                                filter_cols, sels);
+
+			ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names, cache_key);
+			ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
+
+			filter_string = BuildFilterString(fed);
+			BuildLocalFilterExpression(fed, bind_data, input.column_ids, input.filters);
+		} else {
 			filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
 		}
 	} else {

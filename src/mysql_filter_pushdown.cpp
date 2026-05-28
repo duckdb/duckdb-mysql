@@ -141,7 +141,18 @@ string MySQLFilterPushdown::TransformExpression(const string &column_name, const
 
 string MySQLFilterPushdown::TransformFilter(const string &column_name, const TableFilter &filter) {
 	auto &expr_filter = ExpressionFilter::GetExpressionFilter(filter, "MySQLFilterPushdown::TransformFilter");
-	return TransformExpression(column_name, *expr_filter.expr);
+	string filter_string = TransformExpression(column_name, *expr_filter.expr);
+	if (filter_string.empty()) {
+		string expr_str = expr_filter.expr->ToString();
+		// TODO: FIXME with non-string checks
+		if (expr_str.find("__internal_") == std::string::npos) {
+			throw NotImplementedException(
+			    "Unsupported filter pushdown, use 'mysql_enable_filter_pushdown=FALSE' to disable pushdowns."
+			    " Problematic filter: \"%s\"",
+			    expr_str);
+		}
+	}
+	return filter_string;
 }
 
 string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
@@ -155,9 +166,6 @@ string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
 		auto column_name = MySQLUtils::WriteIdentifier(names[column_ids[entry.GetIndex()]]);
 		auto &filter = entry.Filter();
 		auto new_filter = TransformFilter(column_name, filter);
-		if (new_filter.empty()) {
-			continue;
-		}
 		if (!result.empty()) {
 			result += " AND ";
 		}
