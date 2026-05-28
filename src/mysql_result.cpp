@@ -128,7 +128,7 @@ DataChunk &MySQLResult::NextChunk() {
 		WriteToChunk(r);
 	}
 
-	this->data_chunk.SetCardinality(r);
+	this->data_chunk.SetChildCardinality(r);
 	return this->data_chunk;
 }
 

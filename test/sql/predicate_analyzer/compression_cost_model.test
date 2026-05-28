@@ -1,18 +1,18 @@
-# name: test/sql/compression_cost_model.test
+# name: test/sql/predicate_analyzer/compression_cost_model.test
 # description: Test compression-aware transfer cost estimation
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create regular and compressed tables
 
@@ -112,3 +112,9 @@ DROP TABLE IF EXISTS s1.uncompressed_data;
 
 statement ok
 DROP TABLE IF EXISTS s1.compressed_data;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1

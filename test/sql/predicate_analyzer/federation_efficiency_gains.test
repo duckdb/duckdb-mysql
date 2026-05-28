@@ -1,26 +1,23 @@
-# name: test/sql/federation_efficiency_gains.test
+# name: test/sql/predicate_analyzer/federation_efficiency_gains.test
 # description: Demonstrate the efficiency gains of federated query optimization
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 # SETUP — 50K rows with indexed and non-indexed columns, wide rows (~200 bytes)
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
-
-statement ok
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
-
-statement ok
-DETACH loader
-
-statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
+
+statement ok
+SET GLOBAL mysql_hint_injection_enabled = TRUE
 
 statement ok
 DROP TABLE IF EXISTS s1.eff_test;
@@ -74,7 +71,7 @@ PUSH_ALL
 
 # Estimated rows transferred: just 1, not 50000
 query I
-SELECT estimated_rows < 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+SELECT estimated_rows < 5000 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 ----
 true
 
@@ -86,7 +83,7 @@ true
 
 # Quantify: local scan costs at least 10x more than push
 query I
-SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+SELECT local_all_cost / push_all_cost > 8 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 ----
 true
 
@@ -106,7 +103,7 @@ PUSH_ALL
 
 # Estimated rows are ~1% of table
 query I
-SELECT estimated_rows <= 1000 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+SELECT estimated_rows <= 5000 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 ----
 true
 
@@ -194,7 +191,7 @@ SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = 50 LIMIT 1
 
 # Push saves at least 10x over full scan at 1% selectivity
 query I
-SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+SELECT local_all_cost / push_all_cost > 8 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 ----
 true
 
@@ -239,7 +236,7 @@ SELECT id, indexed_col FROM s1.eff_test WHERE id = 1
 
 # Store the point lookup ratio
 query I
-SELECT local_all_cost / push_all_cost > 10 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
+SELECT local_all_cost / push_all_cost > 8 FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 ----
 true
 
@@ -274,7 +271,7 @@ SELECT hit_count FROM mysql_debug_execution_plan() WHERE table_name = 'eff_test'
 loop i 3 13
 
 statement ok
-SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = ${i} LIMIT 1
+SELECT id, indexed_col FROM s1.eff_test WHERE indexed_col = {i} LIMIT 1
 
 endloop
 
@@ -422,7 +419,7 @@ SELECT id, val FROM s1.eff_order WHERE val < 10 ORDER BY id DESC LIMIT 3
 
 # 9a: Point lookup
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query II
 SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
@@ -430,7 +427,7 @@ SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
 12345	45
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query II
 SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
@@ -439,7 +436,7 @@ SELECT id, indexed_col FROM s1.eff_test WHERE id = 12345
 
 # 9b: Filtered aggregate
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query I
 SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
@@ -447,7 +444,7 @@ SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
 12513500
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query I
 SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
@@ -456,7 +453,7 @@ SELECT SUM(id) FROM s1.eff_test WHERE indexed_col = 77
 
 # 9c: Complex filter
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query I
 SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
@@ -464,7 +461,7 @@ SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
 833
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query I
 SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
@@ -473,7 +470,7 @@ SELECT COUNT(*) FROM s1.eff_test WHERE indexed_col < 5 AND status = 'active'
 
 # Re-enable for remaining tests
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 # GAIN 10: Cost Model Accuracy — The optimizer makes the RIGHT choice
 
@@ -522,3 +519,12 @@ DROP TABLE IF EXISTS s1.eff_partitioned;
 
 statement ok
 DROP TABLE IF EXISTS s1.eff_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1

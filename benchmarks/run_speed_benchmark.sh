@@ -176,7 +176,7 @@ time_query() {
     output=$("$DUCKDB" -unsigned -csv -noheader -c "
         ATTACH '$CONN_STRING' AS loader (TYPE MYSQL_SCANNER);
         DETACH loader;
-        SET GLOBAL mysql_experimental_filter_pushdown=$mode;
+        SET GLOBAL mysql_enable_predicate_analyzer=$mode;
         ATTACH '$CONN_STRING' AS s1 (TYPE MYSQL_SCANNER);
         CALL mysql_clear_cache();
         $query;

@@ -126,7 +126,7 @@ static void DebugExecutionPlanFunction(ClientContext &context, TableFunctionInpu
 		data.offset++;
 		count++;
 	}
-	output.SetCardinality(count);
+	output.SetChildCardinality(count);
 }
 
 MySQLExplainFederatedFunction::MySQLExplainFederatedFunction()

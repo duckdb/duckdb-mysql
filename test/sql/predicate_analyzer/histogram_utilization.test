@@ -1,6 +1,6 @@
-# name: test/sql/histogram_utilization.test
+# name: test/sql/predicate_analyzer/histogram_utilization.test
 # description: Test MySQL 8.0+ histogram statistics utilization for selectivity estimation
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
@@ -8,13 +8,13 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 require-env ORACLE_MYSQL_SERVER
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
-
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create table with skewed data distribution
 
@@ -131,6 +131,9 @@ CALL mysql_execute('s1', 'ANALYZE TABLE histogram_test DROP HISTOGRAM ON skewed_
 
 statement ok
 DROP TABLE IF EXISTS s1.histogram_test
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
 
 statement ok
 DETACH s1

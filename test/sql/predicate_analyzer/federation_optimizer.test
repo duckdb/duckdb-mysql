@@ -1,18 +1,18 @@
-# name: test/sql/federation_optimizer.test
+# name: test/sql/predicate_analyzer/federation_optimizer.test
 # description: Test federation optimizer components (statistics, predicate analyzer, cost model)
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create tables with indexes for optimizer testing
 
@@ -179,3 +179,9 @@ SELECT COUNT(*) FROM s1.optimizer_test WHERE indexed_col < 100
 
 statement ok
 DROP TABLE IF EXISTS s1.optimizer_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1
