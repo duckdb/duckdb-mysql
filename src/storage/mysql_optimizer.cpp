@@ -202,8 +202,17 @@ static bool CanPushAggregate(LogicalAggregate &aggr) {
 	return true;
 }
 
-static bool TraceBindingToMySQLColumn(ColumnBinding binding, LogicalOperator &child, LogicalGet &get,
-                                      MySQLBindData &bind_data, string &col_name, LogicalType &col_type) {
+struct TracedBindingColumn {
+	string col_name;
+	LogicalType col_type;
+
+	bool Found() {
+		return !col_name.empty();
+	}
+};
+
+static TracedBindingColumn TraceBindingToMySQLColumn(ColumnBinding binding, LogicalOperator &child, LogicalGet &get) {
+	TracedBindingColumn res;
 	reference<LogicalOperator> current = child;
 	while (current.get().type == LogicalOperatorType::LOGICAL_PROJECTION) {
 		auto &proj = current.get().Cast<LogicalProjection>();
@@ -211,44 +220,55 @@ static bool TraceBindingToMySQLColumn(ColumnBinding binding, LogicalOperator &ch
 			break;
 		}
 		if (binding.column_index >= proj.expressions.size()) {
-			return false;
+			return res;
 		}
 		auto &proj_expr = *proj.expressions[binding.column_index];
 		if (proj_expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
-			return false;
+			return res;
 		}
 		auto &inner_ref = proj_expr.Cast<BoundColumnRefExpression>();
 		if (inner_ref.depth > 0) {
-			return false;
+			return res;
 		}
 		binding = inner_ref.binding;
 		current = *current.get().children[0];
 	}
 
 	if (binding.table_index != get.table_index) {
-		return false;
+		return res;
 	}
 	auto &column_ids = get.GetColumnIds();
 	if (binding.column_index >= column_ids.size()) {
-		return false;
+		return res;
 	}
 	auto &col_index = column_ids[binding.column_index];
 	if (col_index.IsRowIdColumn()) {
-		return false;
+		return res;
 	}
 	auto actual_col_idx = col_index.GetPrimaryIndex();
-	if (actual_col_idx >= bind_data.names.size()) {
-		return false;
+	if (actual_col_idx >= get.names.size()) {
+		return res;
 	}
-	col_name = bind_data.names[actual_col_idx];
-	col_type = bind_data.types[actual_col_idx];
-	return true;
+	res.col_name = get.names[actual_col_idx];
+	res.col_type = get.returned_types[actual_col_idx];
+	return res;
 }
 
-static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &aggr_child, LogicalGet &get,
-                                    MySQLBindData &bind_data) {
+struct PushedAggregate {
+	string select_list;
+	string group_by_clause;
+	string where_clause;
+	bool success = false;
+
+	bool PushedDown() {
+		return success;
+	}
+};
+
+static PushedAggregate TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &aggr_child, LogicalGet &get) {
+	PushedAggregate res;
 	if (!CanPushAggregate(aggr)) {
-		return false;
+		return res;
 	}
 
 	vector<string> select_fragments;
@@ -258,16 +278,15 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 
 	for (auto &group : aggr.groups) {
 		auto &col_ref = group->Cast<BoundColumnRefExpression>();
-		string col_name;
-		LogicalType col_type;
-		if (!TraceBindingToMySQLColumn(col_ref.binding, aggr_child, get, bind_data, col_name, col_type)) {
-			return false;
+		TracedBindingColumn traced_binding = TraceBindingToMySQLColumn(col_ref.binding, aggr_child, get);
+		if (!traced_binding.Found()) {
+			return res;
 		}
-		string quoted = MySQLUtils::WriteIdentifier(col_name);
+		string quoted = MySQLUtils::WriteIdentifier(traced_binding.col_name);
 		select_fragments.push_back(quoted);
 		group_names.push_back(quoted);
-		new_types.push_back(col_type);
-		new_names.push_back(col_name);
+		new_types.push_back(traced_binding.col_type);
+		new_names.push_back(traced_binding.col_name);
 	}
 
 	idx_t agg_idx = 0;
@@ -280,12 +299,11 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 			fragment = "COUNT(*) AS " + MySQLUtils::WriteIdentifier(alias);
 		} else {
 			auto &child_ref = agg_expr.children[0]->Cast<BoundColumnRefExpression>();
-			string col_name;
-			LogicalType col_type;
-			if (!TraceBindingToMySQLColumn(child_ref.binding, aggr_child, get, bind_data, col_name, col_type)) {
-				return false;
+			TracedBindingColumn traced_binding = TraceBindingToMySQLColumn(child_ref.binding, aggr_child, get);
+			if (!traced_binding.Found()) {
+				return res;
 			}
-			string quoted_col = MySQLUtils::WriteIdentifier(col_name);
+			string quoted_col = MySQLUtils::WriteIdentifier(traced_binding.col_name);
 			string func_upper;
 			if (agg_expr.function.GetName() == "count") {
 				func_upper = "COUNT";
@@ -298,13 +316,13 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 			} else if (agg_expr.function.GetName() == "max") {
 				func_upper = "MAX";
 			} else {
-				return false;
+				return res;
 			}
-			if (func_upper == "SUM" && col_type.id() == LogicalTypeId::DECIMAL) {
-				return false;
+			if (func_upper == "SUM" && traced_binding.col_type.id() == LogicalTypeId::DECIMAL) {
+				return res;
 			}
-			if (func_upper == "AVG" && col_type.id() == LogicalTypeId::DECIMAL) {
-				return false;
+			if (func_upper == "AVG" && traced_binding.col_type.id() == LogicalTypeId::DECIMAL) {
+				return res;
 			}
 			string agg_sql = func_upper + "(" + quoted_col + ")";
 			if (func_upper == "AVG") {
@@ -319,10 +337,10 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 		agg_idx++;
 	}
 
-	bind_data.aggregate_select_list = StringUtil::Join(select_fragments, ", ");
+	res.select_list = StringUtil::Join(select_fragments, ", ");
 
 	if (!group_names.empty()) {
-		bind_data.group_by_clause = " GROUP BY " + StringUtil::Join(group_names, ", ");
+		res.group_by_clause = " GROUP BY " + StringUtil::Join(group_names, ", ");
 	}
 
 	if (get.table_filters.HasFilters()) {
@@ -331,13 +349,13 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 			ProjectionIndex proj_idx = entry.GetIndex();
 			ColumnIndex col_idx = get.GetColumnIndex(proj_idx);
 			column_t table_col_idx = col_idx.GetPrimaryIndex();
-			if (table_col_idx >= bind_data.names.size()) {
-				return false;
+			if (table_col_idx >= get.names.size()) {
+				return res;
 			}
-			auto column_name = MySQLUtils::WriteIdentifier(bind_data.names[table_col_idx]);
+			auto column_name = MySQLUtils::WriteIdentifier(get.names[table_col_idx]);
 			auto new_filter = MySQLFilterPushdown::TransformFilter(column_name, entry.Filter());
 			if (new_filter.empty()) {
-				return false;
+				return res;
 			}
 			if (!where_clause.empty()) {
 				where_clause += " AND ";
@@ -345,7 +363,7 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 			where_clause += new_filter;
 		}
 		if (!where_clause.empty()) {
-			bind_data.aggregate_where_clause = where_clause;
+			res.where_clause = where_clause;
 		}
 	}
 
@@ -359,15 +377,14 @@ static bool TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOperator &agg
 	get.projection_ids.clear();
 	get.table_filters.ClearFilters();
 
-	bind_data.has_aggregate_pushdown = true;
-
-	return true;
+	res.success = true;
+	return res;
 }
 
 struct AggregateRewriteInfo {
-	idx_t group_index;
-	idx_t aggregate_index;
-	idx_t scan_table_index;
+	TableIndex group_index;
+	TableIndex aggregate_index;
+	TableIndex scan_table_index;
 	idx_t num_groups;
 };
 
@@ -377,10 +394,10 @@ static void RewriteExpression(unique_ptr<Expression> &expr, AggregateRewriteInfo
 		if (col_ref.depth > 0) {
 			return;
 		}
-		if (col_ref.binding.table_index.index == info.group_index) {
-			col_ref.binding.table_index = TableIndex(info.scan_table_index);
-		} else if (col_ref.binding.table_index.index == info.aggregate_index) {
-			col_ref.binding.table_index = TableIndex(info.scan_table_index);
+		if (col_ref.binding.table_index == info.group_index) {
+			col_ref.binding.table_index = info.scan_table_index;
+		} else if (col_ref.binding.table_index == info.aggregate_index) {
+			col_ref.binding.table_index = info.scan_table_index;
 			col_ref.binding.column_index = ProjectionIndex(col_ref.binding.column_index.GetIndex() + info.num_groups);
 		}
 	}
@@ -505,11 +522,10 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					for (auto &group : aggr.groups) {
 						if (group->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 							auto &col_ref = group->Cast<BoundColumnRefExpression>();
-							string col_name;
-							LogicalType col_type;
-							if (TraceBindingToMySQLColumn(col_ref.binding, *aggr.children[0], *get, *bind_data,
-							                              col_name, col_type)) {
-								auto it = table_stats.column_distinct_count.find(col_name);
+							TracedBindingColumn traced_binding =
+							    TraceBindingToMySQLColumn(col_ref.binding, *aggr.children[0], *get);
+							if (traced_binding.Found()) {
+								auto it = table_stats.column_distinct_count.find(traced_binding.col_name);
 								if (it != table_stats.column_distinct_count.end() && it->second > 0) {
 									num_groups = std::max(num_groups, it->second);
 								}
@@ -529,11 +545,16 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					}
 				}
 
-				if (TryPushAggregateToMySQL(aggr, *aggr.children[0], *get, *bind_data)) {
+				PushedAggregate pushed_aggr = TryPushAggregateToMySQL(aggr, *aggr.children[0], *get);
+				bind_data->aggregate_select_list = pushed_aggr.select_list;
+				bind_data->group_by_clause = pushed_aggr.group_by_clause;
+				bind_data->aggregate_where_clause = pushed_aggr.where_clause;
+				bind_data->has_aggregate_pushdown = pushed_aggr.PushedDown();
+				if (pushed_aggr.PushedDown()) {
 					AggregateRewriteInfo info;
-					info.group_index = aggr.group_index.index;
-					info.aggregate_index = aggr.aggregate_index.index;
-					info.scan_table_index = get->table_index.index;
+					info.group_index = aggr.group_index;
+					info.aggregate_index = aggr.aggregate_index;
+					info.scan_table_index = get->table_index;
 					info.num_groups = aggr.groups.size();
 					rewrites.push_back(info);
 					op->children[i] = std::move(aggr.children[0]);

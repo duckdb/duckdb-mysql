@@ -357,22 +357,20 @@ SELECT execution_count FROM mysql_debug_execution_plan() WHERE table_name = 'ben
 statement ok
 SELECT id, category FROM s1.bench_main WHERE category < 3
 
-# FIXME
 # Entry was evicted by adaptive feedback — plan cache is empty for this table
 query I
 SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
 ----
-1
+0
 
 # 5d: Fourth execution re-populates the cache with a fresh plan
 statement ok
 SELECT id, category FROM s1.bench_main WHERE category < 3
 
-# FIXME
 query I
 SELECT execution_count FROM mysql_debug_execution_plan() WHERE table_name = 'bench_main'
 ----
-4
+1
 
 # SECTION 6: Cost Model Validation — Costs Are Positive and Well-Formed
 

@@ -77,7 +77,7 @@ private:
 
 	bool CanPushFilter(const TableFilter &filter) const;
 	bool IsPushableFilterType(TableFilterType type) const;
-	double EstimateFilterSelectivity(const string &column_name, const TableFilter &filter);
+	double EstimateExpressionSelectivity(const string &column_name, const Expression &expr);
 	PushdownDecision MakePushdownDecision(double selectivity, bool has_index) const;
 	string TransformFilterToMySQL(const string &column_name, const TableFilter &filter) const;
 	string TransformComparisonOperator(ExpressionType type) const;
