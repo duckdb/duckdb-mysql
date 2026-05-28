@@ -535,7 +535,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 				                                                  gstate.cache_generation);
 				gstate.feedback_submitted = true;
 			}
-			output.SetCardinality(0);
+			output.SetChildCardinality(0);
 			return;
 		}
 
@@ -586,12 +586,12 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			SelectionVector sel(output.size());
 			idx_t result_count = gstate.local_filter_executor->SelectExpression(output, sel);
 			if (result_count == 0) {
-				output.SetCardinality(0);
+				output.SetChildCardinality(0);
 				continue;
 			}
 			if (result_count < output.size()) {
 				output.Slice(sel, result_count);
-				output.SetCardinality(result_count);
+				output.SetChildCardinality(result_count);
 			}
 			return;
 		} else {

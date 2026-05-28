@@ -10,9 +10,6 @@ statement ok
 ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
-SET GLOBAL mysql_simple_filter_pushdown=true;
-
-statement ok
 CREATE OR REPLACE TABLE s1.filter_pushdown(i INTEGER)
 
 statement ok

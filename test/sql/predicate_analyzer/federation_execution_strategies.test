@@ -1,18 +1,18 @@
-# name: test/sql/federation_execution_strategies.test
+# name: test/sql/predicate_analyzer/federation_execution_strategies.test
 # description: Test that all execution strategies (PUSH_ALL, HYBRID) produce correct results
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create tables with different characteristics
 
@@ -250,3 +250,9 @@ SELECT SUM(id + indexed_val) FROM s1.exec_strategy_test WHERE indexed_val = 99
 
 statement ok
 DROP TABLE IF EXISTS s1.exec_strategy_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1

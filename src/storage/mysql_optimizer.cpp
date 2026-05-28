@@ -1,5 +1,6 @@
 #include "storage/mysql_optimizer.hpp"
 #include "storage/mysql_catalog.hpp"
+#include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 #include "duckdb/planner/operator/logical_limit.hpp"
 #include "duckdb/planner/operator/logical_order.hpp"
@@ -401,6 +402,13 @@ static void RewriteBindingsInOperator(LogicalOperator &op, AggregateRewriteInfo 
 		auto &topn = op.Cast<LogicalTopN>();
 		for (auto &node : topn.orders) {
 			RewriteExpression(node.expression, info);
+		}
+	}
+	if (op.type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
+		auto &join = op.Cast<LogicalComparisonJoin>();
+		for (auto &cond : join.conditions) {
+			RewriteExpression(cond.LeftReference(), info);
+			RewriteExpression(cond.RightReference(), info);
 		}
 	}
 }

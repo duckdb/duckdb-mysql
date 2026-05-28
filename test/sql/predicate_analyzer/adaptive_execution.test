@@ -1,24 +1,18 @@
-# name: test/sql/adaptive_execution.test
+# name: test/sql/predicate_analyzer/adaptive_execution.test
 # description: Test adaptive execution strategy with plan cache feedback
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require-env MYSQL_TEST_TEMPORARY_DISABLED
-
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
-
-statement ok
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
-
-statement ok
-DETACH loader
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create table for adaptive testing
 
@@ -122,3 +116,9 @@ SELECT COUNT(*), SUM(value) FROM s1.adaptive_test WHERE category = 5;
 
 statement ok
 DROP TABLE IF EXISTS s1.adaptive_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1
