@@ -141,16 +141,13 @@ string MySQLFilterPushdown::TransformExpression(const string &column_name, const
 
 string MySQLFilterPushdown::TransformFilter(const string &column_name, const TableFilter &filter) {
 	auto &expr_filter = ExpressionFilter::GetExpressionFilter(filter, "MySQLFilterPushdown::TransformFilter");
-	string filter_string = TransformExpression(column_name, *expr_filter.expr);
-	if (filter_string.empty()) {
-		string expr_str = expr_filter.expr->ToString();
-		// TODO: FIXME with non-string checks
-		if (expr_str.find("__internal_") == std::string::npos) {
-			throw NotImplementedException(
-			    "Unsupported filter pushdown, use 'mysql_enable_filter_pushdown=FALSE' to disable pushdowns."
-			    " Problematic filter: \"%s\"",
-			    expr_str);
-		}
+	auto &expr = *expr_filter.expr;
+	string filter_string = TransformExpression(column_name, expr);
+	if (filter_string.empty() && expr.GetExpressionClass() != ExpressionClass::BOUND_FUNCTION) {
+		throw NotImplementedException(
+		    "Unsupported filter pushdown, use 'mysql_enable_filter_pushdown=FALSE' to disable pushdowns."
+		    " Problematic filter: \"%s\"",
+		    expr.ToString());
 	}
 	return filter_string;
 }
