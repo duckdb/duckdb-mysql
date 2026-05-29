@@ -14,6 +14,8 @@
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
 
+#include "dbconn/table_scan/filter_pushdown.hpp"
+
 namespace duckdb {
 
 struct MySQLOperators {
@@ -352,8 +354,10 @@ static PushedAggregate TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOp
 			if (table_col_idx >= get.names.size()) {
 				return res;
 			}
-			auto column_name = MySQLUtils::WriteIdentifier(get.names[table_col_idx]);
-			auto new_filter = MySQLFilterPushdown::TransformFilter(column_name, entry.Filter());
+			auto column_name = get.names[table_col_idx];
+			dbconnector::table_scan::FilterPushdownConfig config('`');
+			auto new_filter =
+			    dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, entry.Filter());
 			if (new_filter.empty()) {
 				return res;
 			}

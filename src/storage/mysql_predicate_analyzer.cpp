@@ -1,5 +1,4 @@
 #include "storage/mysql_predicate_analyzer.hpp"
-#include "mysql_filter_pushdown.hpp"
 #include "mysql_utils.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
@@ -7,6 +6,8 @@
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/planner/table_filter_set.hpp"
+
+#include "dbconn/table_scan/filter_pushdown.hpp"
 
 #include <cmath>
 #include <unordered_set>
@@ -149,7 +150,8 @@ PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, co
 	PredicateAnalysis result;
 	result.column_name = column_name;
 
-	result.mysql_predicate = MySQLFilterPushdown::TransformFilter(column_name, filter);
+	dbconnector::table_scan::FilterPushdownConfig config('`');
+	result.mysql_predicate = dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, filter);
 	if (result.mysql_predicate.empty()) {
 		result.decision = PushdownDecision::EXECUTE_IN_DUCKDB;
 		result.estimated_selectivity = DEFAULT_SELECTIVITY;

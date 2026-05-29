@@ -16,6 +16,11 @@ add_library(
   mysql_storage.cpp
   mysql_types.cpp
   mysql_utils.cpp)
+
+add_library(mysql_ext_dbconn OBJECT dbconn/query/query_writer.cpp
+                                    dbconn/table_scan/filter_pushdown.cpp)
+
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:mysql_ext_library>
+    $<TARGET_OBJECTS:mysql_ext_dbconn>
     PARENT_SCOPE)
