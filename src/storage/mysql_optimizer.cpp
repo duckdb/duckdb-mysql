@@ -22,26 +22,6 @@ struct MySQLOperators {
 	reference_map_t<MySQLCatalog, vector<reference<LogicalGet>>> scans;
 };
 
-void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
-	if (op.type == LogicalOperatorType::LOGICAL_GET) {
-		auto &get = op.Cast<LogicalGet>();
-		auto &table_scan = get.function;
-		if (MySQLCatalog::IsMySQLScan(table_scan.name)) {
-			auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-			auto &catalog = bind_data.table.ParentCatalog().Cast<MySQLCatalog>();
-			result.scans[catalog].push_back(get);
-		}
-		if (MySQLCatalog::IsMySQLQuery(table_scan.name)) {
-			auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
-			auto &catalog = bind_data.catalog.Cast<MySQLCatalog>();
-			result.scans[catalog].push_back(get);
-		}
-	}
-	for (auto &child : op.children) {
-		GatherMySQLScans(*child, result);
-	}
-}
-
 static bool TraceColumnToGet(Expression &expr, LogicalOperator &child, LogicalGet &get, MySQLBindData &bind_data,
                              string &out) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
@@ -801,25 +781,6 @@ void OptimizeOrderByAndLimit(ClientContext &context, unique_ptr<LogicalOperator>
 }
 
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
-	MySQLOperators operators;
-	GatherMySQLScans(*plan, operators);
-	for (auto &entry : operators.scans) {
-		MySQLResultStreaming result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
-		if (entry.second.size() == 1) {
-			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
-		}
-		for (auto &logical_get : entry.second) {
-			auto &get = logical_get.get();
-			if (MySQLCatalog::IsMySQLScan(get.function.name)) {
-				auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
-				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
-					bind_data.streaming = result_streaming;
-				}
-			}
-		}
-	}
-
 	vector<AggregateRewriteInfo> rewrites;
 	OptimizeAggregates(input.context, plan, rewrites);
 	for (auto &info : rewrites) {

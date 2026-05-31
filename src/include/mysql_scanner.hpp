@@ -34,7 +34,6 @@ struct MySQLBindData : public FunctionData {
 	string group_by_clause;
 	string aggregate_where_clause;
 	bool has_aggregate_pushdown = false;
-	MySQLResultStreaming streaming = MySQLResultStreaming::UNINITIALIZED;
 
 	bool use_predicate_analyzer = false;
 

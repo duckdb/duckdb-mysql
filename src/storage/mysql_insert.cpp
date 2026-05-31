@@ -321,7 +321,6 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 	if (op.on_conflict_info.action_type != OnConflictAction::THROW) {
 		throw BinderException("ON CONFLICT clause not yet supported for insertion into MySQL table");
 	}
-	MySQLCatalog::MaterializeMySQLScans(*plan);
 
 	D_ASSERT(plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
@@ -332,7 +331,6 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 
 PhysicalOperator &MySQLCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                   LogicalCreateTable &op, PhysicalOperator &plan) {
-	MySQLCatalog::MaterializeMySQLScans(plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, plan);
 	auto &insert = planner.Make<MySQLInsert>(op, op.schema, std::move(op.info));
 	insert.children.push_back(inner_plan);
