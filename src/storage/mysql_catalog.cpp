@@ -481,19 +481,6 @@ bool MySQLCatalog::IsMySQLQuery(const string &name) {
 	return name == "mysql_query";
 }
 
-void MySQLCatalog::MaterializeMySQLScans(PhysicalOperator &op) {
-	if (op.type == PhysicalOperatorType::TABLE_SCAN) {
-		auto &table_scan = op.Cast<PhysicalTableScan>();
-		if (MySQLCatalog::IsMySQLScan(table_scan.function.name)) {
-			auto &bind_data = table_scan.bind_data->Cast<MySQLBindData>();
-			bind_data.streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
-		}
-	}
-	for (auto &child : op.children) {
-		MaterializeMySQLScans(child);
-	}
-}
-
 DatabaseSize MySQLCatalog::GetDatabaseSize(ClientContext &context) {
 	if (default_schema.empty()) {
 		throw InvalidInputException("Attempting to fetch the database size - but no database was provided "
