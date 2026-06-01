@@ -362,37 +362,40 @@ static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &
 	}
 }
 
-static string BuildAggregateQuery(const MySQLBindData &bind_data) {
-	string sql = "SELECT " + bind_data.aggregate_select_list;
+static string BuildAggregateQuery(MySQLBindData &bind_data) {
+	auto &aggr_bind_data = bind_data.aggregate_bind_data;
+	string sql = "SELECT " + aggr_bind_data.aggregate_select_list;
 	sql += " FROM ";
 	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
 	sql += ".";
 	sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
-	if (!bind_data.aggregate_where_clause.empty()) {
-		sql += " WHERE " + bind_data.aggregate_where_clause;
+	if (!aggr_bind_data.aggregate_where_clause.empty()) {
+		sql += " WHERE " + aggr_bind_data.aggregate_where_clause;
 	}
-	if (!bind_data.group_by_clause.empty()) {
-		sql += bind_data.group_by_clause;
+	if (!aggr_bind_data.group_by_clause.empty()) {
+		sql += aggr_bind_data.group_by_clause;
 	}
-	if (!bind_data.order_by_and_limit_bind_data.order_by_clause.empty()) {
-		sql += bind_data.order_by_and_limit_bind_data.order_by_clause;
+	auto order_bind_data = bind_data.order_by_and_limit_bind_data;
+	if (!order_bind_data.order_by_clause.empty()) {
+		sql += order_bind_data.order_by_clause;
 	}
-	if (!bind_data.order_by_and_limit_bind_data.limit_clause.empty()) {
-		sql += bind_data.order_by_and_limit_bind_data.limit_clause;
+	if (!order_bind_data.limit_clause.empty()) {
+		sql += order_bind_data.limit_clause;
 	}
 	return sql;
 }
 
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
-	const auto &bind_data = input.bind_data->Cast<MySQLBindData>();
+	auto &bind_data = input.bind_data->CastNoConst<MySQLBindData>();
 	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
 	auto &con = transaction.GetConnection();
 
 	FederationState fed;
 	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
+	auto &aggr_bind_data = bind_data.aggregate_bind_data;
 
-	if (bind_data.has_aggregate_pushdown) {
+	if (aggr_bind_data.has_aggregate_pushdown) {
 		string select = BuildAggregateQuery(bind_data);
 
 		Value hint_injection_enabled_val;

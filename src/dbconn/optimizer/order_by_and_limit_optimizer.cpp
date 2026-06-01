@@ -10,10 +10,8 @@
 #include "duckdb/planner/expression_iterator.hpp"
 
 #include "dbconn/bind_data.hpp"
+#include "dbconn/optimizer/optimizer_util.hpp"
 #include "dbconn/query/query_writer.hpp"
-
-// todo: removme
-#include <iostream>
 
 namespace dbconnector {
 namespace optimizer {
@@ -22,6 +20,7 @@ using namespace duckdb;
 
 OrderByAndLimitOptimizer::Config OrderByAndLimitOptimizer::CreateConfig(ClientContext &ctx,
                                                                         const std::string &enabled_option,
+                                                                        char identifier_quote,
                                                                         std::string table_scan_name) {
 	Config res;
 
@@ -31,33 +30,14 @@ OrderByAndLimitOptimizer::Config OrderByAndLimitOptimizer::CreateConfig(ClientCo
 		res.enabled = BooleanValue::Get(enabled_val);
 	}
 
+	res.identifier_quote = identifier_quote;
 	res.table_scan_name = std::move(table_scan_name);
 
 	return res;
 }
 
-static bool FindExtensionGet(const std::string &table_scan_name, LogicalOperator &start, LogicalGet *&get_out,
-                             dbconnector::BindData *&bind_out) {
-	reference<LogicalOperator> current = start;
-	while (current.get().type == LogicalOperatorType::LOGICAL_PROJECTION) {
-		if (current.get().children.empty()) {
-			return false;
-		}
-		current = *current.get().children[0];
-	}
-	if (current.get().type != LogicalOperatorType::LOGICAL_GET) {
-		return false;
-	}
-	auto &get = current.get().Cast<LogicalGet>();
-	if (get.function.name != table_scan_name) {
-		return false;
-	}
-	get_out = &get;
-	bind_out = &get.bind_data->Cast<dbconnector::BindData>();
-	return true;
-}
-
-static string TraceColumnToGet(Expression &expr, LogicalOperator &child, LogicalGet &get) {
+static string TraceColumnToGet(const OrderByAndLimitOptimizer::Config &config, Expression &expr, LogicalOperator &child,
+                               LogicalGet &get) {
 	if (expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
 		return std::string();
 	}
@@ -104,14 +84,14 @@ static string TraceColumnToGet(Expression &expr, LogicalOperator &child, Logical
 	if (actual_col_idx >= get.names.size()) {
 		return std::string();
 	}
-	// TODO: quote
-	return dbconnector::query::QueryWriter::WriteIdentifier(get.names[actual_col_idx], '`');
+	return dbconnector::query::QueryWriter::WriteIdentifier(get.names[actual_col_idx], config.identifier_quote);
 }
 
-static string TryBuildOrderByClause(vector<BoundOrderByNode> &orders, LogicalOperator &child, LogicalGet &get) {
+static string TryBuildOrderByClause(const OrderByAndLimitOptimizer::Config &config, vector<BoundOrderByNode> &orders,
+                                    LogicalOperator &child, LogicalGet &get) {
 	vector<string> fragments;
 	for (auto &order : orders) {
-		string col_name = TraceColumnToGet(*order.expression, child, get);
+		string col_name = TraceColumnToGet(config, *order.expression, child, get);
 		if (col_name.empty()) {
 			return std::string();
 		}
@@ -275,8 +255,8 @@ void OrderByAndLimitOptimizer::Optimize(const OrderByAndLimitOptimizer::Config &
 		auto &topn = op->Cast<LogicalTopN>();
 		LogicalGet *get = nullptr;
 		dbconnector::BindData *bind_data = nullptr;
-		if (FindExtensionGet(config.table_scan_name, *op->children[0], get, bind_data)) {
-			string order_clause = TryBuildOrderByClause(topn.orders, *op->children[0], *get);
+		if (OptimizerUtil::FindExtensionGet(config.table_scan_name, *op->children[0], get, bind_data)) {
+			string order_clause = TryBuildOrderByClause(config, topn.orders, *op->children[0], *get);
 			if (!order_clause.empty()) {
 				auto &order_by_and_limit_bind_data = bind_data->GetOrderByAndLimitBindData();
 				order_by_and_limit_bind_data.order_by_clause = order_clause;
@@ -297,8 +277,8 @@ void OrderByAndLimitOptimizer::Optimize(const OrderByAndLimitOptimizer::Config &
 		auto &order = op->Cast<LogicalOrder>();
 		LogicalGet *get = nullptr;
 		dbconnector::BindData *bind_data = nullptr;
-		if (FindExtensionGet(config.table_scan_name, *op->children[0], get, bind_data)) {
-			string order_clause = TryBuildOrderByClause(order.orders, *op->children[0], *get);
+		if (OptimizerUtil::FindExtensionGet(config.table_scan_name, *op->children[0], get, bind_data)) {
+			string order_clause = TryBuildOrderByClause(config, order.orders, *op->children[0], *get);
 			if (!order_clause.empty()) {
 				auto &order_by_and_limit_bind_data = bind_data->GetOrderByAndLimitBindData();
 				order_by_and_limit_bind_data.order_by_clause = order_clause;
