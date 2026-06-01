@@ -61,7 +61,7 @@ SourceResultType MySQLExecuteQuery::GetDataInternal(ExecutionContext &context, D
                                                     OperatorSourceInput &input) const {
 	auto &insert_gstate = sink_state->Cast<MySQLExecuteQueryGlobalState>();
 	chunk.SetChildCardinality(1);
-	chunk.SetValue(0, 0, Value::BIGINT(insert_gstate.affected_rows));
+	chunk.data[0].SetValue(0, Value::BIGINT(insert_gstate.affected_rows));
 
 	return SourceResultType::FINISHED;
 }
