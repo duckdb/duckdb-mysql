@@ -477,10 +477,6 @@ bool MySQLCatalog::IsMySQLScan(const string &name) {
 	return name == "mysql_scan";
 }
 
-bool MySQLCatalog::IsMySQLQuery(const string &name) {
-	return name == "mysql_query";
-}
-
 DatabaseSize MySQLCatalog::GetDatabaseSize(ClientContext &context) {
 	if (default_schema.empty()) {
 		throw InvalidInputException("Attempting to fetch the database size - but no database was provided "

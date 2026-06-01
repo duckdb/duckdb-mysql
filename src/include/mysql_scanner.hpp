@@ -10,6 +10,8 @@
 
 #include "duckdb.hpp"
 
+#include "dbconn/bind_data.hpp"
+
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"
 #include "mysql_statement.hpp"
@@ -20,7 +22,7 @@ namespace duckdb {
 class MySQLTableEntry;
 class MySQLTransaction;
 
-struct MySQLBindData : public FunctionData {
+struct MySQLBindData : public dbconnector::BindData {
 	explicit MySQLBindData(MySQLTableEntry &table) : table(table) {
 	}
 
@@ -28,8 +30,7 @@ struct MySQLBindData : public FunctionData {
 	vector<MySQLType> mysql_types;
 	vector<string> names;
 	vector<LogicalType> types;
-	string limit;
-	string order_by_clause;
+	dbconnector::optimizer::OrderByAndLimitBindData order_by_and_limit_bind_data;
 	string aggregate_select_list;
 	string group_by_clause;
 	string aggregate_where_clause;
@@ -43,6 +44,9 @@ public:
 	}
 	bool Equals(const FunctionData &other_p) const override {
 		return false;
+	}
+	dbconnector::optimizer::OrderByAndLimitBindData &GetOrderByAndLimitBindData() override {
+		return order_by_and_limit_bind_data;
 	}
 };
 

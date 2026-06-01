@@ -1,6 +1,7 @@
 #include "mysql_filter_pushdown.hpp"
 
 #include "dbconn/table_scan/filter_pushdown.hpp"
+#include "dbconn/table_scan/filter_util.hpp"
 
 namespace duckdb {
 
@@ -15,16 +16,16 @@ string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
 		column_t col_id = column_ids[entry.GetIndex()];
 		auto column_name = names[col_id];
 		auto &filter = entry.Filter();
-		dbconnector::table_scan::FilterPushdownConfig config('`');
+		auto config = dbconnector::table_scan::FilterPushdown::CreateConfig('`');
 		auto new_filter = dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, filter);
 		if (new_filter.empty()) {
-			if (dbconnector::table_scan::FilterPushdown::IsInternalFilter(filter)) {
+			if (dbconnector::table_scan::FilterUtil::IsInternalFilter(filter)) {
 				continue;
 			}
 			throw NotImplementedException(
 			    "Unsupported filter pushdown, use 'mysql_enable_filter_pushdown=FALSE' to disable pushdowns."
 			    " Problematic filter: \"%s\"",
-			    dbconnector::table_scan::FilterPushdown::ToString(filter));
+			    dbconnector::table_scan::FilterUtil::ToString(filter));
 		}
 		if (!result.empty()) {
 			result += " AND ";

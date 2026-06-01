@@ -65,7 +65,6 @@ public:
 	void ClearCache();
 
 	static bool IsMySQLScan(const string &name);
-	static bool IsMySQLQuery(const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
 	PlanCache &GetPlanCache();

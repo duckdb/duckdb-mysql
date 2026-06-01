@@ -337,7 +337,7 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 		buffer_enabled = BooleanValue::Get(buffer_val);
 	}
 	if (buffer_enabled && fed.adaptive_estimated_rows > SQL_BUFFER_RESULT_ROW_THRESHOLD &&
-	    bind_data.order_by_clause.empty()) {
+	    bind_data.order_by_and_limit_bind_data.order_by_clause.empty()) {
 		prefix += "SQL_BUFFER_RESULT ";
 	}
 
@@ -374,11 +374,11 @@ static string BuildAggregateQuery(const MySQLBindData &bind_data) {
 	if (!bind_data.group_by_clause.empty()) {
 		sql += bind_data.group_by_clause;
 	}
-	if (!bind_data.order_by_clause.empty()) {
-		sql += bind_data.order_by_clause;
+	if (!bind_data.order_by_and_limit_bind_data.order_by_clause.empty()) {
+		sql += bind_data.order_by_and_limit_bind_data.order_by_clause;
 	}
-	if (!bind_data.limit.empty()) {
-		sql += bind_data.limit;
+	if (!bind_data.order_by_and_limit_bind_data.limit_clause.empty()) {
+		sql += bind_data.order_by_and_limit_bind_data.limit_clause;
 	}
 	return sql;
 }
@@ -482,11 +482,11 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	if (!filter_string.empty()) {
 		select += " WHERE " + filter_string;
 	}
-	if (!bind_data.order_by_clause.empty()) {
-		select += bind_data.order_by_clause;
+	if (!bind_data.order_by_and_limit_bind_data.order_by_clause.empty()) {
+		select += bind_data.order_by_and_limit_bind_data.order_by_clause;
 	}
-	if (!bind_data.limit.empty()) {
-		select += bind_data.limit;
+	if (!bind_data.order_by_and_limit_bind_data.limit_clause.empty()) {
+		select += bind_data.order_by_and_limit_bind_data.limit_clause;
 	}
 
 	if (bind_data.use_predicate_analyzer) {

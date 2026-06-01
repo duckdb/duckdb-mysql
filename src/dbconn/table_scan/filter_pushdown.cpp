@@ -11,25 +11,17 @@
 
 #include "dbconn/query/query_writer.hpp"
 
+#include "dbconn/table_scan/filter_util.hpp"
 #include "dbconn/table_scan/table_scan_exception.hpp"
 
 namespace dbconnector {
 namespace table_scan {
 
-bool FilterPushdown::IsDirectReference(const duckdb::Expression &expr) {
-	switch (expr.GetExpressionClass()) {
-	case duckdb::ExpressionClass::BOUND_REF:
-	case duckdb::ExpressionClass::BOUND_COLUMN_REF:
-		return true;
-	default:
-		return false;
-	}
-}
+using namespace duckdb;
 
 std::string FilterPushdown::CreateExpression(const std::string &column_name,
-                                             const duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> &filters,
-                                             const std::string &op) {
-	duckdb::vector<std::string> filter_entries;
+                                             const vector<unique_ptr<Expression>> &filters, const std::string &op) {
+	vector<std::string> filter_entries;
 	for (auto &filter : filters) {
 		auto new_filter = TransformExpression(column_name, *filter);
 		if (new_filter.empty()) {
@@ -40,87 +32,96 @@ std::string FilterPushdown::CreateExpression(const std::string &column_name,
 	if (filter_entries.empty()) {
 		return std::string();
 	}
-	return "(" + duckdb::StringUtil::Join(filter_entries, " " + op + " ") + ")";
+	return "(" + StringUtil::Join(filter_entries, " " + op + " ") + ")";
 }
 
-std::string FilterPushdown::TransformComparison(duckdb::ExpressionType type) {
+std::string FilterPushdown::TransformComparison(ExpressionType type) {
 	switch (type) {
-	case duckdb::ExpressionType::COMPARE_EQUAL:
+	case ExpressionType::COMPARE_EQUAL:
 		return "=";
-	case duckdb::ExpressionType::COMPARE_NOTEQUAL:
+	case ExpressionType::COMPARE_NOTEQUAL:
 		return "!=";
-	case duckdb::ExpressionType::COMPARE_LESSTHAN:
+	case ExpressionType::COMPARE_LESSTHAN:
 		return "<";
-	case duckdb::ExpressionType::COMPARE_GREATERTHAN:
+	case ExpressionType::COMPARE_GREATERTHAN:
 		return ">";
-	case duckdb::ExpressionType::COMPARE_LESSTHANOREQUALTO:
+	case ExpressionType::COMPARE_LESSTHANOREQUALTO:
 		return "<=";
-	case duckdb::ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+	case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
 		return ">=";
 	default:
-		throw TableScanException("Unsupported expression type: '" + duckdb::EnumUtil::ToString(type) + "'");
+		throw TableScanException("Unsupported expression type: '" + EnumUtil::ToString(type) + "'");
 	}
 }
 
-std::string FilterPushdown::TransformExpression(const std::string &column_name, const duckdb::Expression &expr) {
-	if (duckdb::BoundComparisonExpression::IsComparison(expr)) {
-		auto &comparison = expr.Cast<duckdb::BoundFunctionExpression>();
+static bool IsDirectReference(const Expression &expr) {
+	switch (expr.GetExpressionClass()) {
+	case ExpressionClass::BOUND_REF:
+	case ExpressionClass::BOUND_COLUMN_REF:
+		return true;
+	default:
+		return false;
+	}
+}
+
+std::string FilterPushdown::TransformExpression(const std::string &column_name, const Expression &expr) {
+	if (BoundComparisonExpression::IsComparison(expr)) {
+		auto &comparison = expr.Cast<BoundFunctionExpression>();
 		auto comparison_type = comparison.GetExpressionType();
-		auto &left = duckdb::BoundComparisonExpression::Left(comparison);
-		auto &right = duckdb::BoundComparisonExpression::Right(comparison);
-		const duckdb::Value *constant = nullptr;
-		if (IsDirectReference(left) && right.GetExpressionClass() == duckdb::ExpressionClass::BOUND_CONSTANT) {
-			constant = &right.Cast<duckdb::BoundConstantExpression>().value;
-		} else if (left.GetExpressionClass() == duckdb::ExpressionClass::BOUND_CONSTANT && IsDirectReference(right)) {
-			constant = &left.Cast<duckdb::BoundConstantExpression>().value;
+		auto &left = BoundComparisonExpression::Left(comparison);
+		auto &right = BoundComparisonExpression::Right(comparison);
+		const Value *constant = nullptr;
+		if (IsDirectReference(left) && right.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
+			constant = &right.Cast<BoundConstantExpression>().value;
+		} else if (left.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT && IsDirectReference(right)) {
+			constant = &left.Cast<BoundConstantExpression>().value;
 			comparison_type = FlipComparisonExpression(comparison_type);
 		} else {
 			return std::string();
 		}
 		auto constant_string = query::QueryWriter::WriteConstant(*constant);
 		auto operator_string = TransformComparison(comparison_type);
-		return duckdb::StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
+		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
 	}
 
 	switch (expr.GetExpressionClass()) {
-	case duckdb::ExpressionClass::BOUND_CONJUNCTION: {
-		auto &conjunction = expr.Cast<duckdb::BoundConjunctionExpression>();
+	case ExpressionClass::BOUND_CONJUNCTION: {
+		auto &conjunction = expr.Cast<BoundConjunctionExpression>();
 		switch (conjunction.GetExpressionType()) {
-		case duckdb::ExpressionType::CONJUNCTION_AND:
+		case ExpressionType::CONJUNCTION_AND:
 			return CreateExpression(column_name, conjunction.children, "AND");
-		case duckdb::ExpressionType::CONJUNCTION_OR:
+		case ExpressionType::CONJUNCTION_OR:
 			return CreateExpression(column_name, conjunction.children, "OR");
 		default:
 			return std::string();
 		}
 	}
-	case duckdb::ExpressionClass::BOUND_OPERATOR: {
-		auto &op = expr.Cast<duckdb::BoundOperatorExpression>();
+	case ExpressionClass::BOUND_OPERATOR: {
+		auto &op = expr.Cast<BoundOperatorExpression>();
 		switch (op.GetExpressionType()) {
-		case duckdb::ExpressionType::OPERATOR_IS_NULL:
+		case ExpressionType::OPERATOR_IS_NULL:
 			if (op.children.size() == 1 && IsDirectReference(*op.children[0])) {
 				return column_name + " IS NULL";
 			}
 			return std::string();
-		case duckdb::ExpressionType::OPERATOR_IS_NOT_NULL:
+		case ExpressionType::OPERATOR_IS_NOT_NULL:
 			if (op.children.size() == 1 && IsDirectReference(*op.children[0])) {
 				return column_name + " IS NOT NULL";
 			}
 			return std::string();
-		case duckdb::ExpressionType::COMPARE_IN: {
+		case ExpressionType::COMPARE_IN: {
 			if (op.children.empty() || !IsDirectReference(*op.children[0])) {
 				return std::string();
 			}
 			std::string in_list;
 			for (idx_t i = 1; i < op.children.size(); i++) {
-				if (op.children[i]->GetExpressionClass() != duckdb::ExpressionClass::BOUND_CONSTANT) {
+				if (op.children[i]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
 					return std::string();
 				}
 				if (!in_list.empty()) {
 					in_list += ", ";
 				}
-				in_list +=
-				    query::QueryWriter::WriteConstant(op.children[i]->Cast<duckdb::BoundConstantExpression>().value);
+				in_list += query::QueryWriter::WriteConstant(op.children[i]->Cast<BoundConstantExpression>().value);
 			}
 			return column_name + " IN (" + in_list + ")";
 		}
@@ -128,17 +129,17 @@ std::string FilterPushdown::TransformExpression(const std::string &column_name, 
 			return std::string();
 		}
 	}
-	case duckdb::ExpressionClass::BOUND_FUNCTION: {
-		auto &func = expr.Cast<duckdb::BoundFunctionExpression>();
-		if (func.function.GetName() == duckdb::OptionalFilterScalarFun::NAME && func.bind_info) {
-			auto &data = func.bind_info->Cast<duckdb::OptionalFilterFunctionData>();
+	case ExpressionClass::BOUND_FUNCTION: {
+		auto &func = expr.Cast<BoundFunctionExpression>();
+		if (func.function.GetName() == OptionalFilterScalarFun::NAME && func.bind_info) {
+			auto &data = func.bind_info->Cast<OptionalFilterFunctionData>();
 			return data.child_filter_expr ? TransformExpression(column_name, *data.child_filter_expr) : std::string();
 		}
-		if (func.function.GetName() == duckdb::SelectivityOptionalFilterScalarFun::NAME && func.bind_info) {
-			auto &data = func.bind_info->Cast<duckdb::SelectivityOptionalFilterFunctionData>();
+		if (func.function.GetName() == SelectivityOptionalFilterScalarFun::NAME && func.bind_info) {
+			auto &data = func.bind_info->Cast<SelectivityOptionalFilterFunctionData>();
 			return data.child_filter_expr ? TransformExpression(column_name, *data.child_filter_expr) : std::string();
 		}
-		if (func.function.GetName() == duckdb::DynamicFilterScalarFun::NAME) {
+		if (func.function.GetName() == DynamicFilterScalarFun::NAME) {
 			return std::string();
 		}
 		return std::string();
@@ -148,27 +149,17 @@ std::string FilterPushdown::TransformExpression(const std::string &column_name, 
 	}
 }
 
-std::string FilterPushdown::TransformFilter(const FilterPushdownConfig &config, const std::string &column_name,
-                                            const duckdb::TableFilter &filter) {
+FilterPushdown::Config FilterPushdown::CreateConfig(char identifier_quote) {
+	Config res;
+	res.identifier_quote = identifier_quote;
+	return res;
+}
+
+std::string FilterPushdown::TransformFilter(const FilterPushdown::Config &config, const std::string &column_name,
+                                            const TableFilter &filter) {
 	std::string column_name_quoted = query::QueryWriter::WriteIdentifier(column_name, config.identifier_quote);
-	auto &expr = GetExpression(filter, "FilterPushdown::TransformFilter");
+	auto &expr = FilterUtil::GetExpression(filter, "FilterPushdown::TransformFilter");
 	return TransformExpression(column_name_quoted, expr);
-}
-
-bool FilterPushdown::IsInternalFilter(const duckdb::TableFilter &filter) {
-	auto &expr = GetExpression(filter, "FilterPushdown::IsInternalFilter");
-	return expr.GetExpressionClass() == duckdb::ExpressionClass::BOUND_FUNCTION &&
-	       expr.ToString().find("__internal_tablefilter_") == 0;
-}
-
-std::string FilterPushdown::ToString(const duckdb::TableFilter &filter) {
-	auto &expr = GetExpression(filter, "FilterPushdown::ToString");
-	return expr.ToString();
-}
-
-const duckdb::Expression &FilterPushdown::GetExpression(const duckdb::TableFilter &filter, const std::string &context) {
-	auto &expr_filter = duckdb::ExpressionFilter::GetExpressionFilter(filter, context.c_str());
-	return *expr_filter.expr;
 }
 
 } // namespace table_scan
