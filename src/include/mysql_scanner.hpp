@@ -31,10 +31,7 @@ struct MySQLBindData : public dbconnector::BindData {
 	vector<string> names;
 	vector<LogicalType> types;
 	dbconnector::optimizer::OrderByAndLimitBindData order_by_and_limit_bind_data;
-	string aggregate_select_list;
-	string group_by_clause;
-	string aggregate_where_clause;
-	bool has_aggregate_pushdown = false;
+	dbconnector::optimizer::AggregateBindData aggregate_bind_data;
 
 	bool use_predicate_analyzer = false;
 
@@ -47,6 +44,10 @@ public:
 	}
 	dbconnector::optimizer::OrderByAndLimitBindData &GetOrderByAndLimitBindData() override {
 		return order_by_and_limit_bind_data;
+	}
+
+	dbconnector::optimizer::AggregateBindData &GetAggregateBindData() override {
+		return aggregate_bind_data;
 	}
 };
 
