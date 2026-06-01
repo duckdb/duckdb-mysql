@@ -14,6 +14,7 @@
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
 
+#include "dbconn/optimizer/order_by_and_limit_optimizer.hpp"
 #include "dbconn/table_scan/filter_pushdown.hpp"
 
 namespace duckdb {
@@ -21,105 +22,6 @@ namespace duckdb {
 struct MySQLOperators {
 	reference_map_t<MySQLCatalog, vector<reference<LogicalGet>>> scans;
 };
-
-static bool TraceColumnToGet(Expression &expr, LogicalOperator &child, LogicalGet &get, MySQLBindData &bind_data,
-                             string &out) {
-	if (expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
-		return false;
-	}
-	auto &col_ref = expr.Cast<BoundColumnRefExpression>();
-	if (col_ref.depth > 0) {
-		return false;
-	}
-	auto binding = col_ref.binding;
-
-	reference<LogicalOperator> current = child;
-	while (current.get().type == LogicalOperatorType::LOGICAL_PROJECTION) {
-		auto &proj = current.get().Cast<LogicalProjection>();
-		if (binding.table_index != proj.table_index) {
-			break;
-		}
-		if (binding.column_index >= proj.expressions.size()) {
-			return false;
-		}
-		auto &proj_expr = *proj.expressions[binding.column_index];
-		if (proj_expr.GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF) {
-			return false;
-		}
-		auto &inner_ref = proj_expr.Cast<BoundColumnRefExpression>();
-		if (inner_ref.depth > 0) {
-			return false;
-		}
-		binding = inner_ref.binding;
-		current = *current.get().children[0];
-	}
-
-	if (binding.table_index != get.table_index) {
-		return false;
-	}
-	auto &column_ids = get.GetColumnIds();
-	if (binding.column_index >= column_ids.size()) {
-		return false;
-	}
-	auto &col_index = column_ids[binding.column_index];
-	if (col_index.IsRowIdColumn()) {
-		return false;
-	}
-
-	if (bind_data.has_aggregate_pushdown) {
-		auto agg_idx = col_index.GetPrimaryIndex();
-		if (agg_idx >= get.names.size()) {
-			return false;
-		}
-		out = MySQLUtils::WriteIdentifier(get.names[agg_idx]);
-		return true;
-	}
-
-	auto actual_col_idx = col_index.GetPrimaryIndex();
-	if (actual_col_idx >= bind_data.names.size()) {
-		return false;
-	}
-	out = MySQLUtils::WriteIdentifier(bind_data.names[actual_col_idx]);
-	return true;
-}
-
-static bool TryBuildOrderByClause(vector<BoundOrderByNode> &orders, LogicalOperator &child, LogicalGet &get,
-                                  MySQLBindData &bind_data, string &out) {
-	vector<string> fragments;
-	for (auto &order : orders) {
-		string col_name;
-		if (!TraceColumnToGet(*order.expression, child, get, bind_data, col_name)) {
-			return false;
-		}
-
-		OrderType direction = order.type;
-		OrderByNullType null_order = order.null_order;
-
-		if (direction == OrderType::ORDER_DEFAULT) {
-			direction = OrderType::ASCENDING;
-		}
-		if (null_order == OrderByNullType::ORDER_DEFAULT) {
-			null_order =
-			    (direction == OrderType::ASCENDING) ? OrderByNullType::NULLS_LAST : OrderByNullType::NULLS_FIRST;
-		}
-
-		if (direction == OrderType::ASCENDING) {
-			if (null_order == OrderByNullType::NULLS_FIRST) {
-				fragments.push_back(col_name + " ASC");
-			} else {
-				fragments.push_back(col_name + " IS NULL, " + col_name + " ASC");
-			}
-		} else {
-			if (null_order == OrderByNullType::NULLS_FIRST) {
-				fragments.push_back(col_name + " IS NOT NULL, " + col_name + " DESC");
-			} else {
-				fragments.push_back(col_name + " DESC");
-			}
-		}
-	}
-	out = " ORDER BY " + StringUtil::Join(fragments, ", ");
-	return true;
-}
 
 static bool FindMySQLGet(LogicalOperator &start, LogicalGet *&get_out, MySQLBindData *&bind_out) {
 	reference<LogicalOperator> current = start;
@@ -335,7 +237,7 @@ static PushedAggregate TryPushAggregateToMySQL(LogicalAggregate &aggr, LogicalOp
 				return res;
 			}
 			auto column_name = get.names[table_col_idx];
-			dbconnector::table_scan::FilterPushdownConfig config('`');
+			auto config = dbconnector::table_scan::FilterPushdown::CreateConfig('`');
 			auto new_filter =
 			    dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, entry.Filter());
 			if (new_filter.empty()) {
@@ -550,236 +452,6 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 	}
 }
 
-static void CollectBindingRefs(Expression &expr, idx_t target_table_index, unordered_set<idx_t> &referenced) {
-	if (expr.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
-		auto &ref = expr.Cast<BoundColumnRefExpression>();
-		if (ref.binding.table_index.index == target_table_index) {
-			referenced.insert(ref.binding.column_index);
-		}
-	}
-	ExpressionIterator::EnumerateChildren(
-	    expr, [&](unique_ptr<Expression> &child) { CollectBindingRefs(*child, target_table_index, referenced); });
-}
-
-static void RewriteBindingRefs(Expression &expr, idx_t target_table_index, unordered_map<idx_t, idx_t> &old_to_new) {
-	if (expr.GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
-		auto &ref = expr.Cast<BoundColumnRefExpression>();
-		if (ref.binding.table_index.index == target_table_index) {
-			auto it = old_to_new.find(ref.binding.column_index);
-			if (it != old_to_new.end()) {
-				ref.binding.column_index = ProjectionIndex(it->second);
-			}
-		}
-	}
-	ExpressionIterator::EnumerateChildren(
-	    expr, [&](unique_ptr<Expression> &child) { RewriteBindingRefs(*child, target_table_index, old_to_new); });
-}
-
-static void PruneProjectionLayer(LogicalProjection &proj, const unordered_set<idx_t> &keep_indices,
-                                 vector<LogicalProjection *> &above_projs) {
-	vector<unique_ptr<Expression>> new_exprs;
-	unordered_map<idx_t, idx_t> old_to_new;
-	for (idx_t i = 0; i < proj.expressions.size(); i++) {
-		if (keep_indices.count(i)) {
-			old_to_new[i] = new_exprs.size();
-			new_exprs.push_back(std::move(proj.expressions[i]));
-		}
-	}
-	proj.expressions = std::move(new_exprs);
-
-	for (auto *above : above_projs) {
-		for (auto &expr : above->expressions) {
-			RewriteBindingRefs(*expr, proj.table_index.index, old_to_new);
-		}
-	}
-}
-
-static void PruneColumnsAfterOrderByRemoval(LogicalOperator &child, LogicalGet &get,
-                                            const vector<idx_t> &projection_map) {
-	if (child.type == LogicalOperatorType::LOGICAL_GET) {
-		auto &column_ids = get.GetColumnIds();
-		vector<ColumnIndex> new_ids;
-		for (auto idx : projection_map) {
-			new_ids.push_back(column_ids[idx]);
-		}
-		get.SetColumnIds(std::move(new_ids));
-		get.projection_ids.clear();
-		return;
-	}
-
-	if (child.type != LogicalOperatorType::LOGICAL_PROJECTION) {
-		return;
-	}
-
-	vector<LogicalProjection *> proj_chain;
-	reference<LogicalOperator> current = child;
-	while (current.get().type == LogicalOperatorType::LOGICAL_PROJECTION) {
-		proj_chain.push_back(&current.get().Cast<LogicalProjection>());
-		if (current.get().children.empty()) {
-			break;
-		}
-		current = *current.get().children[0];
-	}
-
-	if (proj_chain.size() < 2) {
-		return;
-	}
-
-	auto &top_proj = *proj_chain[0];
-	vector<LogicalProjection *> above_projs;
-	above_projs.push_back(&top_proj);
-
-	for (idx_t layer = 1; layer < proj_chain.size(); layer++) {
-		auto &prev_proj = *proj_chain[layer - 1];
-		auto &curr_proj = *proj_chain[layer];
-
-		unordered_set<idx_t> needed;
-		for (auto &expr : prev_proj.expressions) {
-			CollectBindingRefs(*expr, curr_proj.table_index.index, needed);
-		}
-
-		if (needed.size() < curr_proj.expressions.size()) {
-			PruneProjectionLayer(curr_proj, needed, above_projs);
-		}
-		above_projs.push_back(&curr_proj);
-	}
-
-	auto &bottom_proj = *proj_chain.back();
-	unordered_set<idx_t> get_referenced;
-	for (auto &expr : bottom_proj.expressions) {
-		CollectBindingRefs(*expr, get.table_index.index, get_referenced);
-	}
-
-	auto &column_ids = get.GetColumnIds();
-	if (get_referenced.size() < column_ids.size()) {
-		vector<ColumnIndex> new_ids;
-		unordered_map<idx_t, idx_t> get_old_to_new;
-		for (idx_t i = 0; i < column_ids.size(); i++) {
-			if (get_referenced.count(i)) {
-				get_old_to_new[i] = new_ids.size();
-				new_ids.push_back(column_ids[i]);
-			}
-		}
-		get.SetColumnIds(std::move(new_ids));
-		get.projection_ids.clear();
-
-		for (auto *proj : proj_chain) {
-			for (auto &expr : proj->expressions) {
-				RewriteBindingRefs(*expr, get.table_index.index, get_old_to_new);
-			}
-		}
-	}
-}
-
-void OptimizeOrderByAndLimit(ClientContext &context, unique_ptr<LogicalOperator> &op) {
-	Value order_enabled_val;
-	if (context.TryGetCurrentSetting("mysql_order_pushdown_enabled", order_enabled_val)) {
-		if (!BooleanValue::Get(order_enabled_val)) {
-			for (auto &child : op->children) {
-				OptimizeOrderByAndLimit(context, child);
-			}
-			return;
-		}
-	}
-
-	if (op->type == LogicalOperatorType::LOGICAL_TOP_N) {
-		auto &topn = op->Cast<LogicalTopN>();
-		LogicalGet *get = nullptr;
-		MySQLBindData *bind_data = nullptr;
-		if (FindMySQLGet(*op->children[0], get, bind_data)) {
-			string order_clause;
-			if (TryBuildOrderByClause(topn.orders, *op->children[0], *get, *bind_data, order_clause)) {
-				bind_data->order_by_clause = order_clause;
-				bind_data->limit = " LIMIT " + to_string(topn.limit);
-				if (topn.offset > 0) {
-					bind_data->limit += " OFFSET " + to_string(topn.offset);
-				}
-				op = std::move(op->children[0]);
-				return;
-			}
-		}
-		for (auto &child : op->children) {
-			OptimizeOrderByAndLimit(context, child);
-		}
-		return;
-	}
-	if (op->type == LogicalOperatorType::LOGICAL_ORDER_BY) {
-		auto &order = op->Cast<LogicalOrder>();
-		LogicalGet *get = nullptr;
-		MySQLBindData *bind_data = nullptr;
-		if (FindMySQLGet(*op->children[0], get, bind_data)) {
-			string order_clause;
-			if (TryBuildOrderByClause(order.orders, *op->children[0], *get, *bind_data, order_clause)) {
-				bind_data->order_by_clause = order_clause;
-				if (!order.projection_map.empty()) {
-					vector<column_t> indices;
-					indices.reserve(order.projection_map.size());
-					for (auto proj_idx : order.projection_map) {
-						ColumnIndex col_idx = get->GetColumnIndex(proj_idx);
-						column_t table_col_idx = col_idx.GetPrimaryIndex();
-						indices.emplace_back(table_col_idx);
-					}
-					PruneColumnsAfterOrderByRemoval(*op->children[0], *get, indices);
-				}
-				op = std::move(op->children[0]);
-				return;
-			}
-		}
-		for (auto &child : op->children) {
-			OptimizeOrderByAndLimit(context, child);
-		}
-		return;
-	}
-	if (op->type == LogicalOperatorType::LOGICAL_LIMIT) {
-		auto &limit = op->Cast<LogicalLimit>();
-		reference<LogicalOperator> child = *op->children[0];
-		while (child.get().type == LogicalOperatorType::LOGICAL_PROJECTION) {
-			child = *child.get().children[0];
-		}
-		if (child.get().type != LogicalOperatorType::LOGICAL_GET) {
-			return;
-		}
-		auto &get = child.get().Cast<LogicalGet>();
-		if (!MySQLCatalog::IsMySQLScan(get.function.name)) {
-			return;
-		}
-		switch (limit.limit_val.Type()) {
-		case LimitNodeType::CONSTANT_VALUE:
-		case LimitNodeType::UNSET:
-			break;
-		default:
-			return;
-		}
-		switch (limit.offset_val.Type()) {
-		case LimitNodeType::CONSTANT_VALUE:
-		case LimitNodeType::UNSET:
-			break;
-		default:
-			return;
-		}
-		auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-		if (!bind_data.limit.empty()) {
-			return;
-		}
-		bool has_limit = (limit.limit_val.Type() != LimitNodeType::UNSET);
-		bool has_offset = (limit.offset_val.Type() != LimitNodeType::UNSET);
-		if (!has_limit && has_offset) {
-			return;
-		}
-		if (has_limit) {
-			bind_data.limit = " LIMIT " + to_string(limit.limit_val.GetConstantValue());
-		}
-		if (has_offset) {
-			bind_data.limit += " OFFSET " + to_string(limit.offset_val.GetConstantValue());
-		}
-		op = std::move(op->children[0]);
-		return;
-	}
-	for (auto &child : op->children) {
-		OptimizeOrderByAndLimit(context, child);
-	}
-}
-
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	vector<AggregateRewriteInfo> rewrites;
 	OptimizeAggregates(input.context, plan, rewrites);
@@ -787,7 +459,9 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 		RewriteBindingsInTree(*plan, info);
 	}
 
-	OptimizeOrderByAndLimit(input.context, plan);
+	auto order_config = dbconnector::optimizer::OrderByAndLimitOptimizer::CreateConfig(
+	    input.context, "mysql_order_pushdown_enabled", "mysql_scan");
+	dbconnector::optimizer::OrderByAndLimitOptimizer::Optimize(order_config, input, plan);
 }
 
 } // namespace duckdb

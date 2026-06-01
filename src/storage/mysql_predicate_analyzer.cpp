@@ -150,7 +150,7 @@ PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, co
 	PredicateAnalysis result;
 	result.column_name = column_name;
 
-	dbconnector::table_scan::FilterPushdownConfig config('`');
+	auto config = dbconnector::table_scan::FilterPushdown::CreateConfig('`');
 	result.mysql_predicate = dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, filter);
 	if (result.mysql_predicate.empty()) {
 		result.decision = PushdownDecision::EXECUTE_IN_DUCKDB;
