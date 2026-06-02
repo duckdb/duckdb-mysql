@@ -14,11 +14,11 @@
 #include "mysql_scanner.hpp"
 #include "storage/federation/cost_model.hpp"
 
-#include "dbconn/bind_data.hpp"
-#include "dbconn/optimizer/aggregate_optimizer.hpp"
-#include "dbconn/optimizer/optimizer_util.hpp"
-#include "dbconn/optimizer/order_by_and_limit_optimizer.hpp"
-#include "dbconn/table_scan/filter_pushdown.hpp"
+#include "dbconnector/bind_data.hpp"
+#include "dbconnector/optimizer/aggregate_optimizer.hpp"
+#include "dbconnector/optimizer/optimizer_util.hpp"
+#include "dbconnector/optimizer/order_by_and_limit_optimizer.hpp"
+#include "dbconnector/table_scan/filter_pushdown.hpp"
 
 namespace duckdb {
 
@@ -115,7 +115,7 @@ static bool ShouldPushAggregate(ClientContext &context, LogicalAggregate &aggr) 
 		if (group->GetExpressionClass() == ExpressionClass::BOUND_COLUMN_REF) {
 			auto &col_ref = group->Cast<BoundColumnRefExpression>();
 			dbconnector::optimizer::TracedBindingColumn traced_binding =
-			    dbconnector::optimizer::OptimizerUtil::TraceBindingToColumn(col_ref.binding, *aggr.children[0], *get);
+			    dbconnector::optimizer::OptimizerUtil::TraceBindingToColumn(col_ref.Binding(), *aggr.children[0], *get);
 			if (traced_binding.Found()) {
 				auto it = table_stats.column_distinct_count.find(traced_binding.col_name);
 				if (it != table_stats.column_distinct_count.end() && it->second > 0) {

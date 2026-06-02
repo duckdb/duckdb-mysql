@@ -1,7 +1,7 @@
 #include "mysql_filter_pushdown.hpp"
 
-#include "dbconn/table_scan/filter_pushdown.hpp"
-#include "dbconn/table_scan/filter_util.hpp"
+#include "dbconnector/table_scan/filter_pushdown.hpp"
+#include "dbconnector/table_scan/filter_util.hpp"
 
 namespace duckdb {
 

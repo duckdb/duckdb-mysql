@@ -7,7 +7,7 @@
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/planner/table_filter_set.hpp"
 
-#include "dbconn/table_scan/filter_pushdown.hpp"
+#include "dbconnector/table_scan/filter_pushdown.hpp"
 
 #include <cmath>
 #include <unordered_set>
@@ -47,9 +47,9 @@ double PredicateAnalyzer::EstimateExpressionSelectivity(const string &column_nam
 		auto &right = BoundComparisonExpression::Right(comparison);
 		const Value *constant = nullptr;
 		if (IsDirectReference(left) && right.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
-			constant = &right.Cast<BoundConstantExpression>().value;
+			constant = &right.Cast<BoundConstantExpression>().GetValue();
 		} else if (left.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT && IsDirectReference(right)) {
-			constant = &left.Cast<BoundConstantExpression>().value;
+			constant = &left.Cast<BoundConstantExpression>().GetValue();
 			comparison_type = FlipComparisonExpression(comparison_type);
 		} else {
 			return DEFAULT_SELECTIVITY;
@@ -62,14 +62,14 @@ double PredicateAnalyzer::EstimateExpressionSelectivity(const string &column_nam
 		switch (conjunction.GetExpressionType()) {
 		case ExpressionType::CONJUNCTION_AND: {
 			double selectivity = 1.0;
-			for (const auto &child : conjunction.children) {
+			for (const auto &child : conjunction.GetChildren()) {
 				selectivity *= EstimateExpressionSelectivity(column_name, *child);
 			}
 			return selectivity;
 		}
 		case ExpressionType::CONJUNCTION_OR: {
 			double selectivity = 1.0;
-			for (const auto &child : conjunction.children) {
+			for (const auto &child : conjunction.GetChildren()) {
 				selectivity *= EstimateExpressionSelectivity(column_name, *child);
 			}
 			return selectivity;
@@ -97,14 +97,14 @@ double PredicateAnalyzer::EstimateExpressionSelectivity(const string &column_nam
 			return 0.99;
 		}
 		case ExpressionType::COMPARE_IN: {
-			if (op.children.empty() || !IsDirectReference(*op.children[0])) {
+			if (op.GetChildren().empty() || !IsDirectReference(*op.GetChildren()[0])) {
 				return DEFAULT_SELECTIVITY;
 			}
 			double per_value_selectivity = 0.01;
-			if (op.children.size() > 10) {
+			if (op.GetChildren().size() > 10) {
 				per_value_selectivity = 0.005;
 			}
-			return std::min(static_cast<double>(op.children.size()) * per_value_selectivity, 0.8);
+			return std::min(static_cast<double>(op.GetChildren().size()) * per_value_selectivity, 0.8);
 		}
 		default:
 			return DEFAULT_SELECTIVITY;
