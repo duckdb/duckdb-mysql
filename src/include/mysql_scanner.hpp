@@ -10,7 +10,7 @@
 
 #include "duckdb.hpp"
 
-#include "dbconn/bind_data.hpp"
+#include "dbconnector/bind_data.hpp"
 
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"

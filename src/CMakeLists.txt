@@ -1,5 +1,6 @@
 include_directories(include)
 
+add_subdirectory(dbconnector)
 add_subdirectory(storage)
 
 add_library(
@@ -17,16 +18,6 @@ add_library(
   mysql_types.cpp
   mysql_utils.cpp)
 
-add_library(
-  mysql_ext_dbconn OBJECT
-  dbconn/query/query_writer.cpp
-  dbconn/table_scan/filter_pushdown.cpp
-  dbconn/table_scan/filter_util.cpp
-  dbconn/optimizer/aggregate_optimizer.cpp
-  dbconn/optimizer/optimizer_util.cpp
-  dbconn/optimizer/order_by_and_limit_optimizer.cpp)
-
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:mysql_ext_library>
-    $<TARGET_OBJECTS:mysql_ext_dbconn>
     PARENT_SCOPE)

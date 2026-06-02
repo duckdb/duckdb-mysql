@@ -199,7 +199,7 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 		auto &expr = proj.select_list[ref.index];
 		if (expr->GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
 			auto &bound_const_expr = expr->Cast<BoundConstantExpression>();
-			result += MySQLUtils::TransformConstant(bound_const_expr.value);
+			result += MySQLUtils::TransformConstant(bound_const_expr.GetValue());
 		} else {
 			result += expr->ToString();
 		}

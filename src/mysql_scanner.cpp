@@ -251,7 +251,7 @@ static void BuildLocalFilterExpression(FederationState &fed, const MySQLBindData
 	} else if (local_exprs.size() > 1) {
 		auto conjunction = make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND);
 		for (auto &expr : local_exprs) {
-			conjunction->children.push_back(std::move(expr));
+			conjunction->GetChildrenMutable().push_back(std::move(expr));
 		}
 		fed.local_filter_expression = std::move(conjunction);
 	}
