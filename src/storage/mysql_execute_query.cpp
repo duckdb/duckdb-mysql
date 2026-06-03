@@ -196,7 +196,7 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 			throw NotImplementedException("MySQL Update not supported - Expected a bound reference expression");
 		}
 		auto &ref = op.expressions[c]->Cast<BoundReferenceExpression>();
-		auto &expr = proj.select_list[ref.index];
+		auto &expr = proj.select_list[ref.Index()];
 		if (expr->GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
 			auto &bound_const_expr = expr->Cast<BoundConstantExpression>();
 			result += MySQLUtils::TransformConstant(bound_const_expr.GetValue());
