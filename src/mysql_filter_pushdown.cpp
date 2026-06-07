@@ -16,7 +16,8 @@ string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
 		column_t col_id = column_ids[entry.GetIndex()];
 		auto column_name = names[col_id];
 		auto &filter = entry.Filter();
-		auto config = dbconnector::table_scan::FilterPushdown::CreateConfig('`');
+		auto config =
+		    dbconnector::table_scan::FilterPushdown::CreateConfig('`', dbconnector::query::QuoteEscapeStyle::BACKSLASH);
 		auto new_filter = dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, filter);
 		if (new_filter.empty()) {
 			if (dbconnector::table_scan::FilterUtil::IsInternalFilter(filter)) {
