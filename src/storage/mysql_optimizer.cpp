@@ -135,11 +135,13 @@ static bool ShouldPushAggregate(ClientContext &context, LogicalAggregate &aggr) 
 
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	auto aggr_config = dbconnector::optimizer::AggregateOptimizer::CreateConfig(
-	    input.context, "mysql_aggregate_pushdown_enabled", '`', "mysql_scan", ShouldPushAggregate);
+	    input.context, "mysql_aggregate_pushdown_enabled", '`', dbconnector::query::QuoteEscapeStyle::BACKSLASH,
+	    "mysql_scan", ShouldPushAggregate);
 	dbconnector::optimizer::AggregateOptimizer::Optimize(aggr_config, input, plan);
 
 	auto order_config = dbconnector::optimizer::OrderByAndLimitOptimizer::CreateConfig(
-	    input.context, "mysql_order_pushdown_enabled", '`', "mysql_scan");
+	    input.context, "mysql_order_pushdown_enabled", '`', dbconnector::query::QuoteEscapeStyle::BACKSLASH,
+	    "mysql_scan");
 	dbconnector::optimizer::OrderByAndLimitOptimizer::Optimize(order_config, input, plan);
 }
 

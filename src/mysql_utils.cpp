@@ -4,6 +4,8 @@
 
 #include "duckdb/common/string_util.hpp"
 
+#include "dbconnector/query/query_writer.hpp"
+
 #include "storage/mysql_schema_entry.hpp"
 #include "storage/mysql_transaction.hpp"
 
@@ -330,33 +332,16 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	return result;
 }
 
-string MySQLUtils::EscapeQuotes(const string &text, char quote) {
-	string result;
-	for (auto c : text) {
-		if (c == quote) {
-			result += "\\";
-			result += quote;
-		} else if (c == '\\') {
-			result += "\\\\";
-		} else {
-			result += c;
-		}
-	}
-	return result;
-}
-
-string MySQLUtils::WriteQuoted(const string &text, char quote) {
-	// 1. Escapes all occurences of 'quote' by escaping them with a backslash
-	// 2. Adds quotes around the string
-	return string(1, quote) + EscapeQuotes(text, quote) + string(1, quote);
-}
-
 string MySQLUtils::WriteIdentifier(const string &identifier) {
-	return MySQLUtils::WriteQuoted(identifier, '`');
+	using namespace dbconnector::query;
+	auto config = QueryWriter::CreateConfig('`', QuoteEscapeStyle::BACKSLASH);
+	return QueryWriter::WriteQuotedAndEscaped(config, identifier);
 }
 
 string MySQLUtils::WriteLiteral(const string &identifier) {
-	return MySQLUtils::WriteQuoted(identifier, '\'');
+	using namespace dbconnector::query;
+	auto config = QueryWriter::CreateConfig('\'', QuoteEscapeStyle::BACKSLASH);
+	return QueryWriter::WriteQuotedAndEscaped(config, identifier);
 }
 
 static string TransformBlobToMySQL(const string &val) {
