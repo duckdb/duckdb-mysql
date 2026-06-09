@@ -61,6 +61,21 @@ public:
 	//! Whether or not this is an in-memory MySQL database
 	bool InMemory() override;
 	string GetDBPath() override;
+	bool Supports(RemoteCapability capability) const override {
+		switch (capability) {
+		case RemoteCapability::IS_REMOTE:
+		case RemoteCapability::EXECUTE_QUERY_NODE:
+		case RemoteCapability::CONNECT:
+			return true;
+		default:
+			return false;
+		}
+	}
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
+	bool SupportsPushdown(const ParsedExpression &expression) override;
+	bool SupportsPushdown(const TableRef &ref) override;
+	bool SupportsPushdown(const QueryNode &node) override;
 
 	void ClearCache();
 
@@ -69,6 +84,10 @@ public:
 	MySQLConnectionPool &GetConnectionPool();
 	PlanCache &GetPlanCache();
 	MySQLStatsCache &GetStatsCache();
+	//! The server version, fetched when the database was attached
+	const MySQLVersion &GetVersion() const {
+		return version;
+	}
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
@@ -76,6 +95,7 @@ private:
 private:
 	MySQLSchemaSet schemas;
 	string default_schema;
+	MySQLVersion version;
 	shared_ptr<MySQLConnectionPool> connection_pool;
 	PlanCache plan_cache_;
 	MySQLStatsCache stats_cache_;

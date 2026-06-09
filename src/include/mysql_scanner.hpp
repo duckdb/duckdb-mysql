@@ -68,6 +68,9 @@ struct MySQLQueryBindData : public FunctionData {
 	unique_ptr<MySQLResult> result;
 	unique_ptr<MySQLStatement> stmt;
 	vector<Value> params;
+	//! Whether the query must be executed through the transaction's connection
+	//! (set when a remote transaction was active at bind time)
+	bool use_transaction_connection = false;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {

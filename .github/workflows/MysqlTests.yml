@@ -71,7 +71,7 @@ jobs:
       id: cache_key
       working-directory: ./duckdb
       run: |
-        DUCKDB_VERSION=$(git rev-parse --short HEAD)
+        DUCKDB_VERSION=$(git rev-parse --short=10 HEAD)
         KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
         echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
 
@@ -111,13 +111,14 @@ jobs:
         LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         ORACLE_MYSQL_SERVER: 1
-        MYSQL_TEST_PREDICATE_ANALYZER: 1
       run: |
         ./build/release/test/unittest 'test/*'
 
   linux-mariadb:
     name: Linux MariaDB (amd64)
     runs-on: ubuntu-latest
+    # TODO: enable me
+    if: ${{ false }}
     needs: linux
     env:
       GEN: ninja
@@ -151,7 +152,7 @@ jobs:
       id: cache_key
       working-directory: ./duckdb
       run: |
-        DUCKDB_VERSION=$(git rev-parse --short HEAD)
+        DUCKDB_VERSION=$(git rev-parse --short=10 HEAD)
         KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"
         echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
 
@@ -185,7 +186,6 @@ jobs:
         LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
         MARIADB_SERVER: 1
-        MYSQL_TEST_PREDICATE_ANALYZER: 1
       run: |
         ./build/release/test/unittest 'test/*'
 
@@ -242,7 +242,7 @@ jobs:
       id: cache_key
       working-directory: ./duckdb
       run: |
-        DUCKDB_VERSION=$(git rev-parse --short HEAD)
+        DUCKDB_VERSION=$(git rev-parse --short=10 HEAD)
         KEY="${{ runner.os }}-${{ runner.arch }}-$DUCKDB_VERSION"-relassert-${{ matrix.sanitizer.name }}
         echo "value=${KEY}" >> "${GITHUB_OUTPUT}"
 

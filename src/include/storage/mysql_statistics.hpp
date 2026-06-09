@@ -11,6 +11,7 @@
 #include "duckdb.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/planner/table_filter.hpp"
+#include "mysql_utils.hpp"
 
 #include <chrono>
 #include <deque>
@@ -152,13 +153,6 @@ struct CachedBufferPoolRate {
 	std::chrono::steady_clock::time_point cached_at;
 };
 
-struct CachedVersionInfo {
-	string mysql_version;
-	bool has_histogram_support = false;
-	bool detected = false;
-	std::chrono::steady_clock::time_point cached_at;
-};
-
 struct StatsEvictionEntry {
 	string key;
 	idx_t seq;
@@ -169,7 +163,6 @@ public:
 	static constexpr int64_t TABLE_STATS_TTL_SECONDS = 300;
 	static constexpr int64_t COST_CONSTANTS_TTL_SECONDS = 1800;
 	static constexpr int64_t BUFFER_POOL_TTL_SECONDS = 300;
-	static constexpr int64_t VERSION_TTL_SECONDS = 3600;
 	static constexpr idx_t MAX_TABLE_STATS_ENTRIES = 1000;
 
 	using InvalidationCallback = std::function<void(const string &schema, const string &table)>;
@@ -185,9 +178,6 @@ public:
 	bool GetBufferPoolHitRate(double &out);
 	void StoreBufferPoolHitRate(double hit_rate);
 
-	bool GetVersionInfo(string &version, bool &has_histogram_support);
-	void StoreVersionInfo(const string &version, bool has_histogram_support);
-
 	void Clear();
 	void Invalidate(const string &schema, const string &table);
 
@@ -199,7 +189,6 @@ private:
 	idx_t next_eviction_seq_ = 0;
 	CachedCostConstants cost_constants_;
 	CachedBufferPoolRate buffer_pool_;
-	CachedVersionInfo version_info_;
 
 	static string MakeCacheKey(const string &schema, const string &table);
 	void EvictOldest();
@@ -208,7 +197,8 @@ private:
 
 class MySQLStatisticsCollector {
 public:
-	MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache);
+	MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache,
+	                         const MySQLVersion &server_version);
 
 	MySQLTableStats GetTableStats(const string &schema, const string &table);
 	bool HasUsableIndex(const string &schema, const string &table, const vector<string> &columns);
@@ -232,21 +222,16 @@ public:
 	ExplainAnalyzeResult RunExplainAnalyze(const string &query);
 
 	bool SupportsExplainAnalyze() const;
-	int GetMajorVersion() const;
-	int GetMinorVersion() const;
-	int GetPatchVersion() const;
 	double EstimateSelectivity(const string &schema, const string &table, const string &column,
 	                           ExpressionType comparison, const Value &value);
 
 private:
 	reference<MySQLConnection> connection_;
 	reference<MySQLStatsCache> shared_cache_;
+	MySQLVersion server_version_;
 	bool has_histogram_support_ = false;
-	bool version_detected_ = false;
 	bool stats_expiry_set_ = false;
-	string mysql_version_;
 
-	void DetectVersion();
 	void EnsureFreshStats();
 	void FetchTableMetadata(const string &schema, const string &table, MySQLTableStats &stats);
 	void FetchInnoDBStats(const string &schema, const string &table, MySQLTableStats &stats);

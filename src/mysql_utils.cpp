@@ -370,4 +370,34 @@ string MySQLUtils::TransformConstant(const Value &val) {
 	return val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
 }
 
+MySQLVersion MySQLVersion::Parse(const string &version_string) {
+	MySQLVersion result;
+	if (StringUtil::Contains(StringUtil::Lower(version_string), "mariadb")) {
+		result.server_type = MySQLServerType::MARIADB;
+	}
+
+	string version = version_string;
+	if (result.server_type == MySQLServerType::MARIADB && StringUtil::StartsWith(version, "5.5.5-")) {
+		// MariaDB servers can prefix their version with "5.5.5-" (replication compatibility)
+		version = version.substr(6);
+	}
+	// parse the leading major.minor.patch
+	idx_t numbers[3] = {0, 0, 0};
+	idx_t number_index = 0;
+	for (idx_t pos = 0; pos < version.size(); pos++) {
+		auto c = version[pos];
+		if (c >= '0' && c <= '9') {
+			numbers[number_index] = numbers[number_index] * 10 + static_cast<idx_t>(c - '0');
+		} else if (c == '.' && number_index < 2) {
+			number_index++;
+		} else {
+			break;
+		}
+	}
+	result.major_version = numbers[0];
+	result.minor_version = numbers[1];
+	result.patch_version = numbers[2];
+	return result;
+}
+
 } // namespace duckdb

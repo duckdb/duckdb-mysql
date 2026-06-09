@@ -7,6 +7,7 @@
 #include "mysql_result.hpp"
 #include "mysql_connection_pool.hpp"
 #include "storage/mysql_transaction.hpp"
+#include "duckdb/main/query_result.hpp"
 #include "storage/mysql_table_set.hpp"
 #include "storage/mysql_catalog.hpp"
 #include "storage/mysql_statistics.hpp"
@@ -262,7 +263,8 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 	Value explain_val;
 	if (context.TryGetCurrentSetting("mysql_explain_validation_enabled", explain_val) &&
 	    BooleanValue::Get(explain_val) && !fed.filter_analysis.recommended_index.empty()) {
-		MySQLStatisticsCollector explain_stats(con, shared_cache);
+		MySQLStatisticsCollector explain_stats(con, shared_cache,
+		                                       bind_data.table.catalog.Cast<MySQLCatalog>().GetVersion());
 		bool uses_index = false;
 		for (const auto &analysis : fed.filter_analysis.analyses) {
 			if (analysis.has_index && analysis.ShouldPush()) {
@@ -287,27 +289,10 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 	if (context.TryGetCurrentSetting("mysql_query_timeout_enabled", timeout_val)) {
 		timeout_enabled = BooleanValue::Get(timeout_val);
 	}
-	string cached_version;
-	bool cached_histogram = false;
-	bool version_supports_timeout = true;
-	if (shared_cache.GetVersionInfo(cached_version, cached_histogram)) {
-		bool is_mariadb = StringUtil::Contains(StringUtil::Lower(cached_version), "mariadb");
-		if (is_mariadb) {
-			version_supports_timeout = false;
-		} else {
-			auto dot = cached_version.find('.');
-			if (dot != string::npos) {
-				int major = 0;
-				try {
-					major = std::stoi(cached_version.substr(0, dot));
-				} catch (...) {
-				}
-				if (major < 8) {
-					version_supports_timeout = false;
-				}
-			}
-		}
-	}
+	// MAX_EXECUTION_TIME query hints are only supported on MySQL 8+
+	auto &server_version = bind_data.table.catalog.Cast<MySQLCatalog>().GetVersion();
+	bool version_supports_timeout =
+	    server_version.server_type == MySQLServerType::MYSQL && server_version.IsAtLeast(8, 0, 0);
 	if (timeout_enabled && version_supports_timeout && fed.execution_plan.estimated_cost.Total() > 0) {
 		idx_t min_timeout = MIN_QUERY_TIMEOUT_MS;
 		idx_t max_timeout = MAX_QUERY_TIMEOUT_MS;
@@ -435,7 +420,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	string filter_string;
 
 	if (bind_data.use_predicate_analyzer && input.filters && input.filters->HasFilters()) {
-		MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache());
+		MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache(), mysql_catalog.GetVersion());
 		PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
 		ConfigurePredicateAnalyzer(context, analyzer);
 
@@ -676,7 +661,27 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			names.push_back(field.name);
 			return_types.push_back(field.duckdb_type);
 		}
+		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
+		// rename them as table functions require unique column names
+		QueryResult::DeduplicateColumns(names);
 		return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(result));
+	}
+
+	auto &active_transaction = MySQLTransaction::Get(context, catalog);
+	if (active_transaction.HasStartedTransaction()) {
+		// a transaction has already been started on the remote server - run the query over the
+		// transaction's connection so that it sees uncommitted changes
+		auto &conn = active_transaction.GetConnection();
+		auto stmt = conn.Prepare(sql);
+		for (auto &field : stmt->Fields()) {
+			names.push_back(field.name);
+			return_types.push_back(field.duckdb_type);
+		}
+		QueryResult::DeduplicateColumns(names);
+		auto bind_data = make_uniq<MySQLQueryBindData>(std::move(sql), catalog, MySQLPooledConnection(),
+		                                               std::move(stmt), std::move(params));
+		bind_data->use_transaction_connection = true;
+		return std::move(bind_data);
 	}
 
 	auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
@@ -696,6 +701,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		names.push_back(field.name);
 		return_types.push_back(field.duckdb_type);
 	}
+	QueryResult::DeduplicateColumns(names);
 	return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(conn), std::move(stmt), std::move(params));
 }
 
@@ -713,11 +719,17 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
 		auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
-		D_ASSERT(bind_data.pooled_connection);
 		D_ASSERT(bind_data.stmt);
-		auto result = bind_data.pooled_connection->Query(*bind_data.stmt, bind_data.params,
-		                                                 MySQLResultStreaming::ALLOW_STREAMING);
-		gstate.result = std::move(result);
+		if (bind_data.use_transaction_connection) {
+			auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
+			auto &conn = transaction.GetConnection();
+			gstate.result = conn.Query(*bind_data.stmt, bind_data.params, MySQLResultStreaming::FORCE_MATERIALIZATION);
+		} else {
+			D_ASSERT(bind_data.pooled_connection);
+			auto result = bind_data.pooled_connection->Query(*bind_data.stmt, bind_data.params,
+			                                                 MySQLResultStreaming::ALLOW_STREAMING);
+			gstate.result = std::move(result);
+		}
 	}
 	MySQLScan(context, data, output);
 }

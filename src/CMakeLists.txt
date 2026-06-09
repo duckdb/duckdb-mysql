@@ -14,6 +14,7 @@ add_library(
   mysql_parameter.cpp
   mysql_result.cpp
   mysql_scanner.cpp
+  mysql_sql_writer.cpp
   mysql_storage.cpp
   mysql_types.cpp
   mysql_utils.cpp)

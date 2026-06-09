@@ -510,30 +510,6 @@ void MySQLStatsCache::StoreBufferPoolHitRate(double hit_rate) {
 	buffer_pool_.cached_at = std::chrono::steady_clock::now();
 }
 
-bool MySQLStatsCache::GetVersionInfo(string &version, bool &has_histogram_support) {
-	std::lock_guard<std::mutex> lock(mutex_);
-	if (!version_info_.detected) {
-		return false;
-	}
-	auto elapsed = std::chrono::steady_clock::now() - version_info_.cached_at;
-	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
-	if (seconds >= VERSION_TTL_SECONDS) {
-		version_info_.detected = false;
-		return false;
-	}
-	version = version_info_.mysql_version;
-	has_histogram_support = version_info_.has_histogram_support;
-	return true;
-}
-
-void MySQLStatsCache::StoreVersionInfo(const string &version, bool has_histogram_support) {
-	std::lock_guard<std::mutex> lock(mutex_);
-	version_info_.mysql_version = version;
-	version_info_.has_histogram_support = has_histogram_support;
-	version_info_.detected = true;
-	version_info_.cached_at = std::chrono::steady_clock::now();
-}
-
 void MySQLStatsCache::Clear() {
 	std::lock_guard<std::mutex> lock(mutex_);
 	table_stats_.clear();
@@ -541,7 +517,6 @@ void MySQLStatsCache::Clear() {
 	next_eviction_seq_ = 0;
 	cost_constants_.loaded = false;
 	buffer_pool_.loaded = false;
-	version_info_.detected = false;
 }
 
 void MySQLStatsCache::Invalidate(const string &schema, const string &table) {
@@ -550,8 +525,12 @@ void MySQLStatsCache::Invalidate(const string &schema, const string &table) {
 	table_stats_.erase(cache_key);
 }
 
-MySQLStatisticsCollector::MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache)
-    : connection_(connection), shared_cache_(shared_cache) {
+MySQLStatisticsCollector::MySQLStatisticsCollector(MySQLConnection &connection, MySQLStatsCache &shared_cache,
+                                                   const MySQLVersion &server_version)
+    : connection_(connection), shared_cache_(shared_cache), server_version_(server_version) {
+	// histograms (and information_schema_stats_expiry) are only available on MySQL 8+
+	has_histogram_support_ =
+	    server_version_.server_type == MySQLServerType::MYSQL && server_version_.IsAtLeast(8, 0, 0);
 }
 
 double MySQLStatisticsCollector::ComputeStalenessScore(const MySQLTableStats &stats) {
@@ -585,41 +564,6 @@ double MySQLStatisticsCollector::ComputeStalenessScore(const MySQLTableStats &st
 	return std::min(score, 1.0);
 }
 
-void MySQLStatisticsCollector::DetectVersion() {
-	if (version_detected_) {
-		return;
-	}
-
-	string cached_version;
-	bool cached_histogram;
-	if (shared_cache_.get().GetVersionInfo(cached_version, cached_histogram)) {
-		mysql_version_ = cached_version;
-		has_histogram_support_ = cached_histogram;
-		version_detected_ = true;
-		return;
-	}
-
-	version_detected_ = true;
-
-	auto result =
-	    connection_.get().Query("SELECT @@version AS mysql_version", MySQLResultStreaming::FORCE_MATERIALIZATION);
-
-	if (result->Exhausted()) {
-		return;
-	}
-
-	auto &chunk = result->NextChunk();
-	if (chunk.size() == 0) {
-		return;
-	}
-
-	mysql_version_ = chunk.data[0].GetValue(0).ToString();
-	bool is_mariadb = StringUtil::Contains(StringUtil::Lower(mysql_version_), "mariadb");
-	has_histogram_support_ = (!is_mariadb && GetMajorVersion() >= 8);
-
-	shared_cache_.get().StoreVersionInfo(mysql_version_, has_histogram_support_);
-}
-
 void MySQLStatisticsCollector::EnsureFreshStats() {
 	if (stats_expiry_set_) {
 		return;
@@ -637,19 +581,9 @@ void MySQLStatisticsCollector::EnsureFreshStats() {
 MySQLTableStats MySQLStatisticsCollector::GetTableStats(const string &schema, const string &table) {
 	MySQLTableStats cached_stats;
 	if (shared_cache_.get().GetTableStats(schema, table, cached_stats)) {
-		if (!version_detected_) {
-			string cached_ver;
-			bool cached_hist;
-			if (shared_cache_.get().GetVersionInfo(cached_ver, cached_hist)) {
-				mysql_version_ = cached_ver;
-				has_histogram_support_ = cached_hist;
-				version_detected_ = true;
-			}
-		}
 		return cached_stats;
 	}
 
-	DetectVersion();
 	EnsureFreshStats();
 
 	MySQLTableStats stats;
@@ -1322,75 +1256,9 @@ bool MySQLStatisticsCollector::ValidateWithExplain(const string &query, const st
 	return true;
 }
 
-int MySQLStatisticsCollector::GetMajorVersion() const {
-	if (mysql_version_.empty()) {
-		return 0;
-	}
-	auto dot = mysql_version_.find('.');
-	if (dot == string::npos) {
-		return 0;
-	}
-	try {
-		return std::stoi(mysql_version_.substr(0, dot));
-	} catch (...) {
-		return 0;
-	}
-}
-
-int MySQLStatisticsCollector::GetMinorVersion() const {
-	if (mysql_version_.empty()) {
-		return 0;
-	}
-	auto first_dot = mysql_version_.find('.');
-	if (first_dot == string::npos) {
-		return 0;
-	}
-	auto second_dot = mysql_version_.find('.', first_dot + 1);
-	if (second_dot == string::npos) {
-		return 0;
-	}
-	try {
-		return std::stoi(mysql_version_.substr(first_dot + 1, second_dot - first_dot - 1));
-	} catch (...) {
-		return 0;
-	}
-}
-
-int MySQLStatisticsCollector::GetPatchVersion() const {
-	if (mysql_version_.empty()) {
-		return 0;
-	}
-	auto first_dot = mysql_version_.find('.');
-	if (first_dot == string::npos) {
-		return 0;
-	}
-	auto second_dot = mysql_version_.find('.', first_dot + 1);
-	if (second_dot == string::npos) {
-		return 0;
-	}
-	auto rest = mysql_version_.substr(second_dot + 1);
-	auto end = rest.find_first_not_of("0123456789");
-	try {
-		return std::stoi(rest.substr(0, end));
-	} catch (...) {
-		return 0;
-	}
-}
-
 bool MySQLStatisticsCollector::SupportsExplainAnalyze() const {
-	int major = GetMajorVersion();
-	int minor = GetMinorVersion();
-	int patch = GetPatchVersion();
-	if (major > 8) {
-		return true;
-	}
-	if (major == 8 && minor > 0) {
-		return true;
-	}
-	if (major == 8 && minor == 0 && patch >= 18) {
-		return true;
-	}
-	return false;
+	// EXPLAIN ANALYZE is available on MySQL 8.0.18+ (MariaDB uses different ANALYZE syntax)
+	return server_version_.server_type == MySQLServerType::MYSQL && server_version_.IsAtLeast(8, 0, 18);
 }
 
 MySQLStatisticsCollector::ExplainAnalyzeResult MySQLStatisticsCollector::RunExplainAnalyze(const string &query) {

@@ -143,10 +143,11 @@ SELECT * FROM mysql_query('simple', 'SELEC 42')
 ----
 Failed to prepare
 
-statement error
+# duplicate result column names are renamed (table functions require unique column names)
+query II
 SELECT * FROM mysql_query('simple', 'SELECT 42 a, 42 a')
 ----
-duplicate column
+42	42
 
 require icu
 
