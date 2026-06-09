@@ -28,6 +28,11 @@ public:
 	void Rollback();
 
 	MySQLConnection &GetConnection();
+	//! Whether a transaction has been started on the remote server - if so, queries must be
+	//! executed through the transaction's connection so they see uncommitted changes
+	bool HasStartedTransaction() const {
+		return transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_STARTED;
+	}
 	unique_ptr<MySQLResult> Query(const string &query);
 	static MySQLTransaction &Get(ClientContext &context, Catalog &catalog);
 	AccessMode GetAccessMode() const {

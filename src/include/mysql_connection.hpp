@@ -22,7 +22,7 @@ class MySQLTextWriter;
 struct MySQLBinaryReader;
 class MySQLSchemaEntry;
 class MySQLTableEntry;
-class MySQLStatement;
+struct MySQLStatement;
 class MySQLResult;
 struct IndexInfo;
 

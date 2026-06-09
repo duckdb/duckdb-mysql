@@ -147,8 +147,17 @@ bool MySQLResult::FetchNext() {
 	int res = mysql_stmt_fetch(stmt.get());
 
 	if (res == 1) {
+		// error might be in connect or stmt
+		auto stmt_error = mysql_stmt_error(stmt.get());
+		if (!stmt_error || strlen(stmt_error) == 0) {
+			// try to get it from the connection
+			auto conn_err = mysql_error(stmt->mysql);
+			if (conn_err) {
+				stmt_error = conn_err;
+			}
+		}
 		throw IOException("Failed to fetch result row for MySQL query \"%s\": %s\n", query.c_str(),
-		                  mysql_stmt_error(stmt.get()));
+		                  stmt_error ? stmt_error : "<unknown error>");
 	}
 
 	HandleTruncatedData();
