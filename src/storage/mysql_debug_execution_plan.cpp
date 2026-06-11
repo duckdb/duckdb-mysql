@@ -27,7 +27,7 @@ static unique_ptr<FunctionData> DebugExecutionPlanBind(ClientContext &context, T
 		auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
 		auto entries = mysql_catalog.GetPlanCache().GetPlanCacheEntries();
 		for (auto &entry : entries) {
-			result->database_names.push_back(db.GetName());
+			result->database_names.emplace_back(db.GetName());
 			result->entries.push_back(std::move(entry));
 		}
 	}

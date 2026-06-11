@@ -28,7 +28,7 @@ MySQLTransaction &GetMySQLTransaction(CatalogTransaction transaction) {
 void MySQLSchemaEntry::TryDropEntry(ClientContext &context, CatalogType catalog_type, const string &name) {
 	DropInfo info;
 	info.type = catalog_type;
-	info.name = name;
+	info.name = Identifier(name);
 	info.cascade = false;
 	info.if_not_found = OnEntryNotFound::RETURN_NULL;
 	DropEntry(context, info);
@@ -39,7 +39,7 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateTable(CatalogTransaction tran
 	auto table_name = base_info.table;
 	if (base_info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
 		// CREATE OR REPLACE - drop any existing entries first (if any)
-		TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name);
+		TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name.GetIdentifierName());
 	}
 	return tables.CreateTable(transaction.GetContext(), info);
 }
@@ -66,9 +66,9 @@ string GetMySQLCreateIndex(CreateIndexInfo &info, TableCatalogEntry &tbl) {
 		sql += " UNIQUE";
 	}
 	sql += " INDEX ";
-	sql += MySQLUtils::WriteIdentifier(info.index_name);
+	sql += MySQLUtils::WriteIdentifier(info.index_name.GetIdentifierName());
 	sql += " ON ";
-	sql += MySQLUtils::WriteIdentifier(tbl.name);
+	sql += MySQLUtils::WriteIdentifier(tbl.name.GetIdentifierName());
 	sql += "(";
 	for (idx_t i = 0; i < info.parsed_expressions.size(); i++) {
 		if (i > 0) {
@@ -98,7 +98,7 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateIndex(CatalogTransaction tran
 string GetMySQLCreateView(CreateViewInfo &info) {
 	string sql;
 	sql = "CREATE VIEW ";
-	sql += MySQLUtils::WriteIdentifier(info.view_name);
+	sql += MySQLUtils::WriteIdentifier(info.view_name.GetIdentifierName());
 	sql += " ";
 	if (!info.aliases.empty()) {
 		sql += "(";
@@ -107,7 +107,7 @@ string GetMySQLCreateView(CreateViewInfo &info) {
 				sql += ", ";
 			}
 			auto &alias = info.aliases[i];
-			sql += MySQLUtils::WriteIdentifier(alias);
+			sql += MySQLUtils::WriteIdentifier(alias.GetIdentifierName());
 		}
 		sql += ") ";
 	}
@@ -129,12 +129,12 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateView(CatalogTransaction trans
 				return current_entry;
 			}
 			// CREATE OR REPLACE - drop any existing entries first (if any)
-			TryDropEntry(transaction.GetContext(), CatalogType::VIEW_ENTRY, info.view_name);
+			TryDropEntry(transaction.GetContext(), CatalogType::VIEW_ENTRY, info.view_name.GetIdentifierName());
 		}
 	}
 	auto &mysql_transaction = GetMySQLTransaction(transaction);
 	mysql_transaction.Query(GetMySQLCreateView(info));
-	return tables.RefreshTable(transaction.GetContext(), info.view_name);
+	return tables.RefreshTable(transaction.GetContext(), info.view_name.GetIdentifierName());
 }
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateType(CatalogTransaction transaction, CreateTypeInfo &info) {

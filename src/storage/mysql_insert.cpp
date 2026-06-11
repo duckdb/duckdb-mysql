@@ -68,7 +68,7 @@ vector<string> GetInsertColumns(const MySQLInsert &insert, MySQLTableEntry &entr
 		}
 		for (idx_t c = 0; c < column_count; c++) {
 			auto &col = columns.GetColumn(column_indexes[c]);
-			column_names.push_back(col.GetName());
+			column_names.emplace_back(col.GetName().GetIdentifierName());
 		}
 	}
 	return column_names;
@@ -77,9 +77,9 @@ vector<string> GetInsertColumns(const MySQLInsert &insert, MySQLTableEntry &entr
 string GetBaseInsertQuery(const MySQLTableEntry &table, const vector<string> &column_names) {
 	string query;
 	query += "INSERT INTO ";
-	query += MySQLUtils::WriteIdentifier(table.schema.name);
+	query += MySQLUtils::WriteIdentifier(table.schema.name.GetIdentifierName());
 	query += ".";
-	query += MySQLUtils::WriteIdentifier(table.name);
+	query += MySQLUtils::WriteIdentifier(table.name.GetIdentifierName());
 	query += " ";
 	if (!column_names.empty()) {
 		query += "(";
@@ -268,7 +268,7 @@ string MySQLInsert::GetName() const {
 
 InsertionOrderPreservingMap<string> MySQLInsert::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
-	result["Table Name"] = table ? table->name : info->Base().table;
+	result["Table Name"] = table ? table->name.GetIdentifierName() : info->Base().table.GetIdentifierName();
 	return result;
 }
 

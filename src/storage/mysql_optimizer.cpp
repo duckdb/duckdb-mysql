@@ -44,8 +44,8 @@ static bool ShouldPushAggregate(ClientContext &context, LogicalAggregate &aggr) 
 
 	auto &catalog = bind_data->table.ParentCatalog().Cast<MySQLCatalog>();
 	MySQLTableStats table_stats;
-	bool have_stats =
-	    catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name, table_stats);
+	bool have_stats = catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name.GetIdentifierName(),
+	                                                        bind_data->table.name.GetIdentifierName(), table_stats);
 
 	if (!have_stats) {
 		return true;
@@ -77,8 +77,8 @@ static bool ShouldPushAggregate(ClientContext &context, LogicalAggregate &aggr) 
 	double filter_selectivity = 1.0;
 	if (get->table_filters.HasFilters()) {
 		MySQLTableStats cached_filter_stats;
-		if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name,
-		                                          cached_filter_stats)) {
+		if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name.GetIdentifierName(),
+		                                          bind_data->table.name.GetIdentifierName(), cached_filter_stats)) {
 			for (const auto &entry : get->table_filters) {
 				ProjectionIndex proj_idx = entry.GetIndex();
 				ColumnIndex col_idx = get->GetColumnIndex(proj_idx);

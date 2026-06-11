@@ -154,7 +154,7 @@ string MySQLSQLWriter::WriteColumnRef(const ColumnRefExpression &column_ref) {
 		if (!result.empty()) {
 			result += ".";
 		}
-		result += WriteIdentifier(column_name);
+		result += WriteIdentifier(column_name.GetIdentifierName());
 	}
 	return result;
 }
@@ -262,7 +262,7 @@ string MySQLSQLWriter::WriteFunctionCall(const string &function_name, const vect
 
 string MySQLSQLWriter::WriteFunction(const FunctionExpression &func) {
 	auto &children = func.GetArguments();
-	auto name = StringUtil::Lower(func.FunctionName());
+	auto name = StringUtil::Lower(func.FunctionName().GetIdentifierName());
 	if (name == "~~" || name == "!~~") {
 		// [NOT] LIKE - DuckDB's LIKE has no default escape character, while MySQL's default
 		// escape character is backslash; disable it with an empty ESCAPE clause
@@ -290,7 +290,7 @@ string MySQLSQLWriter::WriteFunction(const FunctionExpression &func) {
 		                        "SupportsPushdown",
 		                        name);
 	}
-	return WriteFunctionCall(func.FunctionName(), children, func.Distinct());
+	return WriteFunctionCall(func.FunctionName().GetIdentifierName(), children, func.Distinct());
 }
 
 static string MySQLWriteWindowBoundary(WindowBoundary boundary, const string &boundary_expr) {
@@ -313,7 +313,8 @@ static string MySQLWriteWindowBoundary(WindowBoundary boundary, const string &bo
 }
 
 string MySQLSQLWriter::WriteWindow(const WindowExpression &window) {
-	string result = WriteFunctionCall(window.FunctionName(), window.GetArguments(), window.Distinct());
+	string result =
+	    WriteFunctionCall(window.FunctionName().GetIdentifierName(), window.GetArguments(), window.Distinct());
 	result += " OVER (";
 	string sep;
 	if (!window.Partitions().empty()) {
@@ -447,7 +448,7 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 		auto &star = expr.Cast<StarExpression>();
 		if (!star.RelationName().empty()) {
 			// qualified star (e.g. t.*)
-			return WriteIdentifier(star.RelationName()) + ".*";
+			return WriteIdentifier(star.RelationName().GetIdentifierName()) + ".*";
 		}
 		return "*";
 	}
@@ -513,11 +514,11 @@ string MySQLSQLWriter::WriteTableRef(const TableRef &ref) {
 		auto &base = ref.Cast<BaseTableRef>();
 		string result;
 		if (!base.schema_name.empty()) {
-			result += WriteIdentifier(base.schema_name) + ".";
+			result += WriteIdentifier(base.schema_name.GetIdentifierName()) + ".";
 		}
-		result += WriteIdentifier(base.table_name);
+		result += WriteIdentifier(base.table_name.GetIdentifierName());
 		if (!base.alias.empty()) {
-			result += " AS " + WriteIdentifier(base.alias);
+			result += " AS " + WriteIdentifier(base.alias.GetIdentifierName());
 		}
 		return result;
 	}
@@ -557,7 +558,7 @@ string MySQLSQLWriter::WriteTableRef(const TableRef &ref) {
 				if (i > 0) {
 					result += ", ";
 				}
-				result += WriteIdentifier(join.using_columns[i]);
+				result += WriteIdentifier(join.using_columns[i].GetIdentifierName());
 			}
 			result += ")";
 		}
@@ -567,7 +568,7 @@ string MySQLSQLWriter::WriteTableRef(const TableRef &ref) {
 	case TableReferenceType::SUBQUERY: {
 		auto &subquery = ref.Cast<SubqueryRef>();
 		// MySQL requires an alias for every derived table - generate one if there is none
-		string alias = subquery.alias;
+		string alias = subquery.alias.GetIdentifierName();
 		if (alias.empty()) {
 			alias = "mysql_unnamed_subquery" + to_string(++unnamed_subquery_index);
 		}
@@ -609,8 +610,8 @@ string MySQLSQLWriter::WriteOrderList(const vector<OrderByNode> &orders,
 						// reference the output column by its alias where possible - expressions over
 						// output columns satisfy MySQL's ONLY_FULL_GROUP_BY checks where raw expression
 						// copies may not
-						null_key =
-						    target.GetAlias().empty() ? WriteExpression(target) : WriteIdentifier(target.GetAlias());
+						null_key = target.GetAlias().empty() ? WriteExpression(target)
+						                                     : WriteIdentifier(target.GetAlias().GetIdentifierName());
 					}
 				}
 			}
@@ -689,14 +690,14 @@ string MySQLSQLWriter::WriteCTEMap(const CommonTableExpressionMap &cte_map) {
 			result += ", ";
 		}
 		auto &cte = *kv.second;
-		result += WriteIdentifier(kv.first);
+		result += WriteIdentifier(kv.first.GetIdentifierName());
 		if (!cte.aliases.empty()) {
 			result += " (";
 			for (idx_t k = 0; k < cte.aliases.size(); k++) {
 				if (k > 0) {
 					result += ", ";
 				}
-				result += WriteIdentifier(cte.aliases[k]);
+				result += WriteIdentifier(cte.aliases[k].GetIdentifierName());
 			}
 			result += ")";
 		}
@@ -725,7 +726,7 @@ string MySQLSQLWriter::WriteSelectNode(const SelectNode &node) {
 		auto &select_expr = *node.select_list[i];
 		result += WriteExpression(select_expr);
 		if (!select_expr.GetAlias().empty()) {
-			result += " AS " + WriteIdentifier(select_expr.GetAlias());
+			result += " AS " + WriteIdentifier(select_expr.GetAlias().GetIdentifierName());
 		} else if (select_expr.GetExpressionClass() != ExpressionClass::STAR &&
 		           select_expr.GetExpressionClass() != ExpressionClass::COLUMN_REF) {
 			// alias the column with DuckDB's name for the expression so that the result column

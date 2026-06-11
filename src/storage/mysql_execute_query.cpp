@@ -75,7 +75,7 @@ string MySQLExecuteQuery::GetName() const {
 
 InsertionOrderPreservingMap<string> MySQLExecuteQuery::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
-	result["Table Name"] = table.name;
+	result["Table Name"] = table.name.GetIdentifierName();
 	return result;
 }
 
@@ -127,7 +127,7 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 					column_name = table_scan.names[col_id];
 				}
 			}
-			BoundReferenceExpression bound_ref(std::move(column_name), LogicalTypeId::INVALID, 0);
+			BoundReferenceExpression bound_ref(Identifier(std::move(column_name)), LogicalTypeId::INVALID, 0);
 			auto filter_expr = filter.ToExpression(bound_ref);
 			auto filter_str = filter_expr->ToString();
 			if (result.empty()) {
@@ -147,9 +147,9 @@ string ExtractFilters(PhysicalOperator &child, const string &statement) {
 
 string ConstructDeleteStatement(LogicalDelete &op, PhysicalOperator &child) {
 	string result = "DELETE FROM ";
-	result += MySQLUtils::WriteIdentifier(op.table.schema.name);
+	result += MySQLUtils::WriteIdentifier(op.table.schema.name.GetIdentifierName());
 	result += ".";
-	result += MySQLUtils::WriteIdentifier(op.table.name);
+	result += MySQLUtils::WriteIdentifier(op.table.name.GetIdentifierName());
 	auto filters = ExtractFilters(child, "DELETE");
 	if (!filters.empty()) {
 		result += " WHERE " + filters;
@@ -172,9 +172,9 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 	// FIXME - all of this is pretty gnarly, we should provide a hook earlier on
 	// in the planning process to convert this into a SQL statement
 	string result = "UPDATE ";
-	result += MySQLUtils::WriteIdentifier(op.table.schema.name);
+	result += MySQLUtils::WriteIdentifier(op.table.schema.name.GetIdentifierName());
 	result += ".";
-	result += MySQLUtils::WriteIdentifier(op.table.name);
+	result += MySQLUtils::WriteIdentifier(op.table.name.GetIdentifierName());
 	result += " SET ";
 	if (child.type != PhysicalOperatorType::PROJECTION) {
 		throw NotImplementedException("MySQL Update not supported - Expected the "
@@ -186,7 +186,7 @@ string ConstructUpdateStatement(LogicalUpdate &op, PhysicalOperator &child) {
 			result += ", ";
 		}
 		auto &col = op.table.GetColumn(op.table.GetColumns().PhysicalToLogical(op.columns[c]));
-		result += MySQLUtils::WriteIdentifier(col.GetName());
+		result += MySQLUtils::WriteIdentifier(col.GetName().GetIdentifierName());
 		result += " = ";
 		if (op.expressions[c]->GetExpressionType() == ExpressionType::VALUE_DEFAULT) {
 			result += "DEFAULT";
