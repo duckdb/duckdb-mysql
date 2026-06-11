@@ -104,7 +104,8 @@ static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, c
 		fed.adaptive_cache_generation = cached.plan_generation;
 		fed.adaptive_estimated_rows = cached.plan.estimated_rows_from_mysql;
 	} else {
-		auto table_stats = stats_collector.GetTableStats(bind_data.table.schema.name, bind_data.table.name);
+		auto table_stats = stats_collector.GetTableStats(bind_data.table.schema.name.GetIdentifierName(),
+		                                                 bind_data.table.name.GetIdentifierName());
 		auto mysql_costs = stats_collector.FetchMySQLCostConstants();
 		CostModelParameters cost_params;
 		if (mysql_costs.loaded) {
@@ -141,7 +142,8 @@ static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, c
 static void ResolvePartitionPruning(FederationState &fed, const MySQLBindData &bind_data,
                                     MySQLStatisticsCollector &stats_collector, const vector<column_t> &column_ids,
                                     optional_ptr<TableFilterSet> filters) {
-	auto part_stats = stats_collector.GetTableStats(bind_data.table.schema.name, bind_data.table.name);
+	auto part_stats = stats_collector.GetTableStats(bind_data.table.schema.name.GetIdentifierName(),
+	                                                bind_data.table.name.GetIdentifierName());
 	const auto &part_info = part_stats.partition_info;
 	if (!part_info.IsRangeOrList() || part_info.partitions.empty()) {
 		return;
@@ -276,8 +278,10 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 			bool valid = explain_stats.ValidateWithExplain(select, fed.filter_analysis.recommended_index, true);
 			if (!valid) {
 				auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
-				mysql_catalog.GetPlanCache().InvalidateTable(bind_data.table.schema.name, bind_data.table.name);
-				mysql_catalog.GetStatsCache().Invalidate(bind_data.table.schema.name, bind_data.table.name);
+				mysql_catalog.GetPlanCache().InvalidateTable(bind_data.table.schema.name.GetIdentifierName(),
+				                                             bind_data.table.name.GetIdentifierName());
+				mysql_catalog.GetStatsCache().Invalidate(bind_data.table.schema.name.GetIdentifierName(),
+				                                         bind_data.table.name.GetIdentifierName());
 			}
 		}
 	}
@@ -351,9 +355,9 @@ static string BuildAggregateQuery(MySQLBindData &bind_data) {
 	auto &aggr_bind_data = bind_data.aggregate_bind_data;
 	string sql = "SELECT " + aggr_bind_data.aggregate_select_list;
 	sql += " FROM ";
-	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name.GetIdentifierName());
 	sql += ".";
-	sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.name.GetIdentifierName());
 	if (!aggr_bind_data.aggregate_where_clause.empty()) {
 		sql += " WHERE " + aggr_bind_data.aggregate_where_clause;
 	}
@@ -409,19 +413,20 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		} else {
 			auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
 			auto col_name = col.GetName();
-			select += MySQLUtils::WriteIdentifier(col_name);
+			select += MySQLUtils::WriteIdentifier(col_name.GetIdentifierName());
 		}
 	}
 	select += " FROM ";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	select += MySQLUtils::WriteIdentifier(bind_data.table.schema.name.GetIdentifierName());
 	select += ".";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	select += MySQLUtils::WriteIdentifier(bind_data.table.name.GetIdentifierName());
 
 	string filter_string;
 
 	if (bind_data.use_predicate_analyzer && input.filters && input.filters->HasFilters()) {
 		MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache(), mysql_catalog.GetVersion());
-		PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
+		PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name.GetIdentifierName(),
+		                           bind_data.table.name.GetIdentifierName());
 		ConfigurePredicateAnalyzer(context, analyzer);
 
 		fed.filter_analysis = analyzer.AnalyzeFilters(input.column_ids, input.filters, bind_data.names);
@@ -430,7 +435,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		for (idx_t c = 0; c < input.column_ids.size(); c++) {
 			if (input.column_ids[c] != COLUMN_IDENTIFIER_ROW_ID) {
 				auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
-				column_names.push_back(col.GetName());
+				column_names.emplace_back(col.GetName().GetIdentifierName());
 			}
 		}
 
@@ -441,8 +446,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 				filter_cols.push_back(analysis.column_name);
 				sels.push_back(analysis.estimated_selectivity);
 			}
-			ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
-			                                filter_cols, sels);
+			ExecutionPlanCacheKey cache_key(bind_data.table.schema.name.GetIdentifierName(),
+			                                bind_data.table.name.GetIdentifierName(), column_names, filter_cols, sels);
 
 			ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names, cache_key);
 			ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
@@ -580,7 +585,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
 	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	result["Table"] = bind_data.table.name;
+	result["Table"] = bind_data.table.name.GetIdentifierName();
 	return result;
 }
 
@@ -621,7 +626,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 	auto db_name = input.inputs[0].GetValue<string>();
 	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, db_name);
+	auto db = db_manager.GetDatabase(context, Identifier(db_name));
 	if (!db) {
 		throw BinderException("Failed to find attached database \"%s\" referenced in mysql_query", db_name);
 	}

@@ -83,7 +83,7 @@ string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name,
 		// option already provided in connection string
 		return string();
 	}
-	Value input_val = kv_secret.TryGetValue(name);
+	Value input_val = kv_secret.TryGetValue(Identifier(name));
 	if (input_val.IsNull()) {
 		// not provided
 		return string();
@@ -603,7 +603,7 @@ static bool MySQLSupportsValue(const Value &value) {
 }
 
 bool MySQLSupportsFunction(const FunctionExpression &func) {
-	auto &function_name = func.FunctionName();
+	auto &function_name = func.FunctionName().GetIdentifierName();
 
 	// Whitelist of functions that can be pushed into MySQL 8.0+ - either because the name and
 	// semantics are identical, or because MySQLSQLWriter rewrites them during serialization:
@@ -756,13 +756,13 @@ static void MySQLCollectJoinTableNames(const TableRef &ref, case_insensitive_set
 	case TableReferenceType::BASE_TABLE: {
 		auto &base = ref.Cast<BaseTableRef>();
 		const auto &name = base.alias.empty() ? base.table_name : base.alias;
-		if (!names.insert(name).second) {
+		if (!names.insert(name.GetIdentifierName()).second) {
 			duplicate = true;
 		}
 		break;
 	}
 	case TableReferenceType::SUBQUERY: {
-		if (!ref.alias.empty() && !names.insert(ref.alias).second) {
+		if (!ref.alias.empty() && !names.insert(ref.alias.GetIdentifierName()).second) {
 			duplicate = true;
 		}
 		break;
@@ -780,7 +780,7 @@ static void MySQLCollectColumnRefs(const ParsedExpression &expr, case_insensitiv
 	if (expr.GetExpressionClass() == ExpressionClass::COLUMN_REF) {
 		auto &colref = expr.Cast<ColumnRefExpression>();
 		if (!colref.IsQualified()) {
-			names.insert(colref.GetColumnName());
+			names.insert(colref.GetColumnName().GetIdentifierName());
 		}
 	}
 	if (expr.GetExpressionClass() == ExpressionClass::SUBQUERY) {
@@ -889,7 +889,7 @@ static bool MySQLSupportsSelectAliasUsage(const SelectNode &select) {
 	// find the first select-list item that defines each alias
 	case_insensitive_map_t<idx_t> alias_definitions;
 	for (idx_t i = 0; i < select.select_list.size(); i++) {
-		auto &alias = select.select_list[i]->GetAlias();
+		auto &alias = select.select_list[i]->GetAlias().GetIdentifierName();
 		if (!alias.empty() && alias_definitions.find(alias) == alias_definitions.end()) {
 			alias_definitions[alias] = i;
 		}
@@ -1190,7 +1190,7 @@ static bool MySQLSupportsWindow(const WindowExpression &window) {
 	    "lag",        "first_value", "last_value", "nth_value",    "count",       "count_star", "sum",
 	    "avg",        "min",         "max",        "stddev_pop",   "stddev_samp", "var_pop",    "var_samp",
 	};
-	return MYSQL_WINDOW_FUNCTIONS.count(window.FunctionName()) > 0;
+	return MYSQL_WINDOW_FUNCTIONS.count(window.FunctionName().GetIdentifierName()) > 0;
 }
 
 bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
@@ -1249,6 +1249,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 	}
 	case ExpressionClass::FUNCTION: {
 		auto &func = expr.Cast<FunctionExpression>();
+		auto &function_name = func.FunctionName().GetIdentifierName();
 		if (func.Filter()) {
 			// FILTER (WHERE ...) on aggregates is not supported in MySQL
 			return false;
@@ -1265,7 +1266,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			// (avg is excluded: it is serialized as avg(CAST(x AS DOUBLE)), which would deduplicate
 			// the DOUBLE-cast values instead of the original ones)
 			static const case_insensitive_set_t MYSQL_DISTINCT_AGGREGATES = {"count", "sum", "min", "max"};
-			if (MYSQL_DISTINCT_AGGREGATES.count(func.FunctionName()) == 0) {
+			if (MYSQL_DISTINCT_AGGREGATES.count(function_name) == 0) {
 				return false;
 			}
 		}
@@ -1278,24 +1279,23 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			}
 		}
 		if (children.size() > 1 &&
-		    (StringUtil::CIEquals(func.FunctionName(), "trim") || StringUtil::CIEquals(func.FunctionName(), "ltrim") ||
-		     StringUtil::CIEquals(func.FunctionName(), "rtrim"))) {
+		    (StringUtil::CIEquals(function_name, "trim") || StringUtil::CIEquals(function_name, "ltrim") ||
+		     StringUtil::CIEquals(function_name, "rtrim"))) {
 			// the two-argument variants of trim/ltrim/rtrim are not supported in MySQL
 			return false;
 		}
 		static const case_insensitive_set_t MYSQL_SINGLE_ARGUMENT_REWRITES = {"week",   "dayofweek",   "weekday",
 		                                                                      "isodow", "microsecond", "trunc"};
-		if (MYSQL_SINGLE_ARGUMENT_REWRITES.count(func.FunctionName()) > 0 && children.size() != 1) {
+		if (MYSQL_SINGLE_ARGUMENT_REWRITES.count(function_name) > 0 && children.size() != 1) {
 			return false;
 		}
-		if (StringUtil::CIEquals(func.FunctionName(), "greatest") ||
-		    StringUtil::CIEquals(func.FunctionName(), "least")) {
+		if (StringUtil::CIEquals(function_name, "greatest") || StringUtil::CIEquals(function_name, "least")) {
 			// rewritten into a COALESCE rotation, which grows quadratically - bound the argument count
 			if (children.size() < 2 || children.size() > 8) {
 				return false;
 			}
 		}
-		if (StringUtil::CIEquals(func.FunctionName(), "lpad") || StringUtil::CIEquals(func.FunctionName(), "rpad")) {
+		if (StringUtil::CIEquals(function_name, "lpad") || StringUtil::CIEquals(function_name, "rpad")) {
 			// MySQL returns NULL for negative lengths where DuckDB returns an empty string, and
 			// returns NULL when the result exceeds @@max_allowed_packet - only push down calls
 			// with a literal length that is non-negative and small enough for any server setting
@@ -1304,8 +1304,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 				return false;
 			}
 		}
-		if (StringUtil::CIEquals(func.FunctionName(), "substring") ||
-		    StringUtil::CIEquals(func.FunctionName(), "substr")) {
+		if (StringUtil::CIEquals(function_name, "substring") || StringUtil::CIEquals(function_name, "substr")) {
 			// MySQL handles zero and negative offsets differently - only push down calls with
 			// literal positive offsets (and a literal non-negative length)
 			if (children.size() < 2 || children.size() > 3) {

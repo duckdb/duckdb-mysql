@@ -69,12 +69,12 @@ static bool TableIsInternal(const SchemaCatalogEntry &schema, const string &name
 
 MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info)
     : TableCatalogEntry(catalog, schema, info) {
-	this->internal = TableIsInternal(schema, name);
+	this->internal = TableIsInternal(schema, name.GetIdentifierName());
 }
 
 MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, MySQLTableInfo &info)
     : TableCatalogEntry(catalog, schema, *info.create_info) {
-	this->internal = TableIsInternal(schema, name);
+	this->internal = TableIsInternal(schema, name.GetIdentifierName());
 }
 
 unique_ptr<BaseStatistics> MySQLTableEntry::GetStatistics(ClientContext &context, column_t column_id) {
@@ -97,7 +97,7 @@ TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_pt
 	auto result = make_uniq<MySQLBindData>(*this);
 	for (auto &col : columns.Logical()) {
 		result->types.push_back(col.GetType());
-		result->names.push_back(col.GetName());
+		result->names.emplace_back(col.GetName().GetIdentifierName());
 	}
 	bool use_predicate_analyzer = GetBoolSetting(context, "mysql_enable_predicate_analyzer");
 	result->use_predicate_analyzer = use_predicate_analyzer;
@@ -113,7 +113,7 @@ TableStorageInfo MySQLTableEntry::GetStorageInfo(ClientContext &context) {
 	auto &db = transaction.GetConnection();
 	TableStorageInfo result;
 	result.cardinality = 0;
-	result.index_info = db.GetIndexInfo(name);
+	result.index_info = db.GetIndexInfo(name.GetIdentifierName());
 	return result;
 }
 

@@ -29,7 +29,7 @@ static duckdb::unique_ptr<FunctionData> MySQLExecuteBind(ClientContext &context,
 	// look up the database to query
 	auto db_name = input.inputs[0].GetValue<string>();
 	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, db_name);
+	auto db = db_manager.GetDatabase(context, Identifier(db_name));
 	if (!db) {
 		throw BinderException("Failed to find attached database \"%s\" referenced in mysql_query", db_name);
 	}

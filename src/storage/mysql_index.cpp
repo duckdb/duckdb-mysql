@@ -19,7 +19,7 @@ SourceResultType MySQLCreateIndex::GetDataInternal(ExecutionContext &context, Da
                                                    OperatorSourceInput &input) const {
 	auto &catalog = table.catalog;
 	if (info->catalog == INVALID_CATALOG && info->schema == catalog.GetName()) {
-		info->schema = DEFAULT_SCHEMA;
+		info->schema = Identifier::DefaultSchema();
 	}
 	auto &schema = catalog.GetSchema(context.client, info->schema);
 	schema.CreateIndex(context.client, *info, table);
