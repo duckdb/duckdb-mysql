@@ -641,7 +641,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	if (params_it != input.named_parameters.end()) {
 		Value &struct_val = params_it->second;
 		if (struct_val.IsNull()) {
-			throw BinderException("Parameters to mysql_query cannot be NULL");
+			throw BinderException("Query parameters cannot be NULL");
 		}
 		if (struct_val.type().id() != LogicalTypeId::STRUCT) {
 			throw BinderException("Query parameters must be specified in a STRUCT");
@@ -649,93 +649,36 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		params = StructValue::GetChildren(struct_val);
 	}
 
-	bool streaming_enabled = true;
-	auto streaming_it = input.named_parameters.find("stream_results");
-	if (streaming_it != input.named_parameters.end()) {
-		Value &bool_val = streaming_it->second;
-		if (!bool_val.IsNull()) {
-			streaming_enabled = BooleanValue::Get(bool_val);
-		}
-	}
-
-	if (!streaming_enabled) {
+	try { // todo: move me to scan
 		auto &transaction = MySQLTransaction::Get(context, catalog);
 		MySQLConnection &conn = transaction.GetConnection();
 		auto result = conn.Query(sql, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
-		for (auto &field : result->Fields()) {
-			names.push_back(field.name);
-			return_types.push_back(field.duckdb_type);
+		if (result->Fields().size() > 0) {
+			for (auto &field : result->Fields()) {
+				names.push_back(field.name);
+				return_types.push_back(field.duckdb_type);
+			}
+		} else {
+			return_types.emplace_back(LogicalType::BOOLEAN);
+			names.emplace_back("Success");
 		}
 		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
 		return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(result));
+	} catch (const std::exception &ex) {
+		ErrorData error(ex);
+		throw BinderException("Query execution error: %s", error.RawMessage());
 	}
-
-	auto &active_transaction = MySQLTransaction::Get(context, catalog);
-	if (active_transaction.HasStartedTransaction()) {
-		// a transaction has already been started on the remote server - run the query over the
-		// transaction's connection so that it sees uncommitted changes
-		auto &conn = active_transaction.GetConnection();
-		auto stmt = conn.Prepare(sql);
-		for (auto &field : stmt->Fields()) {
-			names.push_back(field.name);
-			return_types.push_back(field.duckdb_type);
-		}
-		QueryResult::DeduplicateColumns(names);
-		auto bind_data = make_uniq<MySQLQueryBindData>(std::move(sql), catalog, MySQLPooledConnection(),
-		                                               std::move(stmt), std::move(params));
-		bind_data->use_transaction_connection = true;
-		return std::move(bind_data);
-	}
-
-	auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
-
-	auto acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
-	std::string time_zone;
-	Value mysql_session_time_zone;
-	if (context.TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
-		time_zone = mysql_session_time_zone.ToString();
-	}
-	auto conn = mysql_catalog.GetConnectionPool().Acquire(acquire_mode, time_zone);
-	auto type_config = MySQLTypeConfig(context);
-	conn->SetTypeConfig(type_config);
-
-	auto stmt = conn->Prepare(sql);
-	for (auto &field : stmt->Fields()) {
-		names.push_back(field.name);
-		return_types.push_back(field.duckdb_type);
-	}
-	QueryResult::DeduplicateColumns(names);
-	return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(conn), std::move(stmt), std::move(params));
 }
 
 static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
                                                                       TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->CastNoConst<MySQLQueryBindData>();
-	unique_ptr<MySQLResult> mysql_result;
-	if (bind_data.result) {
-		mysql_result = std::move(bind_data.result);
-	}
-	return make_uniq<MySQLGlobalState>(std::move(mysql_result));
+	return make_uniq<MySQLGlobalState>(std::move(bind_data.result));
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
-	if (!gstate.result) {
-		auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
-		D_ASSERT(bind_data.stmt);
-		if (bind_data.use_transaction_connection) {
-			auto &transaction = MySQLTransaction::Get(context, bind_data.catalog);
-			auto &conn = transaction.GetConnection();
-			gstate.result = conn.Query(*bind_data.stmt, bind_data.params, MySQLResultStreaming::FORCE_MATERIALIZATION);
-		} else {
-			D_ASSERT(bind_data.pooled_connection);
-			auto result = bind_data.pooled_connection->Query(*bind_data.stmt, bind_data.params,
-			                                                 MySQLResultStreaming::ALLOW_STREAMING);
-			gstate.result = std::move(result);
-		}
-	}
 	MySQLScan(context, data, output);
 }
 
@@ -745,7 +688,39 @@ MySQLQueryFunction::MySQLQueryFunction()
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
+	// TODO: reimplement me
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
+}
+
+static unique_ptr<FunctionData> MySQLExecuteBind(ClientContext &context, TableFunctionBindInput &input,
+                                                 vector<LogicalType> &return_types, vector<string> &names) {
+	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
+		throw BinderException("Parameters to mysql_execute cannot be NULL");
+	}
+
+	auto db_name = input.inputs[0].GetValue<string>();
+	auto &db_manager = DatabaseManager::Get(context);
+	auto db = db_manager.GetDatabase(context, Identifier(db_name));
+	if (!db) {
+		throw BinderException("Failed to find attached database \"%s\" referenced in mysql_query", db_name);
+	}
+	auto &catalog = db->GetCatalog();
+	if (catalog.GetCatalogType() != "mysql") {
+		throw BinderException("Attached database \"%s\" does not refer to a MySQL database", db_name);
+	}
+	auto &transaction = Transaction::Get(context, catalog).Cast<MySQLTransaction>();
+	if (transaction.GetAccessMode() == AccessMode::READ_ONLY) {
+		throw PermissionException("mysql_execute cannot be run in a read-only connection");
+	}
+	return MySQLQueryBind(context, input, return_types, names);
+}
+
+MySQLExecuteFunction::MySQLExecuteFunction()
+    : TableFunction("mysql_execute", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLQueryScan, MySQLExecuteBind,
+                    MySQLQueryInitGlobalState, MySQLInitLocalState) {
+	serialize = MySQLScanSerialize;
+	deserialize = MySQLScanDeserialize;
+	named_parameters["params"] = LogicalType::ANY;
 }
 
 } // namespace duckdb

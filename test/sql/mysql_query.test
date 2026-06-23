@@ -11,7 +11,7 @@ ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple (TYPE M
 
 # simple example
 query I
-SELECT * FROM mysql_query('simple', 'SELECT 42')
+FROM mysql_query('simple', 'SELECT 42')
 ----
 42
 
@@ -21,7 +21,7 @@ SELECT col FROM mysql_query('simple', 'SELECT 42 AS col')
 42
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT NULL')
+FROM mysql_query('simple', 'SELECT NULL')
 ----
 NULL
 
@@ -32,7 +32,7 @@ SELECT typeof(COLUMNS(*)) FROM mysql_query('simple', 'SELECT * FROM booleans') L
 BOOLEAN
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT * FROM booleans')
+FROM mysql_query('simple', 'SELECT * FROM booleans')
 ----
 false
 true
@@ -44,7 +44,7 @@ SELECT typeof(COLUMNS(*)) FROM mysql_query('simple', 'SELECT * FROM signed_integ
 TINYINT	SMALLINT	INTEGER	INTEGER	BIGINT
 
 query IIIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM signed_integers')
+FROM mysql_query('simple', 'SELECT * FROM signed_integers')
 ----
 -128	-32768	-8388608	-2147483648	-9223372036854775808
 127	32767	8388607	2147483647	9223372036854775807
@@ -56,7 +56,7 @@ SELECT typeof(COLUMNS(*)) FROM mysql_query('simple', 'SELECT * FROM unsigned_int
 UTINYINT	USMALLINT	UINTEGER	UINTEGER	UBIGINT
 
 query IIIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM unsigned_integers')
+FROM mysql_query('simple', 'SELECT * FROM unsigned_integers')
 ----
 0	0	0	0	0
 255	65535	16777215	4294967295	18446744073709551615
@@ -68,7 +68,7 @@ SELECT typeof(COLUMNS(*)) FROM mysql_query('simple', 'SELECT * FROM floating_poi
 FLOAT	DOUBLE	FLOAT	DOUBLE
 
 query IIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM floating_points')
+FROM mysql_query('simple', 'SELECT * FROM floating_points')
 ----
 0.0	0.0	0.0	0.0
 0.5	0.5	0.5	0.5
@@ -76,7 +76,7 @@ SELECT * FROM mysql_query('simple', 'SELECT * FROM floating_points')
 NULL	NULL	NULL	NULL
 
 query IIIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM decimals')
+FROM mysql_query('simple', 'SELECT * FROM decimals')
 ----
 0.5	1234.1	12345678.12	12345678901234567.123	1.2345678901234568e+35
 -0.5	-1234.1	-12345678.12	-12345678901234567.123	-1.2345678901234568e+35
@@ -88,7 +88,7 @@ SELECT typeof(COLUMNS(*)) FROM mysql_query('simple', 'SELECT * FROM decimals') L
 DECIMAL(2,1)	DECIMAL(5,1)	DECIMAL(10,2)	DECIMAL(20,3)	DOUBLE
 
 query II
-SELECT * FROM mysql_query('simple', 'SELECT * FROM fake_booleans')
+FROM mysql_query('simple', 'SELECT * FROM fake_booleans')
 ----
 1	true
 0	false
@@ -97,13 +97,13 @@ NULL	NULL
 1	false
 
 query II
-SELECT * FROM mysql_query('simple', 'SELECT * FROM bits')
+FROM mysql_query('simple', 'SELECT * FROM bits')
 ----
 \x05	\x00\x00\x00\x00\x00\x01UU
 NULL	NULL
 
 query III
-SELECT * FROM mysql_query('simple', 'SELECT * FROM text_tbl')
+FROM mysql_query('simple', 'SELECT * FROM text_tbl')
 ----
 ab  	ab	thisisalongstring
 (empty)	(empty)	(empty)
@@ -111,7 +111,7 @@ ab  	ab	thisisalongstring
 NULL	NULL	NULL
 
 query III
-SELECT * FROM mysql_query('simple', 'SELECT * FROM blob_tbl')
+FROM mysql_query('simple', 'SELECT * FROM blob_tbl')
 ----
 c\x00\x00\x00	c\x00\x00	c\x00\x00
 \x00\x00\x00\x00	(empty)	(empty)
@@ -119,7 +119,7 @@ c\x00\x00\x00	c\x00\x00	c\x00\x00
 NULL	NULL	NULL
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT * FROM enum_tbl')
+FROM mysql_query('simple', 'SELECT * FROM enum_tbl')
 ----
 x-small
 small
@@ -129,7 +129,7 @@ x-large
 NULL
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT * FROM set_tbl')
+FROM mysql_query('simple', 'SELECT * FROM set_tbl')
 ----
 a,d
 a,d
@@ -139,13 +139,13 @@ a,d
 
 # errors
 statement error
-SELECT * FROM mysql_query('simple', 'SELEC 42')
+FROM mysql_query('simple', 'SELEC 42')
 ----
 Failed to prepare
 
 # duplicate result column names are renamed (table functions require unique column names)
 query II
-SELECT * FROM mysql_query('simple', 'SELECT 42 a, 42 a')
+FROM mysql_query('simple', 'SELECT 42 a, 42 a')
 ----
 42	42
 
@@ -158,7 +158,7 @@ statement ok
 SET mysql_session_time_zone = '+01:00'
 
 query IIIIII
-SELECT * FROM mysql_query('simple', 'SELECT * FROM datetime_tbl ORDER BY id')
+FROM mysql_query('simple', 'SELECT * FROM datetime_tbl ORDER BY id')
 ----
 1	2020-02-03	2029-02-14 08:47:23	2029-02-14 14:47:23	23:59:59	1901
 2	1000-01-01	1000-01-01 00:00:00	1970-01-01 06:00:01	-838:59:59	2155
@@ -167,7 +167,7 @@ SELECT * FROM mysql_query('simple', 'SELECT * FROM datetime_tbl ORDER BY id')
 
 # issue #65 - Decimal data type conversion issue with mysql_query function
 query II
-SELECT * FROM mysql_query('simple', 'SELECT * FROM tbl_issue65')
+FROM mysql_query('simple', 'SELECT * FROM tbl_issue65')
 ----
 1	1.11
 2	2.22
@@ -175,67 +175,71 @@ SELECT * FROM mysql_query('simple', 'SELECT * FROM tbl_issue65')
 
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+FROM mysql_query('simple', 'SELECT ''foo''',
   stream_results=TRUE)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+FROM mysql_query('simple', 'SELECT ''foo''',
   stream_results=FALSE)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ''foo''',
+FROM mysql_query('simple', 'SELECT ''foo''',
   stream_results=NULL)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ?',
+FROM mysql_query('simple', 'SELECT ?',
   params=row('foo'),
   stream_results=TRUE)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ?',
+FROM mysql_query('simple', 'SELECT ?',
   params=row('foo'),
   stream_results=FALSE)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT ?',
+FROM mysql_query('simple', 'SELECT ?',
   params=row('foo'),
   stream_results=NULL)
 ----
 foo
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=FALSE)
+FROM mysql_query('simple', 'SELECT 42 col1', stream_results=FALSE)
 UNION ALL
-SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
+FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
 ----
 42
 43
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
+FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
 UNION ALL
-SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
+FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
 ----
 42
 43
 
 query I
-SELECT * FROM mysql_query('simple', 'SELECT 42 col1', stream_results=NULL)
+FROM mysql_query('simple', 'SELECT 42 col1', stream_results=NULL)
 UNION ALL
-SELECT * FROM mysql_query('simple', 'SELECT 43 col1', stream_results=NULL)
+FROM mysql_query('simple', 'SELECT 43 col1', stream_results=NULL)
 ----
 42
 43
+
+query I
+FROM mysql_query('simple', 'UPDATE booleans SET b = TRUE WHERE 1 < 0')
+----
 
 statement ok
 DETACH simple;
