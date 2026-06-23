@@ -1,0 +1,124 @@
+# name: test/sql/remote_pushdown/remote_pushdown_update.test
+# description: Test remote pushdown of UPDATE into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.update_tbl (i INTEGER, v INTEGER)
+
+statement ok
+INSERT INTO s.update_tbl SELECT i, i * 10 FROM range(5) t(i)
+
+# Basic UPDATE on a remote table is pushed down
+query II
+explain UPDATE s.update_tbl SET v = v + 1
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+UPDATE s.update_tbl SET v = v + 1
+
+query II
+SELECT i, v FROM s.update_tbl ORDER BY i
+----
+0	1
+1	11
+2	21
+3	31
+4	41
+
+# UPDATE with a WHERE clause is pushed down
+query II
+explain UPDATE s.update_tbl SET v = 0 WHERE i >= 3
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+UPDATE s.update_tbl SET v = 0 WHERE i >= 3
+
+query II
+SELECT i, v FROM s.update_tbl ORDER BY i
+----
+0	1
+1	11
+2	21
+3	0
+4	0
+
+# UPDATE with FROM clause using a remote source is pushed down
+statement ok
+CREATE OR REPLACE TABLE s.src_tbl (i INTEGER, val INTEGER)
+
+statement ok
+INSERT INTO s.src_tbl VALUES (0, 100), (1, 200), (2, 300)
+
+query II
+explain UPDATE s.update_tbl SET v = s.src_tbl.val FROM s.src_tbl WHERE s.update_tbl.i = s.src_tbl.i
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+UPDATE s.update_tbl SET v = s.src_tbl.val FROM s.src_tbl WHERE s.update_tbl.i = s.src_tbl.i
+
+query II
+SELECT i, v FROM s.update_tbl ORDER BY i
+----
+0	100
+1	200
+2	300
+3	0
+4	0
+
+# UPDATE with a subquery is pushed down
+query II
+explain UPDATE s.update_tbl SET v = 999 WHERE i IN (SELECT i FROM s.src_tbl WHERE val = 200)
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+UPDATE s.update_tbl SET v = 999 WHERE i IN (SELECT i FROM s.src_tbl WHERE val = 200)
+
+query II
+SELECT i, v FROM s.update_tbl ORDER BY i
+----
+0	100
+1	999
+2	300
+3	0
+4	0
+
+# UPDATE using multiple SET expressions is pushed down
+query II
+explain UPDATE s.update_tbl SET v = v + 100, i = i + 10
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+UPDATE s.update_tbl SET v = v + 100, i = i + 10
+
+query II
+SELECT i, v FROM s.update_tbl ORDER BY i
+----
+10	200
+11	1099
+12	400
+13	100
+14	100
+
+# UPDATE using a local table in FROM is not pushed down (executed locally)
+statement ok
+CREATE OR REPLACE TABLE local_tbl (i INTEGER, val INTEGER)
+
+statement ok
+INSERT INTO local_tbl VALUES (10, 500)
+
+statement error
+UPDATE s.update_tbl SET v = local_tbl.val FROM local_tbl WHERE s.update_tbl.i = local_tbl.i
+----
+UPDATE syntax not supported

@@ -1,0 +1,86 @@
+# name: test/sql/remote_pushdown/remote_pushdown_delete.test
+# description: Test remote pushdown of DELETE into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.delete_tbl (i INTEGER, v INTEGER)
+
+statement ok
+INSERT INTO s.delete_tbl SELECT i, i * 10 FROM range(5) t(i)
+
+# Basic DELETE with a WHERE clause is pushed down
+query II
+explain DELETE FROM s.delete_tbl WHERE i = 0
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+DELETE FROM s.delete_tbl WHERE i = 0
+
+query II
+SELECT i, v FROM s.delete_tbl ORDER BY i
+----
+1	10
+2	20
+3	30
+4	40
+
+# DELETE with complex WHERE clause is pushed down
+query II
+explain DELETE FROM s.delete_tbl WHERE i >= 3 OR v = 20
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+DELETE FROM s.delete_tbl WHERE i >= 3 OR v = 20
+
+query II
+SELECT i, v FROM s.delete_tbl ORDER BY i
+----
+1	10
+
+# DELETE all rows is pushed down
+query II
+explain DELETE FROM s.delete_tbl
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+DELETE FROM s.delete_tbl
+
+query I
+SELECT COUNT(*) FROM s.delete_tbl
+----
+0
+
+# Repopulate
+statement ok
+INSERT INTO s.delete_tbl SELECT i, i * 10 FROM range(5) t(i)
+
+statement ok
+CREATE OR REPLACE TABLE s.src_tbl (i INTEGER)
+
+statement ok
+INSERT INTO s.src_tbl VALUES (2), (4)
+
+# DELETE with USING clause referencing another remote table
+statement error
+DELETE FROM s.delete_tbl USING s.src_tbl WHERE s.delete_tbl.i = s.src_tbl.i
+----
+PREPARE error
+
+# DELETE using a local table in USING
+statement ok
+CREATE OR REPLACE TABLE local_tbl (i INTEGER)
+
+statement error
+DELETE FROM s.delete_tbl USING local_tbl WHERE s.delete_tbl.i = local_tbl.i
+----
+DELETE syntax not supported

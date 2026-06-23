@@ -52,13 +52,14 @@ public:
 };
 
 struct MySQLQueryBindData : public FunctionData {
-	MySQLQueryBindData(string query_p, Catalog &catalog, unique_ptr<MySQLResult> result_p)
-	    : query(std::move(query_p)), catalog(catalog), result(std::move(result_p)) {
+	MySQLQueryBindData(Catalog &catalog, string query_p, vector<Value> params_p, vector<MySQLField> fields_p)
+	    : catalog(catalog), query(std::move(query_p)), params(std::move(params_p)), fields(std::move(fields_p)) {
 	}
 
-	string query;
 	Catalog &catalog;
-	unique_ptr<MySQLResult> result;
+	string query;
+	vector<Value> params;
+	vector<MySQLField> fields;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
