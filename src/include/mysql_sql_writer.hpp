@@ -11,6 +11,9 @@
 #include "duckdb/common/types.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"
+#include "duckdb/parser/query_node/delete_query_node.hpp"
+#include "duckdb/parser/query_node/insert_query_node.hpp"
+#include "duckdb/parser/query_node/update_query_node.hpp"
 #include "duckdb/parser/result_modifier.hpp"
 #include "duckdb/parser/tableref.hpp"
 
@@ -54,6 +57,8 @@ public:
 private:
 	string WriteQueryNode(const QueryNode &node);
 	string WriteSelectNode(const SelectNode &node);
+	string WriteUpdateNode(const UpdateQueryNode &node);
+	string WriteDeleteNode(const DeleteQueryNode &node);
 	string WriteSetOperationNode(const SetOperationNode &node);
 	string WriteRecursiveCTENode(const RecursiveCTENode &node);
 	string WriteCTEMap(const CommonTableExpressionMap &cte_map);

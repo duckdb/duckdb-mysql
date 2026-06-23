@@ -172,9 +172,6 @@ unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
 	}
 
 	vector<MySQLField> fields = MySQLField::ReadFields(query, stmt.get(), type_config);
-	if (fields.empty()) {
-		throw InvalidInputException("Failed to fetch return types for query '%s'", query);
-	}
 
 	return make_uniq<MySQLStatement>(query, stmt.release(), std::move(fields));
 }

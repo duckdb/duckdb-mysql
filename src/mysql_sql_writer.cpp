@@ -20,6 +20,7 @@
 #include "duckdb/parser/query_node/set_operation_node.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
+#include "duckdb/parser/tableref/expressionlistref.hpp"
 #include "duckdb/parser/tableref/joinref.hpp"
 #include "duckdb/parser/tableref/subqueryref.hpp"
 #include "duckdb/common/extra_type_info.hpp"
@@ -771,6 +772,54 @@ string MySQLSQLWriter::WriteSelectNode(const SelectNode &node) {
 	return result;
 }
 
+string MySQLSQLWriter::WriteUpdateNode(const UpdateQueryNode &node) {
+	string result = WriteCTEMap(node.cte_map);
+	result += "UPDATE ";
+	result += WriteTableRef(*node.table);
+	if (node.from_table) {
+		result += ", " + WriteTableRef(*node.from_table);
+	}
+	result += " SET ";
+	for (idx_t i = 0; i < node.set_info->columns.size(); i++) {
+		if (i > 0) {
+			result += ", ";
+		}
+		result += WriteIdentifier(node.set_info->columns[i].GetIdentifierName()) + " = " +
+		          WriteExpression(*node.set_info->expressions[i]);
+	}
+	if (node.set_info->condition) {
+		result += " WHERE " + WriteExpression(*node.set_info->condition);
+	}
+	if (!node.returning_list.empty()) {
+		throw InternalException("MySQLSQLWriter: RETURNING clause should have been blocked by SupportsPushdown");
+	}
+	result += WriteResultModifiers(node, nullptr);
+	return result;
+}
+
+string MySQLSQLWriter::WriteDeleteNode(const DeleteQueryNode &node) {
+	string result = WriteCTEMap(node.cte_map);
+	result += "DELETE FROM ";
+	result += WriteTableRef(*node.table);
+	if (!node.using_clauses.empty()) {
+		result += " USING ";
+		for (idx_t i = 0; i < node.using_clauses.size(); i++) {
+			if (i > 0) {
+				result += ", ";
+			}
+			result += WriteTableRef(*node.using_clauses[i]);
+		}
+	}
+	if (node.condition) {
+		result += " WHERE " + WriteExpression(*node.condition);
+	}
+	if (!node.returning_list.empty()) {
+		throw InternalException("MySQLSQLWriter: RETURNING clause should have been blocked by SupportsPushdown");
+	}
+	result += WriteResultModifiers(node, nullptr);
+	return result;
+}
+
 string MySQLSQLWriter::WriteSetOperationNode(const SetOperationNode &node) {
 	string result = WriteCTEMap(node.cte_map);
 	for (idx_t i = 0; i < node.children.size(); i++) {
@@ -809,6 +858,10 @@ string MySQLSQLWriter::WriteQueryNode(const QueryNode &node) {
 	switch (node.type) {
 	case QueryNodeType::SELECT_NODE:
 		return WriteSelectNode(node.Cast<SelectNode>());
+	case QueryNodeType::UPDATE_QUERY_NODE:
+		return WriteUpdateNode(node.Cast<UpdateQueryNode>());
+	case QueryNodeType::DELETE_QUERY_NODE:
+		return WriteDeleteNode(node.Cast<DeleteQueryNode>());
 	case QueryNodeType::SET_OPERATION_NODE:
 		return WriteSetOperationNode(node.Cast<SetOperationNode>());
 	case QueryNodeType::RECURSIVE_CTE_NODE:

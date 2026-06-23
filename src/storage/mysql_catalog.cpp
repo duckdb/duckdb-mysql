@@ -1488,12 +1488,65 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 		}
 		return MySQLSupportsResultModifiers(node, nullptr);
 	}
+	case QueryNodeType::UPDATE_QUERY_NODE: {
+		auto &update = node.Cast<UpdateQueryNode>();
+		if (!update.returning_list.empty()) {
+			return false;
+		}
+		if (!SupportsPushdown(*update.table)) {
+			return false;
+		}
+		if (update.from_table) {
+			if (!SupportsPushdown(*update.from_table)) {
+				return false;
+			}
+			for (auto &modifier : update.modifiers) {
+				if (modifier->type == ResultModifierType::ORDER_MODIFIER ||
+				    modifier->type == ResultModifierType::LIMIT_MODIFIER) {
+					return false;
+				}
+			}
+		}
+		if (!update.set_info) {
+			return false;
+		}
+		for (auto &expr : update.set_info->expressions) {
+			if (!SupportsPushdown(*expr)) {
+				return false;
+			}
+		}
+		if (update.set_info->condition && !SupportsPushdown(*update.set_info->condition)) {
+			return false;
+		}
+		return MySQLSupportsResultModifiers(node, nullptr);
+	}
+	case QueryNodeType::DELETE_QUERY_NODE: {
+		auto &del = node.Cast<DeleteQueryNode>();
+		if (!del.returning_list.empty()) {
+			return false;
+		}
+		if (!SupportsPushdown(*del.table)) {
+			return false;
+		}
+		if (!del.using_clauses.empty()) {
+			for (auto &clause : del.using_clauses) {
+				if (!SupportsPushdown(*clause)) {
+					return false;
+				}
+			}
+			for (auto &modifier : del.modifiers) {
+				if (modifier->type == ResultModifierType::ORDER_MODIFIER ||
+				    modifier->type == ResultModifierType::LIMIT_MODIFIER) {
+					return false;
+				}
+			}
+		}
+		if (del.condition && !SupportsPushdown(*del.condition)) {
+			return false;
+		}
+		return MySQLSupportsResultModifiers(node, nullptr);
+	}
 	case QueryNodeType::INSERT_QUERY_NODE:
-	case QueryNodeType::DELETE_QUERY_NODE:
-	case QueryNodeType::UPDATE_QUERY_NODE:
-		// DML cannot be executed through mysql_query - these statements are handled by the
-		// regular catalog insert/update/delete paths instead (the SELECT part of an INSERT
-		// can still be pushed down separately)
 		return false;
 	default:
 		// unknown query node type
