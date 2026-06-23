@@ -58,6 +58,7 @@ MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, M
       connection_string(connection_string_p), connection_id(connection_id_p), streaming(streaming_p),
       affected_rows(affected_rows_p), fields(std::move(fields_p)) {
 	if (affected_rows != static_cast<idx_t>(-1)) {
+		this->exhausted = true;
 		return;
 	}
 	if (this->fields.empty()) {

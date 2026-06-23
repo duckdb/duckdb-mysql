@@ -35,7 +35,7 @@ CALL mysql_execute('s', 'DROP TABLE tab1')
 statement error
 CALL mysql_execute('s', 'SELECT ? col1',  params=NULL)
 ----
-Binder Error: Parameters to mysql_execute cannot be NULL
+Binder Error: Query parameters cannot be NULL
 
 statement error
 CALL mysql_execute('s', 'SELECT ? col1',  params=42)
@@ -45,4 +45,4 @@ Query parameters must be specified in a STRUCT
 statement error
 CALL mysql_execute('s', 'SELECT ? col1',  params=row('2020-12-31 12:34:56'::TIMESTAMP_NS))
 ----
-IO Error: Unsupported parameters type: "TIMESTAMP_NS", MySQL query "SELECT ? col1"
+Unsupported parameters type: "TIMESTAMP_NS", MySQL query "SELECT ? col1"

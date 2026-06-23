@@ -52,25 +52,13 @@ public:
 };
 
 struct MySQLQueryBindData : public FunctionData {
-	MySQLQueryBindData(string query_p, Catalog &catalog, MySQLPooledConnection pooled_connection_p,
-	                   unique_ptr<MySQLStatement> stmt_p, vector<Value> params_p)
-	    : query(std::move(query_p)), catalog(catalog), pooled_connection(std::move(pooled_connection_p)),
-	      stmt(std::move(stmt_p)), params(std::move(params_p)) {
-	}
-
 	MySQLQueryBindData(string query_p, Catalog &catalog, unique_ptr<MySQLResult> result_p)
-	    : query(std::move(query_p)), catalog(catalog), pooled_connection(), result(std::move(result_p)) {
+	    : query(std::move(query_p)), catalog(catalog), result(std::move(result_p)) {
 	}
 
 	string query;
 	Catalog &catalog;
-	MySQLPooledConnection pooled_connection;
 	unique_ptr<MySQLResult> result;
-	unique_ptr<MySQLStatement> stmt;
-	vector<Value> params;
-	//! Whether the query must be executed through the transaction's connection
-	//! (set when a remote transaction was active at bind time)
-	bool use_transaction_connection = false;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
