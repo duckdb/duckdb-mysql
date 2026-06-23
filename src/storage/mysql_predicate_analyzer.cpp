@@ -146,13 +146,14 @@ string PredicateAnalyzer::GenerateReasoning(double selectivity, bool has_index, 
 }
 #endif
 
-PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, const TableFilter &filter) {
+PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, const TableFilter &filter,
+                                                   column_t column_id) {
+	using namespace dbconnector;
 	PredicateAnalysis result;
 	result.column_name = column_name;
 
-	auto config =
-	    dbconnector::table_scan::FilterPushdown::CreateConfig('`', dbconnector::query::QuoteEscapeStyle::BACKSLASH);
-	result.mysql_predicate = dbconnector::table_scan::FilterPushdown::TransformFilter(config, column_name, filter);
+	auto config = table_scan::FilterPushdown::CreateConfig('`', '\'', query::QuoteEscapeStyle::BACKSLASH);
+	result.mysql_predicate = table_scan::FilterPushdown::TransformFilter(config, column_name, filter, column_id);
 	if (result.mysql_predicate.empty()) {
 		result.decision = PushdownDecision::EXECUTE_IN_DUCKDB;
 		result.estimated_selectivity = DEFAULT_SELECTIVITY;
@@ -281,7 +282,7 @@ FilterAnalysisResult PredicateAnalyzer::AnalyzeFilters(const vector<column_t> &c
 		string column_name = names[actual_col_idx];
 		auto &filter = entry.Filter();
 
-		auto analysis = AnalyzeFilter(column_name, filter);
+		auto analysis = AnalyzeFilter(column_name, filter, actual_col_idx);
 		analysis.column_index = col_idx;
 		filter_count++;
 		if (filter_count <= 2) {

@@ -52,7 +52,7 @@ class PredicateAnalyzer {
 public:
 	PredicateAnalyzer(MySQLStatisticsCollector &stats, const string &schema, const string &table);
 
-	PredicateAnalysis AnalyzeFilter(const string &column_name, const TableFilter &filter);
+	PredicateAnalysis AnalyzeFilter(const string &column_name, const TableFilter &filter, column_t column_id);
 	FilterAnalysisResult AnalyzeFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
 	                                    const vector<string> &names);
 

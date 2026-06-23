@@ -23,7 +23,9 @@ namespace duckdb {
 // bytes. We compare against binary strings (CAST(... AS BINARY)) to match DuckDB's semantics.
 
 static string WriteFilterConstant(const Value &constant) {
-	auto constant_string = dbconnector::query::QueryWriter::WriteConstant(constant);
+	using namespace dbconnector::query;
+	auto config = QueryWriter::CreateConfig('`', QuoteEscapeStyle::BACKSLASH, "x'", "");
+	auto constant_string = QueryWriter::WriteConstant(config, constant);
 	if (constant.type().id() == LogicalTypeId::VARCHAR) {
 		// force a binary (byte-wise) comparison to match DuckDB's string comparison semantics
 		return "CAST(" + constant_string + " AS BINARY)";
