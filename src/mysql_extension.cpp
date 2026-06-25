@@ -243,15 +243,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("mysql_sql_buffer_result",
 	                          "Add SQL_BUFFER_RESULT for large result sets to release row locks faster (default: true)",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
-	config.AddExtensionOption("mysql_aggregate_pushdown_enabled",
-	                          "Push aggregate functions (COUNT, SUM, etc.) to MySQL (default: true)",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
-	config.AddExtensionOption("mysql_order_pushdown_enabled",
-	                          "Push ORDER BY and LIMIT clauses to MySQL (default: true)", LogicalType::BOOLEAN,
-	                          Value::BOOLEAN(true));
-	// OptimizerExtension mysql_optimizer;
-	// mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
-	// OptimizerExtension::Register(config, std::move(mysql_optimizer));
+	OptimizerExtension mysql_optimizer;
+	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
+	OptimizerExtension::Register(config, std::move(mysql_optimizer));
 }
 
 void MysqlScannerExtension::Load(ExtensionLoader &loader) {
