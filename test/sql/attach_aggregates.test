@@ -1,5 +1,5 @@
-# name: test/sql/attach_aggregate_pushdown.test
-# description: Test aggregate pushdown over an attached MySQL table
+# name: test/sql/attach_aggregates.test
+# description: Test aggregates over an attached MySQL table
 # group: [sql]
 
 require mysql_scanner
@@ -8,9 +8,6 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
-
-statement ok
-SET mysql_aggregate_pushdown_enabled = TRUE
 
 statement ok
 DROP TABLE IF EXISTS s1.agg_test;
