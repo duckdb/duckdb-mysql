@@ -10,37 +10,14 @@
 #include "duckdb/main/query_result.hpp"
 #include "storage/mysql_table_set.hpp"
 #include "storage/mysql_catalog.hpp"
-#include "storage/mysql_statistics.hpp"
-#include "storage/mysql_predicate_analyzer.hpp"
-#include "storage/federation/cost_model.hpp"
 #include "mysql_filter_pushdown.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
-#include "duckdb/planner/expression/bound_reference_expression.hpp"
-#include "duckdb/planner/expression/bound_conjunction_expression.hpp"
-#include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/common/printer.hpp"
 
 namespace duckdb {
 
-static constexpr idx_t MIN_QUERY_TIMEOUT_MS = 5000;
-static constexpr idx_t MAX_QUERY_TIMEOUT_MS = 300000;
-static constexpr double QUERY_TIMEOUT_COST_MULTIPLIER = 10.0;
-static constexpr idx_t SQL_BUFFER_RESULT_ROW_THRESHOLD = 10000;
-
-struct MySQLGlobalState;
-
 struct MySQLLocalState : public LocalTableFunctionState {};
-
-struct FederationState {
-	FilterAnalysisResult filter_analysis;
-	ExecutionPlan execution_plan;
-	string partition_clause;
-	unique_ptr<Expression> local_filter_expression;
-	ExecutionPlanCacheKey adaptive_cache_key;
-	idx_t adaptive_cache_generation = 0;
-	idx_t adaptive_estimated_rows = 0;
-};
 
 struct MySQLGlobalState : public GlobalTableFunctionState {
 	explicit MySQLGlobalState(MySQLCatalog &catalog_p, string query_p, vector<Value> params_p,
@@ -56,15 +33,6 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 	vector<Value> params;
 	vector<MySQLField> fields;
 	unique_ptr<MySQLResult> result;
-	unique_ptr<ExpressionExecutor> local_filter_executor;
-	unique_ptr<Expression> owned_filter_expression;
-
-	idx_t total_rows_fetched = 0;
-	ExecutionPlanCacheKey cache_key;
-	idx_t estimated_rows = 0;
-	idx_t cache_generation = 0;
-	bool adaptive_feedback_enabled = false;
-	bool feedback_submitted = false;
 
 	idx_t MaxThreads() const override {
 		return 1;
@@ -76,295 +44,12 @@ static unique_ptr<FunctionData> MySQLBind(ClientContext &context, TableFunctionB
 	throw InternalException("MySQLBind");
 }
 
-static void ConfigurePredicateAnalyzer(ClientContext &context, PredicateAnalyzer &analyzer) {
-	Value hint_enabled_val, hint_threshold_val;
-	bool hint_injection_enabled = false;
-	double hint_staleness_threshold = 0.5;
-	if (context.TryGetCurrentSetting("mysql_hint_injection_enabled", hint_enabled_val)) {
-		hint_injection_enabled = BooleanValue::Get(hint_enabled_val);
-	}
-	if (context.TryGetCurrentSetting("mysql_hint_staleness_threshold", hint_threshold_val)) {
-		hint_staleness_threshold = hint_threshold_val.GetValue<double>();
-	}
-	analyzer.SetHintInjectionEnabled(hint_injection_enabled, hint_staleness_threshold);
-
-	Value push_idx_val, push_noidx_val;
-	if (context.TryGetCurrentSetting("mysql_push_threshold_with_index", push_idx_val)) {
-		double with_idx = push_idx_val.GetValue<double>();
-		double no_idx = PredicateAnalyzer::DEFAULT_PUSH_THRESHOLD_NO_INDEX;
-		if (context.TryGetCurrentSetting("mysql_push_threshold_no_index", push_noidx_val)) {
-			no_idx = push_noidx_val.GetValue<double>();
-		}
-		analyzer.SetPushThresholds(with_idx, no_idx);
-	} else if (context.TryGetCurrentSetting("mysql_push_threshold_no_index", push_noidx_val)) {
-		analyzer.SetPushThresholds(PredicateAnalyzer::DEFAULT_PUSH_THRESHOLD_WITH_INDEX,
-		                           push_noidx_val.GetValue<double>());
-	}
-}
-
-static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, const MySQLBindData &bind_data,
-                                 MySQLStatisticsCollector &stats_collector, MySQLCatalog &mysql_catalog,
-                                 MySQLConnection &con, const vector<string> &column_names,
-                                 const ExecutionPlanCacheKey &cache_key) {
-	CachedExecutionPlan cached;
-	if (mysql_catalog.GetPlanCache().GetCachedPlan(cache_key, cached)) {
-		fed.execution_plan = cached.plan;
-		fed.adaptive_cache_generation = cached.plan_generation;
-		fed.adaptive_estimated_rows = cached.plan.estimated_rows_from_mysql;
-	} else {
-		auto table_stats = stats_collector.GetTableStats(bind_data.table.schema.name.GetIdentifierName(),
-		                                                 bind_data.table.name.GetIdentifierName());
-		auto mysql_costs = stats_collector.FetchMySQLCostConstants();
-		CostModelParameters cost_params;
-		if (mysql_costs.loaded) {
-			cost_params.cpu_cost_per_row = mysql_costs.row_evaluate_cost;
-			double effective_block_cost = mysql_costs.io_block_read_cost;
-			if (mysql_costs.buffer_pool_hit_rate >= 0) {
-				effective_block_cost = (mysql_costs.buffer_pool_hit_rate * mysql_costs.memory_block_read_cost) +
-				                       ((1.0 - mysql_costs.buffer_pool_hit_rate) * mysql_costs.io_block_read_cost);
-			}
-			cost_params.io_cost_per_byte =
-			    effective_block_cost / static_cast<double>(CostModelParameters::INNODB_PAGE_SIZE);
-		}
-		DefaultCostModel cost_model(cost_params);
-		mysql_catalog.GetConnectionPool().EnsureCalibrated(con);
-		cost_model.SetNetworkCalibration(mysql_catalog.GetConnectionPool().GetNetworkCalibration());
-		Value compression_aware_val, compression_ratio_val;
-		if (context.TryGetCurrentSetting("mysql_compression_aware_costs", compression_aware_val)) {
-			cost_model.SetCompressionAwareCosts(BooleanValue::Get(compression_aware_val));
-		}
-		if (context.TryGetCurrentSetting("mysql_compression_ratio", compression_ratio_val)) {
-			cost_model.SetCompressionRatio(compression_ratio_val.GetValue<double>());
-		}
-		fed.execution_plan = cost_model.ComparePlans(table_stats, fed.filter_analysis, column_names);
-
-		fed.execution_plan.combined_selectivity = fed.filter_analysis.combined_selectivity;
-		fed.execution_plan.recommended_index = fed.filter_analysis.recommended_index;
-
-		fed.adaptive_estimated_rows = fed.execution_plan.estimated_rows_from_mysql;
-		fed.adaptive_cache_generation = mysql_catalog.GetPlanCache().CachePlan(cache_key, fed.execution_plan);
-	}
-	fed.adaptive_cache_key = cache_key;
-}
-
-static void ResolvePartitionPruning(FederationState &fed, const MySQLBindData &bind_data,
-                                    MySQLStatisticsCollector &stats_collector, const vector<column_t> &column_ids,
-                                    optional_ptr<TableFilterSet> filters) {
-	auto part_stats = stats_collector.GetTableStats(bind_data.table.schema.name.GetIdentifierName(),
-	                                                bind_data.table.name.GetIdentifierName());
-	const auto &part_info = part_stats.partition_info;
-	if (!part_info.IsRangeOrList() || part_info.partitions.empty()) {
-		return;
-	}
-	for (const auto &analysis : fed.filter_analysis.analyses) {
-		if (!analysis.is_partition_key || !analysis.ShouldPush()) {
-			continue;
-		}
-		for (const auto &entry : *filters) {
-			column_t col_idx = entry.GetIndex();
-			if (col_idx >= column_ids.size()) {
-				continue;
-			}
-			column_t actual_col_idx = column_ids[col_idx];
-			if (actual_col_idx >= bind_data.names.size()) {
-				continue;
-			}
-			if (!StringUtil::CIEquals(bind_data.names[actual_col_idx], analysis.column_name)) {
-				continue;
-			}
-			auto &filter = entry.Filter();
-			if (filter.filter_type == TableFilterType::LEGACY_CONSTANT_COMPARISON) {
-				auto &cf = filter.Cast<LegacyConstantFilter>();
-				auto matching = part_info.GetMatchingPartitions(cf.constant, cf.comparison_type);
-				if (!matching.empty() && matching.size() < part_info.partitions.size()) {
-					vector<string> escaped;
-					for (const auto &p : matching) {
-						escaped.push_back(MySQLUtils::WriteIdentifier(p));
-					}
-					fed.partition_clause = "PARTITION (" + StringUtil::Join(escaped, ", ") + ")";
-					fed.execution_plan.partition_clause = fed.partition_clause;
-				}
-			}
-			break;
-		}
-		if (!fed.partition_clause.empty()) {
-			break;
-		}
-	}
-}
-
-static string BuildFilterString(const FederationState &fed) {
-	switch (fed.execution_plan.strategy) {
-	case ExecutionStrategy::PUSH_ALL_FILTERS: {
-		vector<string> all_predicates;
-		for (const auto &analysis : fed.filter_analysis.analyses) {
-			if (!analysis.mysql_predicate.empty()) {
-				all_predicates.push_back(analysis.mysql_predicate);
-			}
-		}
-		return StringUtil::Join(all_predicates, " AND ");
-	}
-	case ExecutionStrategy::EXECUTE_ALL_LOCALLY:
-		return "";
-	case ExecutionStrategy::HYBRID: {
-		vector<string> pushed_predicates;
-		for (const auto idx : fed.execution_plan.pushed_filter_indices) {
-			if (idx < fed.filter_analysis.analyses.size()) {
-				const auto &analysis = fed.filter_analysis.analyses[idx];
-				if (!analysis.mysql_predicate.empty()) {
-					pushed_predicates.push_back(analysis.mysql_predicate);
-				}
-			}
-		}
-		return StringUtil::Join(pushed_predicates, " AND ");
-	}
-	default:
-		return "";
-	}
-}
-
-static void BuildLocalFilterExpression(FederationState &fed, const MySQLBindData &bind_data,
-                                       const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters) {
-	if ((fed.execution_plan.strategy != ExecutionStrategy::HYBRID &&
-	     fed.execution_plan.strategy != ExecutionStrategy::EXECUTE_ALL_LOCALLY) ||
-	    fed.execution_plan.local_filter_indices.empty()) {
-		return;
-	}
-
-	vector<unique_ptr<Expression>> local_exprs;
-	for (auto filter_idx : fed.execution_plan.local_filter_indices) {
-		if (filter_idx >= fed.filter_analysis.analyses.size()) {
-			continue;
-		}
-		const auto &analysis = fed.filter_analysis.analyses[filter_idx];
-		column_t output_col_idx = analysis.column_index;
-		ProjectionIndex proj_output_col_idx(output_col_idx);
-
-		auto filter = filters->TryGetFilterByColumnIndex(proj_output_col_idx);
-		if (!filter) {
-			continue;
-		}
-		if (output_col_idx >= column_ids.size()) {
-			continue;
-		}
-		auto actual_table_col = column_ids[output_col_idx];
-		auto &col = bind_data.table.GetColumn(LogicalIndex(actual_table_col));
-
-		auto col_ref = make_uniq<BoundReferenceExpression>(col.GetType(), output_col_idx);
-		auto expr = filter->ToExpression(*col_ref);
-		if (expr) {
-			local_exprs.push_back(std::move(expr));
-		}
-	}
-
-	if (local_exprs.size() == 1) {
-		fed.local_filter_expression = std::move(local_exprs[0]);
-	} else if (local_exprs.size() > 1) {
-		auto conjunction = make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND);
-		for (auto &expr : local_exprs) {
-			conjunction->GetChildrenMutable().push_back(std::move(expr));
-		}
-		fed.local_filter_expression = std::move(conjunction);
-	}
-}
-
-static void InjectQueryHints(ClientContext &context, string &select, const FederationState &fed,
-                             const MySQLBindData &bind_data, MySQLConnection &con, MySQLStatsCache &shared_cache) {
-	Value explain_val;
-	if (context.TryGetCurrentSetting("mysql_explain_validation_enabled", explain_val) &&
-	    BooleanValue::Get(explain_val) && !fed.filter_analysis.recommended_index.empty()) {
-		MySQLStatisticsCollector explain_stats(con, shared_cache,
-		                                       bind_data.table.catalog.Cast<MySQLCatalog>().GetVersion());
-		bool uses_index = false;
-		for (const auto &analysis : fed.filter_analysis.analyses) {
-			if (analysis.has_index && analysis.ShouldPush()) {
-				uses_index = true;
-				break;
-			}
-		}
-		if (uses_index) {
-			bool valid = explain_stats.ValidateWithExplain(select, fed.filter_analysis.recommended_index, true);
-			if (!valid) {
-				auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
-				mysql_catalog.GetPlanCache().InvalidateTable(bind_data.table.schema.name.GetIdentifierName(),
-				                                             bind_data.table.name.GetIdentifierName());
-				mysql_catalog.GetStatsCache().Invalidate(bind_data.table.schema.name.GetIdentifierName(),
-				                                         bind_data.table.name.GetIdentifierName());
-			}
-		}
-	}
-
-	string prefix;
-
-	Value timeout_val;
-	bool timeout_enabled = true;
-	if (context.TryGetCurrentSetting("mysql_query_timeout_enabled", timeout_val)) {
-		timeout_enabled = BooleanValue::Get(timeout_val);
-	}
-	// MAX_EXECUTION_TIME query hints are only supported on MySQL 8+
-	auto &server_version = bind_data.table.catalog.Cast<MySQLCatalog>().GetVersion();
-	bool version_supports_timeout =
-	    server_version.server_type == MySQLServerType::MYSQL && server_version.IsAtLeast(8, 0, 0);
-	if (timeout_enabled && version_supports_timeout && fed.execution_plan.estimated_cost.Total() > 0) {
-		idx_t min_timeout = MIN_QUERY_TIMEOUT_MS;
-		idx_t max_timeout = MAX_QUERY_TIMEOUT_MS;
-		Value min_val, max_val;
-		if (context.TryGetCurrentSetting("mysql_query_timeout_min_ms", min_val)) {
-			min_timeout = UBigIntValue::Get(min_val);
-		}
-		if (context.TryGetCurrentSetting("mysql_query_timeout_max_ms", max_val)) {
-			max_timeout = UBigIntValue::Get(max_val);
-		}
-		double cost_total = fed.execution_plan.estimated_cost.Total();
-		idx_t timeout_ms = min_timeout;
-		if (std::isfinite(cost_total) && cost_total > 0.0) {
-			double raw_timeout = cost_total * QUERY_TIMEOUT_COST_MULTIPLIER;
-			if (raw_timeout < static_cast<double>(NumericLimits<idx_t>::Maximum())) {
-				timeout_ms = std::min(max_timeout, std::max(min_timeout, static_cast<idx_t>(raw_timeout)));
-			} else {
-				timeout_ms = max_timeout;
-			}
-		}
-		prefix += "/*+ MAX_EXECUTION_TIME(" + std::to_string(timeout_ms) + ") */ ";
-	}
-
-	Value buffer_val;
-	bool buffer_enabled = true;
-	if (context.TryGetCurrentSetting("mysql_sql_buffer_result", buffer_val)) {
-		buffer_enabled = BooleanValue::Get(buffer_val);
-	}
-	if (buffer_enabled && fed.adaptive_estimated_rows > SQL_BUFFER_RESULT_ROW_THRESHOLD) {
-		prefix += "SQL_BUFFER_RESULT ";
-	}
-
-	if (!prefix.empty()) {
-		auto pos = select.find("SELECT ");
-		if (pos != string::npos) {
-			select.insert(pos + 7, prefix);
-		}
-	}
-}
-
-static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &gstate, const FederationState &fed,
-                                      const MySQLBindData &bind_data) {
-	gstate.cache_key = fed.adaptive_cache_key;
-	gstate.cache_generation = fed.adaptive_cache_generation;
-	gstate.estimated_rows = fed.adaptive_estimated_rows;
-	gstate.catalog = &bind_data.table.catalog.Cast<MySQLCatalog>();
-
-	Value adaptive_enabled_val;
-	if (context.TryGetCurrentSetting("mysql_adaptive_replan_enabled", adaptive_enabled_val)) {
-		gstate.adaptive_feedback_enabled = BooleanValue::Get(adaptive_enabled_val);
-	}
-}
-
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->CastNoConst<MySQLBindData>();
 	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
 	auto &con = transaction.GetConnection();
 
-	FederationState fed;
 	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
 
 	string select;
@@ -386,76 +71,14 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	select += ".";
 	select += MySQLUtils::WriteIdentifier(bind_data.table.name.GetIdentifierName());
 
-	string filter_string;
+	string filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
 
-	if (bind_data.use_predicate_analyzer && input.filters && input.filters->HasFilters()) {
-		MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache(), mysql_catalog.GetVersion());
-		PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name.GetIdentifierName(),
-		                           bind_data.table.name.GetIdentifierName());
-		ConfigurePredicateAnalyzer(context, analyzer);
-
-		fed.filter_analysis = analyzer.AnalyzeFilters(input.column_ids, input.filters, bind_data.names);
-
-		vector<string> column_names;
-		for (idx_t c = 0; c < input.column_ids.size(); c++) {
-			if (input.column_ids[c] != COLUMN_IDENTIFIER_ROW_ID) {
-				auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
-				column_names.emplace_back(col.GetName().GetIdentifierName());
-			}
-		}
-
-		if (!fed.filter_analysis.analyses.empty()) {
-			vector<string> filter_cols;
-			vector<double> sels;
-			for (const auto &analysis : fed.filter_analysis.analyses) {
-				filter_cols.push_back(analysis.column_name);
-				sels.push_back(analysis.estimated_selectivity);
-			}
-			ExecutionPlanCacheKey cache_key(bind_data.table.schema.name.GetIdentifierName(),
-			                                bind_data.table.name.GetIdentifierName(), column_names, filter_cols, sels);
-
-			ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names, cache_key);
-			ResolvePartitionPruning(fed, bind_data, stats_collector, input.column_ids, input.filters);
-
-			filter_string = BuildFilterString(fed);
-			BuildLocalFilterExpression(fed, bind_data, input.column_ids, input.filters);
-		} else {
-			filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
-		}
-	} else {
-		filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
-	}
-
-	if (bind_data.use_predicate_analyzer && !fed.partition_clause.empty()) {
-		select += " " + fed.partition_clause;
-	}
-	if (bind_data.use_predicate_analyzer && !fed.filter_analysis.recommended_index.empty()) {
-		string index_identifier = MySQLUtils::WriteIdentifier(fed.filter_analysis.recommended_index);
-		if (fed.filter_analysis.suggest_force_index) {
-			select += " FORCE INDEX (" + index_identifier + ")";
-		} else {
-			select += " USE INDEX (" + index_identifier + ")";
-		}
-	}
 	if (!filter_string.empty()) {
 		select += " WHERE " + filter_string;
 	}
 
-	if (bind_data.use_predicate_analyzer) {
-		InjectQueryHints(context, select, fed, bind_data, con, mysql_catalog.GetStatsCache());
-	}
-
 	auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
-
-	if (bind_data.use_predicate_analyzer) {
-		ConfigureAdaptiveFeedback(context, *result, fed, bind_data);
-	}
-
-	if (fed.local_filter_expression) {
-		result->owned_filter_expression = std::move(fed.local_filter_expression);
-		result->local_filter_executor = make_uniq<ExpressionExecutor>(context, *result->owned_filter_expression);
-	}
 
 	return result;
 }
@@ -470,18 +93,11 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 
 	while (true) {
 		if (gstate.result->Exhausted()) {
-			if (gstate.adaptive_feedback_enabled && !gstate.feedback_submitted && gstate.catalog &&
-			    gstate.estimated_rows > 0) {
-				gstate.catalog->GetPlanCache().UpdatePlanFeedback(gstate.cache_key, gstate.total_rows_fetched,
-				                                                  gstate.cache_generation);
-				gstate.feedback_submitted = true;
-			}
 			output.SetChildCardinality(0);
 			return;
 		}
 
 		DataChunk &res_chunk = gstate.result->NextChunk();
-		gstate.total_rows_fetched += res_chunk.size();
 		D_ASSERT(output.ColumnCount() == res_chunk.ColumnCount());
 		string error;
 		for (idx_t c = 0; c < output.ColumnCount(); c++) {
@@ -522,22 +138,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 			}
 		}
 		output.SetChildCardinality(res_chunk.size());
-
-		if (gstate.local_filter_executor) {
-			SelectionVector sel(output.size());
-			idx_t result_count = gstate.local_filter_executor->SelectExpression(output, sel);
-			if (result_count == 0) {
-				output.SetChildCardinality(0);
-				continue;
-			}
-			if (result_count < output.size()) {
-				output.Slice(sel, result_count);
-				output.SetChildCardinality(result_count);
-			}
-			return;
-		} else {
-			return;
-		}
+		return;
 	}
 }
 

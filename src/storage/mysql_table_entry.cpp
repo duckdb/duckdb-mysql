@@ -99,12 +99,10 @@ TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_pt
 		result->types.push_back(col.GetType());
 		result->names.emplace_back(col.GetName().GetIdentifierName());
 	}
-	bool use_predicate_analyzer = GetBoolSetting(context, "mysql_enable_predicate_analyzer");
-	result->use_predicate_analyzer = use_predicate_analyzer;
 	bind_data = std::move(result);
 
 	auto function = MySQLScanFunction();
-	function.filter_pushdown = use_predicate_analyzer || GetBoolSetting(context, "mysql_enable_filter_pushdown");
+	function.filter_pushdown = GetBoolSetting(context, "mysql_enable_filter_pushdown");
 	return function;
 }
 

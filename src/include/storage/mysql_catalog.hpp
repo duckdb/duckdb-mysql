@@ -13,8 +13,6 @@
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
-#include "storage/federation/plan_cache.hpp"
-#include "storage/mysql_statistics.hpp"
 
 namespace duckdb {
 class MySQLSchemaEntry;
@@ -82,8 +80,6 @@ public:
 	static bool IsMySQLScan(const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
-	PlanCache &GetPlanCache();
-	MySQLStatsCache &GetStatsCache();
 	//! The server version, fetched when the database was attached
 	const MySQLVersion &GetVersion() const {
 		return version;
@@ -97,8 +93,6 @@ private:
 	string default_schema;
 	MySQLVersion version;
 	shared_ptr<MySQLConnectionPool> connection_pool;
-	PlanCache plan_cache_;
-	MySQLStatsCache stats_cache_;
 };
 
 } // namespace duckdb
