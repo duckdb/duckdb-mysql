@@ -29,8 +29,6 @@ struct MySQLBindData : public FunctionData {
 	vector<string> names;
 	vector<LogicalType> types;
 
-	bool use_predicate_analyzer = false;
-
 public:
 	unique_ptr<FunctionData> Copy() const override {
 		throw NotImplementedException("MySQLBindData copy not supported");
@@ -79,16 +77,6 @@ public:
 class MySQLExecuteFunction : public TableFunction {
 public:
 	MySQLExecuteFunction();
-};
-
-class MySQLExplainFederatedFunction : public TableFunction {
-public:
-	MySQLExplainFederatedFunction();
-};
-
-class MySQLDebugExecutionPlanFunction : public TableFunction {
-public:
-	MySQLDebugExecutionPlanFunction();
 };
 
 } // namespace duckdb

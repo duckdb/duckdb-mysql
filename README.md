@@ -170,7 +170,6 @@ SELECT * FROM mysql_db.tmp;
 ## Settings
 |                name                |                          description                           | default |
 |------------------------------------|----------------------------------------------------------------|---------|
-| mysql_enable_predicate_analyzer | Whether or not to use filter pushdown (currently experimental) | true    |
 | mysql_tinyint1_as_boolean          | Whether or not to convert TINYINT(1) columns to BOOLEAN        | true    |
 | mysql_debug_show_queries           | DEBUG SETTING: print all queries sent to MySQL to stdout       | false   |
 | mysql_bit1_as_boolean              | Whether or not to convert BIT(1) columns to BOOLEAN            | true    |
@@ -185,18 +184,6 @@ SELECT * FROM mysql_db.tmp;
 | mysql_pool_connection_max_lifetime_millis  | Maximum age of a pooled connection in milliseconds since it was first opened. When exceeded, the connection is closed instead of being returned to the cache| 0: disabled |
 | mysql_pool_connection_idle_timeout_millis | Maximum time in milliseconds a connection can sit idle in the cache before being closed | 60000 |
 | mysql_pool_enable_reaper_thread    | Whether to run a dedicated thread that periodically scans the pool and removes expired connections | true |
-| mysql_compression_aware_costs      | Apply compression ratios when estimating transfer costs        | true    |
-| mysql_compression_ratio            | Compression ratio for transfer cost estimation                 | 0.7     |
-| mysql_push_threshold_with_index    | Selectivity threshold for pushing filters with index support   | 0.5     |
-| mysql_push_threshold_no_index      | Selectivity threshold for pushing filters without index support | 0.3    |
-| mysql_hint_injection_enabled       | Inject MySQL optimizer hints when statistics appear stale      | false   |
-| mysql_hint_staleness_threshold     | Staleness score threshold for injecting optimizer hints        | 0.5     |
-| mysql_adaptive_replan_enabled      | Enable adaptive execution strategy based on actual vs estimated rows | true |
-| mysql_explain_validation_enabled   | Validate MySQL execution plans with EXPLAIN                    | false    |
-| mysql_query_timeout_enabled        | Add MAX_EXECUTION_TIME hint to MySQL queries for safety        | true    |
-| mysql_query_timeout_min_ms         | Minimum query timeout in milliseconds                          | 5000    |
-| mysql_query_timeout_max_ms         | Maximum query timeout in milliseconds                          | 300000  |
-| mysql_sql_buffer_result            | Add SQL_BUFFER_RESULT for large result sets to release row locks faster | true |
 
 ## Schema Cache
 

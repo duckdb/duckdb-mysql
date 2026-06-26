@@ -52,9 +52,6 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
 	default_schema = connection_params.db;
 
-	stats_cache_.SetInvalidationCallback(
-	    [this](const string &schema, const string &table) { plan_cache_.InvalidateTable(schema, table); });
-
 	auto pooled = connection_pool->ForceAcquire();
 	auto server_info = mysql_get_server_info(pooled->GetConn());
 	version = MySQLVersion::Parse(server_info ? server_info : "");
@@ -1620,20 +1617,10 @@ bool MySQLCatalog::SupportsPushdown(const TableRef &ref) {
 
 void MySQLCatalog::ClearCache() {
 	schemas.ClearEntries();
-	plan_cache_.Clear();
-	stats_cache_.Clear();
 }
 
 MySQLConnectionPool &MySQLCatalog::GetConnectionPool() {
 	return *connection_pool;
-}
-
-PlanCache &MySQLCatalog::GetPlanCache() {
-	return plan_cache_;
-}
-
-MySQLStatsCache &MySQLCatalog::GetStatsCache() {
-	return stats_cache_;
 }
 
 } // namespace duckdb
