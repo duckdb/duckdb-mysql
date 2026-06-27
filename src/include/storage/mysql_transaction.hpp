@@ -39,6 +39,7 @@ private:
 
 	MySQLCatalog &catalog;
 	MySQLPooledConnection pooled_connection;
+	mutex pooled_connection_lock;
 	bool transactions_enabled = true;
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	AccessMode access_mode;

@@ -1,0 +1,57 @@
+# name: test/sql/multi_scan_aggregate.test
+# description: Test multiple simultaneous scans that are aggregaed on DuckDB side
+# group: [sql]
+
+# see https://github.com/duckdb/duckdb-mysql/issues/225
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE simple.aggr_union_test_a AS
+SELECT '2020-01-01' insert_date, unnest(range(1<<14)) amount
+
+statement ok
+CREATE OR REPLACE TABLE simple.aggr_union_test_b AS
+SELECT '2021-01-01' insert_date, unnest(range(1<<14)) amount
+
+# Note, 'date()' is necessary to prevent aggregate pushdown
+
+query II
+SELECT date(t.insert_date) AS d, sum(t.amount) AS s
+FROM simple.aggr_union_test_a t
+GROUP BY 1
+----
+2020-01-01	134209536
+
+query II
+SELECT date(t.insert_date) AS d, sum(t.amount) AS s
+FROM simple.aggr_union_test_b t
+GROUP BY 1
+----
+2021-01-01	134209536
+
+query II
+SELECT date(t.insert_date) AS d, sum(t.amount) AS s
+FROM simple.aggr_union_test_a t
+GROUP BY 1
+UNION ALL
+SELECT date(t.insert_date) AS d, sum(t.amount) AS s
+FROM simple.aggr_union_test_b t
+GROUP BY 1   
+----
+2020-01-01	134209536
+2021-01-01	134209536
+
+statement ok
+DROP TABLE simple.aggr_union_test_a
+
+statement ok
+DROP TABLE simple.aggr_union_test_b
+
+statement ok
+DETACH simple;
