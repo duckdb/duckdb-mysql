@@ -36,12 +36,14 @@ public:
 
 private:
 	void EnsureConnection();
+	void StartTransactionInternal();
 
 	MySQLCatalog &catalog;
 	MySQLPooledConnection pooled_connection;
 	mutex pooled_connection_lock;
 	bool transactions_enabled = true;
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
+	mutex transaction_state_lock;
 	AccessMode access_mode;
 	string time_zone;
 	dbconnector::pool::AcquireMode acquire_mode = dbconnector::pool::AcquireMode::FORCE;
