@@ -63,16 +63,19 @@ void MySQLTransaction::EnsureConnection() {
 	if (pooled_connection) {
 		return;
 	}
-	pooled_connection = catalog.GetConnectionPool().Acquire(acquire_mode, time_zone);
+
+	auto pc = catalog.GetConnectionPool().Acquire(acquire_mode, time_zone);
+
+	auto ctx = context.lock();
+	if (ctx) {
+		pc.GetConnection().SetTypeConfig(MySQLTypeConfig(*ctx));
+	}
+
+	this->pooled_connection = std::move(pc);
 }
 
 MySQLConnection &MySQLTransaction::GetConnection() {
 	EnsureConnection();
-
-	auto ctx = context.lock();
-	if (ctx) {
-		pooled_connection.GetConnection().SetTypeConfig(MySQLTypeConfig(*ctx));
-	}
 
 	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
 		transaction_state = MySQLTransactionState::TRANSACTION_STARTED;

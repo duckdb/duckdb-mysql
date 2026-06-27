@@ -36,44 +36,11 @@ std::unique_ptr<MySQLConnection> MySQLConnectionPool::CreateNewConnection() {
 }
 
 bool MySQLConnectionPool::CheckConnectionHealthy(MySQLConnection &conn) {
-	if (!conn.IsOpen()) {
-		return false;
-	}
-
-	MYSQL *mysql_conn = conn.GetConn();
-	if (mysql_ping(mysql_conn) != 0) {
-		unsigned int err = mysql_errno(mysql_conn);
-		(void)err;
-		return false;
-	}
-	return true;
+	return conn.IsConnectionHealthy();
 }
 
 void MySQLConnectionPool::ResetConnection(MySQLConnection &conn) {
-	MYSQL *mysql_conn = conn.GetConn();
-
-#if defined(MARIADB_VERSION_ID) || (defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 50703)
-	if (mysql_reset_connection(mysql_conn) != 0) {
-		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
-	}
-#else
-	if (mysql_change_user(mysql_conn, nullptr, nullptr, nullptr) != 0) {
-		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
-	}
-#endif
-
-	if (mysql_query(mysql_conn, "SET autocommit=1") != 0) {
-		throw IOException("Failed to set autocommit after connection reset: %s", mysql_error(mysql_conn));
-	}
-
-	if (mysql_set_character_set(mysql_conn, "utf8mb4") != 0) {
-		throw IOException("Failed to set character set after connection reset: %s", mysql_error(mysql_conn));
-	}
-
-	const char *charset = mysql_character_set_name(mysql_conn);
-	if (strcmp(charset, "utf8mb4") != 0) {
-		throw IOException("Character set verification failed: expected utf8mb4, got %s", charset);
-	}
+	conn.Reset();
 }
 
 //===--------------------------------------------------------------------===//
@@ -111,18 +78,15 @@ void MySQLConnectionPool::CalibrateNetwork(MySQLConnection &conn) {
 	static constexpr int NUM_SAMPLES = 3;
 	double total_latency_ms = 0.0;
 
-	MYSQL *mysql_conn = conn.GetConn();
 	for (int i = 0; i < NUM_SAMPLES; i++) {
 		auto start = std::chrono::steady_clock::now();
-		if (mysql_query(mysql_conn, "SELECT 1") != 0) {
+		try {
+			conn.Query("SELECT 1", MySQLResultStreaming::FORCE_MATERIALIZATION);
+		} catch (...) {
 			lock_guard<mutex> lock(calibration_lock);
 			network_calibration.calibration_failed = true;
 			Printer::Print("Warning: MySQL network calibration failed (latency probe error), using default values\n");
 			return;
-		}
-		MYSQL_RES *result = mysql_store_result(mysql_conn);
-		if (result) {
-			mysql_free_result(result);
 		}
 		auto end = std::chrono::steady_clock::now();
 		double elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
@@ -135,20 +99,14 @@ void MySQLConnectionPool::CalibrateNetwork(MySQLConnection &conn) {
 	double bandwidth_mbps = NetworkCalibration::DEFAULT_BANDWIDTH_MBPS;
 
 	auto bw_start = std::chrono::steady_clock::now();
-	if (mysql_query(mysql_conn, "SELECT REPEAT('x', 65536)") == 0) {
-		MYSQL_RES *bw_result = mysql_store_result(mysql_conn);
-		if (bw_result) {
-			mysql_fetch_row(bw_result);
-			mysql_free_result(bw_result);
-		}
-		auto bw_end = std::chrono::steady_clock::now();
-		double bw_elapsed_s = std::chrono::duration<double>(bw_end - bw_start).count();
-		double transfer_s = bw_elapsed_s - (avg_latency_ms / 1000.0);
-		if (transfer_s > 0.0001) {
-			bandwidth_mbps =
-			    (static_cast<double>(BANDWIDTH_PAYLOAD_BYTES) / NetworkCalibration::MBPS_TO_BYTES_PER_SEC) / transfer_s;
-			bandwidth_mbps = std::max(bandwidth_mbps, 1.0);
-		}
+	conn.Query("SELECT REPEAT('x', 65536)", MySQLResultStreaming::FORCE_MATERIALIZATION);
+	auto bw_end = std::chrono::steady_clock::now();
+	double bw_elapsed_s = std::chrono::duration<double>(bw_end - bw_start).count();
+	double transfer_s = bw_elapsed_s - (avg_latency_ms / 1000.0);
+	if (transfer_s > 0.0001) {
+		bandwidth_mbps =
+		    (static_cast<double>(BANDWIDTH_PAYLOAD_BYTES) / NetworkCalibration::MBPS_TO_BYTES_PER_SEC) / transfer_s;
+		bandwidth_mbps = std::max(bandwidth_mbps, 1.0);
 	}
 
 	{

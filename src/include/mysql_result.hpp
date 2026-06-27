@@ -25,9 +25,10 @@ inline void MySQLResultDelete(MYSQL_RES *res) {
 
 class MySQLResult {
 public:
-	MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
-	            const string &connection_string_p, unsigned long connection_id_p, MySQLResultStreaming streaming_p,
-	            idx_t affected_rows_p, vector<MySQLField> fields_p = vector<MySQLField>());
+	MySQLResult(mutex &query_lock_p, const std::string &query_p, MySQLStatementPtr stmt_p,
+	            MySQLTypeConfig type_config_p, const string &connection_string_p, unsigned long connection_id_p,
+	            MySQLResultStreaming streaming_p, idx_t affected_rows_p,
+	            vector<MySQLField> fields_p = vector<MySQLField>());
 
 	~MySQLResult();
 
@@ -43,6 +44,7 @@ public:
 	const vector<MySQLField> &Fields();
 
 private:
+	mutex &query_lock;
 	string query;
 	MySQLStatementPtr stmt;
 	MySQLTypeConfig type_config;
