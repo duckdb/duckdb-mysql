@@ -58,6 +58,8 @@ void MySQLTransaction::Rollback() {
 }
 
 void MySQLTransaction::EnsureConnection() {
+	lock_guard<mutex> guard(pooled_connection_lock);
+
 	if (pooled_connection) {
 		return;
 	}
