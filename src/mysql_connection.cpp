@@ -129,7 +129,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, cons
 
 	auto stmt = MySQLStatementPtr(nullptr, MySQLStatementDelete);
 	{
-		lock_guard<mutex> l(query_lock);
+		lock_guard<mutex> guard(query_lock);
 		stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
 		if (!stmt) {
 			throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
@@ -138,8 +138,8 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, cons
 
 	idx_t affected_rows = MySQLExecute(stmt.get(), query, params, result_streaming);
 	unsigned long connection_id = connection->GetID();
-	return make_uniq<MySQLResult>(query_lock, query, std::move(stmt), type_config, connection_string, connection_id,
-	                              streaming, affected_rows);
+	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, connection_string, connection_id, streaming,
+	                              affected_rows);
 }
 
 unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, MySQLResultStreaming streaming) {
@@ -159,12 +159,12 @@ unique_ptr<MySQLResult> MySQLConnection::Query(MySQLStatement &stmt, const vecto
 	idx_t affected_rows = MySQLExecute(stmt.get(), stmt.Query(), params, result_streaming, prepared);
 	auto stmt_ptr = stmt.release();
 	unsigned long connection_id = connection->GetID();
-	return make_uniq<MySQLResult>(query_lock, stmt.Query(), std::move(stmt_ptr), type_config, connection_string,
-	                              connection_id, streaming, affected_rows, stmt.FieldsCopy());
+	return make_uniq<MySQLResult>(stmt.Query(), std::move(stmt_ptr), type_config, connection_string, connection_id,
+	                              streaming, affected_rows, stmt.FieldsCopy());
 }
 
 unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
-	lock_guard<mutex> l(query_lock);
+	lock_guard<mutex> guard(query_lock);
 	auto con = GetConn();
 
 	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);

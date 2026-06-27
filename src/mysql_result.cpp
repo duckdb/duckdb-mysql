@@ -51,11 +51,10 @@ static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const My
 	return ltypes;
 }
 
-MySQLResult::MySQLResult(mutex &query_lock_p, const std::string &query_p, MySQLStatementPtr stmt_p,
-                         MySQLTypeConfig type_config_p, const string &connection_string_p,
-                         unsigned long connection_id_p, MySQLResultStreaming streaming_p, idx_t affected_rows_p,
-                         vector<MySQLField> fields_p)
-    : query_lock(query_lock_p), query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
+MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
+                         const string &connection_string_p, unsigned long connection_id_p,
+                         MySQLResultStreaming streaming_p, idx_t affected_rows_p, vector<MySQLField> fields_p)
+    : query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
       connection_string(connection_string_p), connection_id(connection_id_p), streaming(streaming_p),
       affected_rows(affected_rows_p), fields(std::move(fields_p)) {
 	if (affected_rows != static_cast<idx_t>(-1)) {
@@ -144,8 +143,6 @@ bool MySQLResult::FetchNext() {
 #endif
 		f.ResetBind();
 	}
-
-	lock_guard<mutex> guard(query_lock);
 
 	int res = mysql_stmt_fetch(stmt.get());
 
