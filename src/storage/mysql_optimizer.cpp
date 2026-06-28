@@ -765,11 +765,25 @@ void OptimizeOrderByAndLimit(ClientContext &context, unique_ptr<LogicalOperator>
 }
 
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
+	vector<AggregateRewriteInfo> rewrites;
+	OptimizeAggregates(input.context, plan, rewrites);
+	for (auto &info : rewrites) {
+		RewriteBindingsInTree(*plan, info);
+	}
+
+	OptimizeOrderByAndLimit(input.context, plan);
+
+	Value allow_streaming_val;
+	bool allow_streaming = false;
+	if (input.context.TryGetCurrentSetting("mysql_allow_results_streaming", allow_streaming_val)) {
+		allow_streaming = BooleanValue::Get(allow_streaming_val);
+	}
+
 	MySQLOperators operators;
 	GatherMySQLScans(*plan, operators);
 	for (auto &entry : operators.scans) {
 		MySQLResultStreaming result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
-		if (entry.second.size() == 1) {
+		if (entry.second.size() == 1 && allow_streaming) {
 			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
 		}
 		for (auto &logical_get : entry.second) {
@@ -783,14 +797,6 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 			}
 		}
 	}
-
-	vector<AggregateRewriteInfo> rewrites;
-	OptimizeAggregates(input.context, plan, rewrites);
-	for (auto &info : rewrites) {
-		RewriteBindingsInTree(*plan, info);
-	}
-
-	OptimizeOrderByAndLimit(input.context, plan);
 }
 
 } // namespace duckdb
