@@ -1,16 +1,18 @@
-# name: test/sql/execution_plan_cache.test
+# name: test/sql/predicate_analyzer/execution_plan_cache.test
 # description: Test execution plan caching for repeated queries
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create tables for plan cache testing
 
@@ -181,7 +183,7 @@ statement ok
 CALL mysql_clear_cache()
 
 query I
-SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = ${i}
+SELECT COUNT(*) FROM s1.plan_cache_test1 WHERE category = {i}
 ----
 100
 
@@ -244,6 +246,9 @@ DROP TABLE IF EXISTS s1.plan_cache_test1
 
 statement ok
 DROP TABLE IF EXISTS s1.plan_cache_test2
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
 
 statement ok
 DETACH s1

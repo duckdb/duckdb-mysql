@@ -5,7 +5,8 @@
 
 namespace duckdb {
 
-string MySQLFilterPushdown::CreateExpression(string &column_name, vector<unique_ptr<TableFilter>> &filters, string op) {
+string MySQLFilterPushdown::CreateExpression(const string &column_name, vector<unique_ptr<TableFilter>> &filters,
+                                             string op) {
 	vector<string> filter_entries;
 	for (auto &filter : filters) {
 		auto new_filter = TransformFilter(column_name, *filter);
@@ -39,7 +40,7 @@ string MySQLFilterPushdown::TransformComparison(ExpressionType type) {
 	}
 }
 
-string MySQLFilterPushdown::TransformFilter(string &column_name, TableFilter &filter) {
+string MySQLFilterPushdown::TransformFilter(const string &column_name, TableFilter &filter) {
 	switch (filter.filter_type) {
 	case TableFilterType::IS_NULL:
 		return column_name + " IS NULL";

@@ -1,28 +1,26 @@
-# name: test/sql/federation_comprehensive_benchmark.test
+# name: test/sql/predicate_analyzer/federation_comprehensive_benchmark.test
 # description: Comprehensive benchmark validating federation optimizer correctness and strategy selection
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require-env MYSQL_TEST_PREDICATE_ANALYZER
+
 # SETUP
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
-
-# Force extension load before using custom settings
-statement ok
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS loader (TYPE MYSQL_SCANNER)
-
-statement ok
-DETACH loader
-
-statement ok
-SET mysql_adaptive_replan_enabled = true;
-
-statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
+
+statement ok
+SET GLOBAL mysql_hint_injection_enabled = TRUE
+
+statement ok
+SET GLOBAL mysql_adaptive_replan_enabled = TRUE
 
 statement ok
 DROP TABLE IF EXISTS s1.bench_main;
@@ -195,7 +193,7 @@ true
 
 # 3a: Point lookup
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query II
 SELECT id, amount FROM s1.bench_main WHERE id = 12345
@@ -203,7 +201,7 @@ SELECT id, amount FROM s1.bench_main WHERE id = 12345
 12345	345.45
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query II
 SELECT id, amount FROM s1.bench_main WHERE id = 12345
@@ -212,7 +210,7 @@ SELECT id, amount FROM s1.bench_main WHERE id = 12345
 
 # 3b: Indexed range — compare SUM via aggregate pushdown
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query I
 SELECT SUM(id) FROM s1.bench_main WHERE category = 77
@@ -220,7 +218,7 @@ SELECT SUM(id) FROM s1.bench_main WHERE category = 77
 12513500
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query I
 SELECT SUM(id) FROM s1.bench_main WHERE category = 77
@@ -229,7 +227,7 @@ SELECT SUM(id) FROM s1.bench_main WHERE category = 77
 
 # 3c: Hybrid (function filter)
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query I
 SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
@@ -237,7 +235,7 @@ SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
 46
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query I
 SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
@@ -246,7 +244,7 @@ SELECT COUNT(*) FROM s1.bench_main WHERE category = 33 AND MOD(id, 11) = 0
 
 # 3d: String filter
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 query I
 SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
@@ -254,7 +252,7 @@ SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
 834
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 query I
 SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
@@ -263,7 +261,7 @@ SELECT COUNT(*) FROM s1.bench_main WHERE status = 'pending' AND category < 5
 
 # Re-enable for remaining tests
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 # SECTION 4: Plan Cache — Hits, Invalidation, Generation Tracking
 
@@ -895,3 +893,15 @@ DROP TABLE IF EXISTS s1.bench_agg;
 
 statement ok
 DROP TABLE IF EXISTS s1.bench_main;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+RESET GLOBAL mysql_hint_injection_enabled
+
+statement ok
+RESET GLOBAL mysql_adaptive_replan_enabled
+
+statement ok
+DETACH s1

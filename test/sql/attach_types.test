@@ -71,15 +71,15 @@ NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	
 foreach column_name bool tinyint smallint int bigint utinyint usmallint uint date time timestamp timestamp_s timestamp_ms timestamp_ns time_tz timestamp_tz dec_4_1 dec_9_4 dec_18_6 dec38_10 uuid interval varchar blob bit small_enum medium_enum large_enum
 
 statement ok
-SET VARIABLE minimum_value=(SELECT MIN(${column_name}) min_val FROM s.all_types);
+SET VARIABLE minimum_value=(SELECT MIN({column_name}) min_val FROM s.all_types);
 
 query I
-SELECT ANY_VALUE(${column_name})=getvariable('minimum_value') FROM s.all_types WHERE ${column_name}=getvariable('minimum_value')
+SELECT ANY_VALUE({column_name})=getvariable('minimum_value') FROM s.all_types WHERE {column_name}=getvariable('minimum_value')
 ----
 true
 
 query I
-SELECT ANY_VALUE(${column_name})=getvariable('minimum_value') FROM s.all_types WHERE ${column_name} IN (getvariable('minimum_value'), getvariable('minimum_value'))
+SELECT ANY_VALUE({column_name})=getvariable('minimum_value') FROM s.all_types WHERE {column_name} IN (getvariable('minimum_value'), getvariable('minimum_value'))
 ----
 true
 

@@ -108,6 +108,7 @@ jobs:
       env: 
         LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
         MYSQL_TEST_DATABASE_AVAILABLE: 1
+        MYSQL_TEST_PREDICATE_ANALYZER: 1
         MARIADB_SERVER: 1
       run: |
         make test
@@ -187,6 +188,7 @@ jobs:
         env:
           LOCAL_EXTENSION_REPO: ${{ github.workspace }}/build/release/repository/
           MYSQL_TEST_DATABASE_AVAILABLE: 1
+          MYSQL_TEST_PREDICATE_ANALYZER: 1
           ORACLE_MYSQL_SERVER: 1
         run: |
           make test

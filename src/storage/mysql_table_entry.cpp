@@ -85,24 +85,26 @@ void MySQLTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &, Logica
                                             ClientContext &) {
 }
 
+static bool GetBoolSetting(ClientContext &context, const std::string &name) {
+	Value val;
+	if (context.TryGetCurrentSetting(name, val)) {
+		return BooleanValue::Get(val);
+	}
+	return false;
+}
+
 TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
 	auto result = make_uniq<MySQLBindData>(*this);
 	for (auto &col : columns.Logical()) {
 		result->types.push_back(col.GetType());
 		result->names.push_back(col.GetName());
 	}
-
-	Value filter_pushdown;
-	bool pushdown_enabled = false;
-	if (context.TryGetCurrentSetting("mysql_experimental_filter_pushdown", filter_pushdown)) {
-		pushdown_enabled = BooleanValue::Get(filter_pushdown);
-	}
-	result->use_predicate_analyzer = pushdown_enabled;
-
+	bool use_predicate_analyzer = GetBoolSetting(context, "mysql_enable_predicate_analyzer");
+	result->use_predicate_analyzer = use_predicate_analyzer;
 	bind_data = std::move(result);
 
 	auto function = MySQLScanFunction();
-	function.filter_pushdown = pushdown_enabled;
+	function.filter_pushdown = use_predicate_analyzer || GetBoolSetting(context, "mysql_experimental_filter_pushdown");
 	return function;
 }
 

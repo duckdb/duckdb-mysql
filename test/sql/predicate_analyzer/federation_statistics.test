@@ -1,16 +1,18 @@
-# name: test/sql/federation_statistics.test
+# name: test/sql/predicate_analyzer/federation_statistics.test
 # description: Test statistics collection and predicate analysis for federation optimizer
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup: Create table with composite indexes
 
@@ -158,3 +160,9 @@ SELECT COUNT(*) FROM s1.stats_test WHERE id BETWEEN 0 AND 99
 
 statement ok
 DROP TABLE IF EXISTS s1.stats_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1

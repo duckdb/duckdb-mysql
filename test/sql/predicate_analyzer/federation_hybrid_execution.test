@@ -1,16 +1,18 @@
-# name: test/sql/federation_hybrid_execution.test
+# name: test/sql/predicate_analyzer/federation_hybrid_execution.test
 # description: Test true hybrid filter execution - filter splitting between MySQL and DuckDB
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-ATTACH 'host=localhost user=root port=3306 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 statement ok
 DROP TABLE IF EXISTS s1.hybrid_test
@@ -112,3 +114,9 @@ WHERE id > 0
 # Cleanup
 statement ok
 DROP TABLE s1.hybrid_test
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1
