@@ -249,6 +249,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("mysql_order_pushdown_enabled",
 	                          "Push ORDER BY and LIMIT clauses to MySQL (default: true)", LogicalType::BOOLEAN,
 	                          Value::BOOLEAN(true));
+	config.AddExtensionOption(
+	    "mysql_allow_results_streaming",
+	    "Whether to allow streaming results of MySQL scans when only a single scan used in a query (default: true)",
+	    LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	OptimizerExtension::Register(config, std::move(mysql_optimizer));
