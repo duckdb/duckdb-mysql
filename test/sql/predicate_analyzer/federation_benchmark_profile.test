@@ -1,15 +1,20 @@
-# name: test/sql/federation_benchmark_profile.test
+# name: test/sql/predicate_analyzer/federation_benchmark_profile.test
 # description: Profile-based benchmark to measure federation optimizer effectiveness
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require-env MYSQL_TEST_PREDICATE_ANALYZER
+
 # SETUP
 
 statement ok
 ATTACH 'host=localhost user=root port=3306 database=mysqlscanner' AS bench (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 statement ok
 DROP TABLE IF EXISTS bench.perf_test
@@ -48,7 +53,7 @@ SELECT COUNT(*) FROM bench.perf_test
 # TEST 2: Point Lookup - Maximum Pushdown Benefit
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+SET GLOBAL mysql_enable_predicate_analyzer=true
 
 query II
 SELECT id, indexed_col FROM bench.perf_test WHERE id = 5000
@@ -154,7 +159,7 @@ WHERE indexed_col = 75
 # TEST 11: Comparison - With vs Without Pushdown
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+SET GLOBAL mysql_enable_predicate_analyzer=true
 
 query I
 SELECT COUNT(*) FROM bench.perf_test
@@ -163,7 +168,7 @@ WHERE indexed_col = 33 AND LENGTH(data_col) > 40
 100
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false
+SET GLOBAL mysql_enable_predicate_analyzer=false
 
 query I
 SELECT COUNT(*) FROM bench.perf_test
@@ -173,7 +178,7 @@ WHERE indexed_col = 33 AND LENGTH(data_col) > 40
 
 # Re-enable for remaining tests
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+SET GLOBAL mysql_enable_predicate_analyzer=true
 
 # TEST 12: Edge Case - Empty Result from Pushed Filter
 
@@ -197,3 +202,9 @@ WHERE indexed_col >= 0
 
 statement ok
 DROP TABLE bench.perf_test
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH bench

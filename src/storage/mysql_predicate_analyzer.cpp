@@ -1,4 +1,5 @@
 #include "storage/mysql_predicate_analyzer.hpp"
+#include "mysql_filter_pushdown.hpp"
 #include "mysql_utils.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
@@ -233,7 +234,8 @@ PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, Ta
 	PredicateAnalysis result;
 	result.column_name = column_name;
 
-	if (!CanPushFilter(filter)) {
+	result.mysql_predicate = MySQLFilterPushdown::TransformFilter(column_name, filter);
+	if (result.mysql_predicate.empty()) {
 		result.decision = PushdownDecision::EXECUTE_IN_DUCKDB;
 		result.estimated_selectivity = DEFAULT_SELECTIVITY;
 #ifndef NDEBUG
@@ -250,11 +252,6 @@ PredicateAnalysis PredicateAnalyzer::AnalyzeFilter(const string &column_name, Ta
 		result.decision = PushdownDecision::PUSH_TO_MYSQL;
 	} else {
 		result.decision = MakePushdownDecision(result.estimated_selectivity, result.has_index);
-	}
-
-	result.mysql_predicate = TransformFilterToMySQL(column_name, filter);
-	if (result.mysql_predicate.empty()) {
-		result.decision = PushdownDecision::EXECUTE_IN_DUCKDB;
 	}
 
 #ifndef NDEBUG

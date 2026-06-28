@@ -1,16 +1,18 @@
-# name: test/sql/federation_strategy_verification.test
+# name: test/sql/predicate_analyzer/federation_strategy_verification.test
 # description: Verify federation optimizer strategy selection and plan cache behavior
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
-ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s1 (TYPE MYSQL_SCANNER)
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
 
 # Test Setup
 
@@ -135,7 +137,7 @@ SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name='strategy_tes
 
 # Test 8: Pushdown disabled - no plan cache entries
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=false;
+SET GLOBAL mysql_enable_predicate_analyzer=false;
 
 statement ok
 CALL mysql_clear_cache();
@@ -151,7 +153,7 @@ SELECT COUNT(*) FROM mysql_debug_execution_plan() WHERE table_name='strategy_tes
 0
 
 statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true;
+SET GLOBAL mysql_enable_predicate_analyzer=true;
 
 # Test 9: No filters - no plan cache entry
 statement ok
@@ -216,3 +218,9 @@ SELECT COUNT(*) FROM s1.strategy_test WHERE non_indexed_val > 100
 
 statement ok
 DROP TABLE IF EXISTS s1.strategy_test;
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+DETACH s1

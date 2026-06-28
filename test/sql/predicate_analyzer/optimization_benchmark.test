@@ -1,6 +1,6 @@
-# name: test/sql/optimization_benchmark.test
+# name: test/sql/predicate_analyzer/optimization_benchmark.test
 # description: Benchmark to measure value of optimizations
-# group: [sql]
+# group: [predicate_analyzer]
 
 require mysql_scanner
 
@@ -8,11 +8,16 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 require-env ORACLE_MYSQL_SERVER
 
-statement ok
-SET GLOBAL mysql_experimental_filter_pushdown=true
+require-env MYSQL_TEST_PREDICATE_ANALYZER
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+SET GLOBAL mysql_enable_predicate_analyzer = TRUE
+
+statement ok
+SET GLOBAL mysql_hint_injection_enabled = TRUE
 
 # SETUP: Create benchmark tables
 
@@ -321,6 +326,12 @@ CALL mysql_execute('s1', 'ANALYZE TABLE optim_bench DROP HISTOGRAM ON col_a, col
 
 statement ok
 DROP TABLE IF EXISTS s1.optim_bench
+
+statement ok
+RESET GLOBAL mysql_enable_predicate_analyzer
+
+statement ok
+RESET GLOBAL mysql_hint_injection_enabled
 
 statement ok
 DETACH s1

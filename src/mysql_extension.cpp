@@ -155,8 +155,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	StorageExtension::Register(config, "mysql_scanner", make_shared_ptr<MySQLStorageExtension>());
 
 	config.AddExtensionOption("mysql_experimental_filter_pushdown",
-	                          "Whether or not to use filter pushdown (currently experimental)", LogicalType::BOOLEAN,
-	                          Value::BOOLEAN(true));
+	                          "Whether or not to use filter pushdown (without predicate analyzer)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("mysql_enable_predicate_analyzer",
+	                          "Whether or not to use predicate analyzer with cost-based pushdowns",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
 	config.AddExtensionOption("mysql_debug_show_queries", "DEBUG SETTING: print all queries sent to MySQL to stdout",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), SetMySQLDebugQueryPrint);
 	config.AddExtensionOption("mysql_tinyint1_as_boolean", "Whether or not to convert TINYINT(1) columns to BOOLEAN",

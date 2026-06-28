@@ -361,6 +361,35 @@ static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &
 	}
 }
 
+static string BuildAggregateQuery(const MySQLBindData &bind_data) {
+	string sql = "SELECT " + bind_data.aggregate_select_list;
+	sql += " FROM ";
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	sql += ".";
+	sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	if (!bind_data.aggregate_where_clause.empty()) {
+		sql += " WHERE " + bind_data.aggregate_where_clause;
+	}
+	if (!bind_data.group_by_clause.empty()) {
+		sql += bind_data.group_by_clause;
+	}
+	if (!bind_data.order_by_clause.empty()) {
+		sql += bind_data.order_by_clause;
+	}
+	if (!bind_data.limit.empty()) {
+		sql += bind_data.limit;
+	}
+	return sql;
+}
+
+static bool HintInjectionEnabled(ClientContext &context) {
+	Value hint_injection_enabled_val;
+	if (context.TryGetCurrentSetting("mysql_hint_injection_enabled", hint_injection_enabled_val)) {
+		return BooleanValue::Get(hint_injection_enabled_val);
+	}
+	return false;
+}
+
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
 	const auto &bind_data = input.bind_data->Cast<MySQLBindData>();
@@ -371,42 +400,16 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
 
 	if (bind_data.has_aggregate_pushdown) {
-		auto build_aggregate_query = [&]() {
-			string sql = "SELECT " + bind_data.aggregate_select_list;
-			sql += " FROM ";
-			sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
-			sql += ".";
-			sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
-			if (!bind_data.aggregate_where_clause.empty()) {
-				sql += " WHERE " + bind_data.aggregate_where_clause;
-			}
-			if (!bind_data.group_by_clause.empty()) {
-				sql += bind_data.group_by_clause;
-			}
-			if (!bind_data.order_by_clause.empty()) {
-				sql += bind_data.order_by_clause;
-			}
-			if (!bind_data.limit.empty()) {
-				sql += bind_data.limit;
-			}
-			return sql;
-		};
+		string select = BuildAggregateQuery(bind_data);
 
-		string select = build_aggregate_query();
-		FederationState agg_fed;
-		agg_fed.adaptive_estimated_rows = 0;
-		agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
-		InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
-		try {
-			auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			return make_uniq<MySQLGlobalState>(std::move(query_result));
-		} catch (std::bad_alloc &) {
-			throw;
-		} catch (std::exception &) {
-			string fallback = build_aggregate_query();
-			auto query_result = con.Query(fallback, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			return make_uniq<MySQLGlobalState>(std::move(query_result));
+		if (bind_data.use_predicate_analyzer && HintInjectionEnabled(context)) {
+			FederationState agg_fed;
+			agg_fed.adaptive_estimated_rows = 0;
+			agg_fed.execution_plan.estimated_cost.cpu_cost = static_cast<double>(MIN_QUERY_TIMEOUT_MS);
+			InjectQueryHints(context, select, agg_fed, bind_data, con, mysql_catalog.GetStatsCache());
 		}
+		auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
+		return make_uniq<MySQLGlobalState>(std::move(query_result));
 	}
 
 	string select;
@@ -499,7 +502,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		select += bind_data.limit;
 	}
 
-	if (bind_data.use_predicate_analyzer) {
+	if (bind_data.use_predicate_analyzer && HintInjectionEnabled(context)) {
 		InjectQueryHints(context, select, fed, bind_data, con, mysql_catalog.GetStatsCache());
 	}
 
