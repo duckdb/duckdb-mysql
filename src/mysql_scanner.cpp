@@ -203,7 +203,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		if (struct_val.IsNull()) {
 			throw BinderException("Query parameters cannot be NULL");
 		}
-		if (struct_val.type().id() != LogicalTypeId::STRUCT) {
+		if (struct_val.type().id() != LogicalTypeId::STRUCT && struct_val.type().id() != LogicalTypeId::TUPLE) {
 			throw BinderException("Query parameters must be specified in a STRUCT");
 		}
 		params = StructValue::GetChildren(struct_val);

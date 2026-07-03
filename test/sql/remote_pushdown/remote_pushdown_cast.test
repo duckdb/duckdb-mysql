@@ -89,4 +89,4 @@ SELECT COUNT(CAST(d AS BLOB)) FROM s.small_tbl
 query II
 explain SELECT COUNT(CAST(d AS BLOB)) FROM s.small_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*

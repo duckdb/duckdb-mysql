@@ -21,7 +21,7 @@ SELECT MAX(TRY(i // g)) FROM s.misc_tbl
 query II
 explain SELECT MAX(TRY(i // g)) FROM s.misc_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- TRY_CAST is DuckDB-specific ----
 query I
@@ -32,7 +32,7 @@ SELECT COUNT(TRY_CAST(i AS DATE)) FROM s.misc_tbl
 query II
 explain SELECT COUNT(TRY_CAST(i AS DATE)) FROM s.misc_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- IS [NOT] DISTINCT FROM is serialized using MySQL's NULL-safe <=> operator ----
 statement ok
@@ -144,7 +144,7 @@ SELECT group_concat(i) FROM s.misc_tbl
 query II
 explain SELECT group_concat(i) FROM s.misc_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # a group_concat result longer than @@group_concat_max_len must not be truncated
 query I
@@ -161,7 +161,7 @@ SELECT COUNT(*) FROM s.misc_tbl WHERE i IN (SELECT i FROM s.misc_tbl ORDER BY i 
 query II
 explain SELECT COUNT(*) FROM s.misc_tbl WHERE i IN (SELECT i FROM s.misc_tbl ORDER BY i LIMIT 3)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # LIMIT within EXISTS / scalar subqueries is supported and pushed
 query I
@@ -223,19 +223,19 @@ SELECT SUM(SUM_v) FROM (
 query II
 explain SELECT SUM(v) OVER (ORDER BY i ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING EXCLUDE CURRENT ROW) FROM s.misc_win_tbl
 ----
-physical_plan	<REGEX>:.*WINDOW.*
+physical_plan	<REGEX>:.*Window.*
 
 # GROUPS frame mode
 query II
 explain SELECT SUM(v) OVER (ORDER BY i GROUPS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM s.misc_win_tbl
 ----
-physical_plan	<REGEX>:.*WINDOW.*
+physical_plan	<REGEX>:.*Window.*
 
 # RANGE frames with an offset
 query II
 explain SELECT SUM(v) OVER (ORDER BY i RANGE BETWEEN 2 PRECEDING AND CURRENT ROW) FROM s.misc_win_tbl
 ----
-physical_plan	<REGEX>:.*WINDOW.*
+physical_plan	<REGEX>:.*Window.*
 
 # COUNT(*) as a window function is pushed (serialized as count(*))
 query I

@@ -54,7 +54,7 @@ SELECT SUM(i) / 7 FROM s.sem_tbl
 query II
 explain SELECT SUM(i) / 7 FROM s.sem_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # avg: MySQL returns DECIMAL with 4 fractional digits; DuckDB returns DOUBLE
 # the pushdown serializes avg(x) as avg(CAST(x AS DOUBLE)), so the query can be pushed
@@ -159,7 +159,7 @@ SELECT MAX(instr(w, 'b')) FROM s.instr_tbl
 query II
 explain SELECT MAX(instr(w, 'b')) FROM s.instr_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # microsecond: DuckDB includes the seconds component, MySQL does not - the pushdown
 # serializes it as (microsecond(x) + second(x) * 1000000)
@@ -210,4 +210,4 @@ h
 query II
 explain SELECT MIN(substring(w, 0, 2)) FROM s.substr_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*

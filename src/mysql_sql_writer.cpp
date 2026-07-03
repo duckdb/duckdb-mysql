@@ -514,10 +514,10 @@ string MySQLSQLWriter::WriteTableRef(const TableRef &ref) {
 	case TableReferenceType::BASE_TABLE: {
 		auto &base = ref.Cast<BaseTableRef>();
 		string result;
-		if (!base.schema_name.empty()) {
-			result += WriteIdentifier(base.schema_name.GetIdentifierName()) + ".";
+		if (!base.GetQualifiedName().Schema().empty()) {
+			result += WriteIdentifier(base.GetQualifiedName().Schema().GetIdentifierName()) + ".";
 		}
-		result += WriteIdentifier(base.table_name.GetIdentifierName());
+		result += WriteIdentifier(base.Table().GetIdentifierName());
 		if (!base.alias.empty()) {
 			result += " AS " + WriteIdentifier(base.alias.GetIdentifierName());
 		}

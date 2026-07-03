@@ -19,14 +19,14 @@ struct MySQLTableInfo {
 		create_info = make_uniq<CreateTableInfo>();
 	}
 	MySQLTableInfo(const string &schema, const string &table) {
-		create_info = make_uniq<CreateTableInfo>(Identifier(), Identifier(schema), Identifier(table));
+		create_info = make_uniq<CreateTableInfo>(QualifiedName(Identifier(), Identifier(schema), Identifier(table)));
 	}
 	MySQLTableInfo(const SchemaCatalogEntry &schema, const string &table) {
 		create_info = make_uniq<CreateTableInfo>((SchemaCatalogEntry &)schema, Identifier(table));
 	}
 
 	const string &GetTableName() const {
-		return create_info->table.GetIdentifierName();
+		return create_info->GetTableName().GetIdentifierName();
 	}
 
 	unique_ptr<CreateTableInfo> create_info;

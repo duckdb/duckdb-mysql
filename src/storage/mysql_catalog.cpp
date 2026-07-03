@@ -457,7 +457,7 @@ optional_ptr<CatalogEntry> MySQLCatalog::CreateSchema(CatalogTransaction transac
 	if (info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
 		DropInfo try_drop;
 		try_drop.type = CatalogType::SCHEMA_ENTRY;
-		try_drop.name = info.schema;
+		try_drop.SetName(info.GetQualifiedName().Schema());
 		try_drop.if_not_found = OnEntryNotFound::RETURN_NULL;
 		try_drop.cascade = false;
 		schemas.DropEntry(transaction.GetContext(), try_drop);
@@ -752,7 +752,7 @@ static void MySQLCollectJoinTableNames(const TableRef &ref, case_insensitive_set
 	}
 	case TableReferenceType::BASE_TABLE: {
 		auto &base = ref.Cast<BaseTableRef>();
-		const auto &name = base.alias.empty() ? base.table_name : base.alias;
+		const auto &name = base.alias.empty() ? base.Table() : base.alias;
 		if (!names.insert(name.GetIdentifierName()).second) {
 			duplicate = true;
 		}

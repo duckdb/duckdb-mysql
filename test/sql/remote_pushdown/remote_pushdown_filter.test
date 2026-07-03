@@ -22,7 +22,7 @@ SELECT SUM(i) FILTER (WHERE i > 5) FROM s.filter_tbl
 query II
 explain SELECT SUM(i) FILTER (WHERE i > 5) FROM s.filter_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # COUNT with FILTER -- even numbers 0,2,4,6,8 → 5
 query I
@@ -33,7 +33,7 @@ SELECT COUNT(*) FILTER (WHERE i % 2 = 0) FROM s.filter_tbl
 query II
 explain SELECT COUNT(*) FILTER (WHERE i % 2 = 0) FROM s.filter_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # multiple filtered aggregates in one query
 # i > 7 → 8,9 (sum=17); i < 3 → 0,1,2 (sum=3)
@@ -51,7 +51,7 @@ SELECT SUM(i), SUM(i) FILTER (WHERE i % 2 = 0) FROM s.filter_tbl
 query II
 explain SELECT SUM(i), SUM(i) FILTER (WHERE i % 2 = 0) FROM s.filter_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # AVG with FILTER
 query I

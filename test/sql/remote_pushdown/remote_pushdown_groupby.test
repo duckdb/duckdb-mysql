@@ -40,7 +40,7 @@ NULL	10
 query II
 explain SELECT g1, COUNT(*) AS cnt FROM s.gb_tbl GROUP BY ROLLUP (g1) ORDER BY g1
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- GROUP BY ALL: MySQL has no GROUP BY ALL syntax -- breaks when pushed ----
 # DuckDB expands ALL to every non-aggregate column in the SELECT list
@@ -58,7 +58,7 @@ SELECT g1, g2, COUNT(*) AS cnt FROM s.gb_tbl GROUP BY ALL ORDER BY g1, g2
 query II
 explain SELECT g1, g2, COUNT(*) AS cnt FROM s.gb_tbl GROUP BY ALL ORDER BY g1, g2
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- GROUP BY CUBE: MySQL has no CUBE support -- breaks when pushed ----
 # CUBE(g1) produces per-group rows plus a grand-total row
@@ -72,7 +72,7 @@ NULL	10
 query II
 explain SELECT g1, COUNT(*) AS cnt FROM s.gb_tbl GROUP BY CUBE (g1) ORDER BY g1
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- GROUP BY GROUPING SETS: MySQL has no GROUPING SETS support -- breaks when pushed ----
 query II
@@ -85,7 +85,7 @@ NULL	10
 query II
 explain SELECT g1, COUNT(*) AS cnt FROM s.gb_tbl GROUP BY GROUPING SETS ((g1), ()) ORDER BY g1
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- DISTINCT ON: MySQL has no DISTINCT ON -- breaks when pushed ----
 # keep the first row per g1 group (lowest i)
@@ -99,7 +99,7 @@ SELECT DISTINCT ON (g1) g1, i FROM s.gb_tbl ORDER BY g1, i
 query II
 explain SELECT DISTINCT ON (g1) g1, i FROM s.gb_tbl ORDER BY g1, i
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- ORDER BY NULLS FIRST / NULLS LAST: MySQL cannot parse the NULLS clause, but the
 # serializer encodes the NULL placement through an explicit "expr IS NULL" ordering key ----
@@ -152,4 +152,4 @@ SELECT COUNT(*) FROM (SELECT i FROM s.gb_tbl LIMIT 50 PERCENT) t
 query II
 explain SELECT COUNT(*) FROM (SELECT i FROM s.gb_tbl LIMIT 50 PERCENT) t
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*

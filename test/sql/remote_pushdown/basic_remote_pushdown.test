@@ -22,7 +22,7 @@ SELECT SUM(i) FROM s.small_tbl
 query II
 explain SELECT SUM(i) FROM s.small_tbl
 ----
-physical_plan	<!REGEX>:.*AGGREGATE.*
+physical_plan	<!REGEX>:.*Aggregate.*
 
 # unsupported aggregates are executed DuckDB side
 query I
@@ -33,4 +33,4 @@ SELECT median(i) FROM s.small_tbl
 query II
 explain SELECT MEDIAN(i) FROM s.small_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*

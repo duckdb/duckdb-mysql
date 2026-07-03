@@ -62,7 +62,7 @@ explain
 WITH local_cte AS (SELECT i FROM local_ids)
 SELECT SUM(s.cte_tbl.v) FROM s.cte_tbl JOIN local_cte ON (s.cte_tbl.i = local_cte.i)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # CTE backed by a range() table function: also local, must NOT be pushed
 query I
@@ -76,7 +76,7 @@ explain
 WITH range_cte AS (SELECT * FROM range(5) t(i))
 SELECT SUM(s.cte_tbl.v) FROM s.cte_tbl JOIN range_cte ON (s.cte_tbl.i = range_cte.i)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # recursive CTE can be pushed
 query I

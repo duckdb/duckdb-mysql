@@ -76,7 +76,7 @@ SELECT SUM(w) FROM s.asof_left ASOF JOIN s.asof_right ON (s.asof_left.ts >= s.as
 query II
 explain SELECT SUM(w) FROM s.asof_left ASOF JOIN s.asof_right ON (s.asof_left.ts >= s.asof_right.ts)
 ----
-physical_plan	<REGEX>:.*JOIN.*
+physical_plan	<REGEX>:.*Join.*
 
 # ---- POSITIONAL JOIN: pairs rows by their ordinal position ----
 # MySQL has no POSITIONAL JOIN syntax -- must be handled by DuckDB
@@ -97,7 +97,7 @@ SELECT SUM(a + b) FROM s.pos_left POSITIONAL JOIN s.pos_right
 query II
 explain SELECT SUM(a + b) FROM s.pos_left POSITIONAL JOIN s.pos_right
 ----
-physical_plan	<REGEX>:.*POSITIONAL.*
+physical_plan	<REGEX>:.*Positional.*
 
 # ---- join conditions using DuckDB-only functions must block pushdown ----
 # levenshtein() is not in MySQL -- the join condition uses it, so the join stays local
@@ -116,7 +116,7 @@ SELECT COUNT(*) FROM s.word_left JOIN s.word_right ON (levenshtein(s.word_left.w
 query II
 explain SELECT COUNT(*) FROM s.word_left JOIN s.word_right ON (levenshtein(s.word_left.w, s.word_right.w) <= 2)
 ----
-physical_plan	<REGEX>:.*JOIN.*AGGREGATE.*|.*AGGREGATE.*JOIN.*
+physical_plan	<REGEX>:.*Join.*Aggregate.*|.*Aggregate.*Join.*
 
 # ---- FULL OUTER JOIN: MySQL has no FULL JOIN -- worse, "x FULL JOIN y" would parse as
 # ---- "x AS full JOIN y" and silently compute an inner join ----
@@ -131,7 +131,7 @@ SELECT COUNT(*) FROM s.jt_left a FULL OUTER JOIN s.jt_right b ON (a.i = b.i + 3)
 query II
 explain SELECT COUNT(*) FROM s.jt_left a FULL OUTER JOIN s.jt_right b ON (a.i = b.i + 3)
 ----
-physical_plan	<REGEX>:.*JOIN.*
+physical_plan	<REGEX>:.*Join.*
 
 # ---- self-joins: MySQL requires unique table aliases within a join ----
 
@@ -155,4 +155,4 @@ SELECT COUNT(*) FROM s.jt_left JOIN s.jt_left USING (i)
 query II
 explain SELECT COUNT(*) FROM s.jt_left JOIN s.jt_left USING (i)
 ----
-physical_plan	<REGEX>:.*JOIN.*
+physical_plan	<REGEX>:.*Join.*

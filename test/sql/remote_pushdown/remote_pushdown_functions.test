@@ -21,7 +21,7 @@ SELECT approx_count_distinct(i) FROM s.func_tbl
 query II
 explain SELECT approx_count_distinct(i) FROM s.func_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # bool_and / bool_or are DuckDB/Postgres extensions not available in MySQL
 query I
@@ -47,7 +47,7 @@ false
 query II
 explain SELECT bool_and(i >= 0) FROM s.func_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # mode() is DuckDB-only
 # i % 3: value 0 appears 4 times (i=0,3,6,9), values 1 and 2 appear 3 times each
@@ -59,7 +59,7 @@ SELECT mode(i % 3) FROM s.func_tbl
 query II
 explain SELECT mode(i % 3) FROM s.func_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # levenshtein() is DuckDB-only
 statement ok
@@ -81,7 +81,7 @@ SELECT SUM(levenshtein(word, 'duck')) FROM s.word_tbl
 query II
 explain SELECT MIN(levenshtein(word, 'duck')) FROM s.word_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # log() domain mismatch: MySQL returns NULL on domain errors (log(0), log(-1)) where DuckDB
 # yields -inf / nan -- log must be evaluated locally
@@ -96,7 +96,7 @@ SELECT ROUND(MIN(log(v))::DOUBLE, 4) FROM s.log_tbl
 query II
 explain SELECT ROUND(MIN(log(v))::DOUBLE, 4) FROM s.log_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # length() semantic mismatch: DuckDB counts characters, MySQL counts bytes
 # chr(233) is 'é', which is 1 character but 2 bytes in UTF-8

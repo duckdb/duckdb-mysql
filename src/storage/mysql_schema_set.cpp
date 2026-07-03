@@ -24,8 +24,9 @@ FROM information_schema.schemata;
 	auto result = transaction.Query(query);
 	while (result->Next()) {
 		CreateSchemaInfo info;
-		info.schema = Identifier(result->GetString(0));
-		info.internal = MySQLSchemaIsInternal(info.schema.GetIdentifierName());
+		info.SetQualifiedName(QualifiedName(info.GetQualifiedName().Catalog(), Identifier(result->GetString(0)),
+		                                    info.GetQualifiedName().Name()));
+		info.internal = MySQLSchemaIsInternal(info.GetQualifiedName().Schema().GetIdentifierName());
 		auto schema = make_uniq<MySQLSchemaEntry>(catalog, info);
 		CreateEntry(std::move(schema));
 	}
@@ -34,7 +35,8 @@ FROM information_schema.schemata;
 optional_ptr<CatalogEntry> MySQLSchemaSet::CreateSchema(ClientContext &context, CreateSchemaInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 
-	string create_sql = "CREATE SCHEMA " + MySQLUtils::WriteIdentifier(info.schema.GetIdentifierName());
+	string create_sql =
+	    "CREATE SCHEMA " + MySQLUtils::WriteIdentifier(info.GetQualifiedName().Schema().GetIdentifierName());
 	transaction.Query(create_sql);
 	auto schema_entry = make_uniq<MySQLSchemaEntry>(catalog, info);
 	return CreateEntry(std::move(schema_entry));

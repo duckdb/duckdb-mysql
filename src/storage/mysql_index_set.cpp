@@ -11,22 +11,22 @@ MySQLIndexSet::MySQLIndexSet(MySQLSchemaEntry &schema) : MySQLInSchemaSet(schema
 }
 
 void MySQLIndexSet::DropEntry(ClientContext &context, DropInfo &info) {
-	auto entry = GetEntry(context, info.name.GetIdentifierName());
+	auto entry = GetEntry(context, info.GetQualifiedName().Name().GetIdentifierName());
 	if (!entry) {
 		if (info.if_not_found == OnEntryNotFound::RETURN_NULL) {
 			return;
 		}
-		throw CatalogException("Failed to DROP INDEX \"%s\": entry not found", info.name);
+		throw CatalogException("Failed to DROP INDEX \"%s\": entry not found", info.GetQualifiedName().Name());
 	}
 	auto &mysql_index = entry->Cast<MySQLIndexEntry>();
 	string drop_query = "DROP INDEX ";
-	drop_query += MySQLUtils::WriteIdentifier(info.name.GetIdentifierName());
+	drop_query += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	drop_query += " ON ";
 	drop_query += MySQLUtils::WriteIdentifier(mysql_index.table_name);
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	transaction.Query(drop_query);
 
-	EraseEntryInternal(info.name.GetIdentifierName());
+	EraseEntryInternal(info.GetQualifiedName().Name().GetIdentifierName());
 }
 
 void MySQLIndexSet::LoadEntries(ClientContext &context) {
@@ -43,9 +43,10 @@ WHERE TABLE_SCHEMA = 'mysqlscanner';
 		auto table_name = result->GetString(0);
 		auto index_name = result->GetString(1);
 		CreateIndexInfo info;
-		info.schema = schema.name;
+		info.SetQualifiedName(
+		    QualifiedName(info.GetQualifiedName().Catalog(), schema.name, info.GetQualifiedName().Name()));
 		info.table = Identifier(table_name);
-		info.index_name = Identifier(index_name);
+		info.SetIndexName(Identifier(index_name));
 		auto index_entry = make_uniq<MySQLIndexEntry>(catalog, schema, info, table_name);
 		CreateEntry(std::move(index_entry));
 	}

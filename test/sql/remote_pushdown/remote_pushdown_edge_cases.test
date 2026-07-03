@@ -24,7 +24,7 @@ SELECT COUNT(*) FROM s.edge_tbl WHERE isnan(sqrt(neg)::DOUBLE)
 query II
 explain SELECT sqrt(neg) FROM s.edge_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # MySQL raises an out-of-range error for exp(1000) / pow(0, -1) / cot(0); DuckDB yields inf
 query I
@@ -35,12 +35,12 @@ inf
 query II
 explain SELECT exp(i) FROM s.edge_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 query II
 explain SELECT pow(i, 2) FROM s.edge_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # round() rounds doubles half-away-from-zero in DuckDB but half-to-even in MySQL
 query I
@@ -51,7 +51,7 @@ SELECT round(2.5::DOUBLE + i - i) FROM s.edge_tbl LIMIT 1
 query II
 explain SELECT round(v / 2.0, 0) FROM s.edge_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # ---- upper / lower / reverse have different Unicode behavior and stay local ----
 # MySQL only applies simple case mapping: upper('ß') stays 'ß', DuckDB returns 'ẞ'
@@ -67,12 +67,12 @@ ABC
 query II
 explain SELECT upper(w) FROM s.edge_str_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 query II
 explain SELECT reverse(w) FROM s.edge_str_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # ---- any_value: MySQL's ANY_VALUE may return NULL for groups with non-NULL values ----
 statement ok
@@ -89,7 +89,7 @@ SELECT g, any_value(v) FROM s.edge_av_tbl GROUP BY g ORDER BY g
 query II
 explain SELECT g, any_value(v) FROM s.edge_av_tbl GROUP BY g
 ----
-physical_plan	<REGEX>:.*GROUP_BY.*
+physical_plan	<REGEX>:.*Group By.*
 
 # ---- lpad / rpad with negative length: MySQL returns NULL, DuckDB an empty string ----
 query I
@@ -100,7 +100,7 @@ SELECT lpad(w, -1, 'x') FROM s.edge_str_tbl LIMIT 1
 query II
 explain SELECT lpad(w, -1, 'x') FROM s.edge_str_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # literal non-negative lengths are pushed
 query II
@@ -137,7 +137,7 @@ SELECT i + 1 AS j FROM s.edge_tbl WHERE j = 5
 query II
 explain SELECT i + 1 AS j FROM s.edge_tbl WHERE j = 5
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # an alias that shadows a real column is fine - both systems prefer the column
 query I
@@ -190,7 +190,7 @@ SELECT * FROM s.edge_j1 JOIN s.edge_j2 USING (i)
 query II
 explain SELECT * FROM s.edge_j1 JOIN s.edge_j2 USING (i)
 ----
-physical_plan	<REGEX>:.*JOIN.*
+physical_plan	<REGEX>:.*Join.*
 
 query III
 SELECT * FROM s.edge_j1 NATURAL JOIN s.edge_j2
@@ -233,12 +233,12 @@ SELECT COUNT(*) FROM s.edge_ts_tbl WHERE ts < TIMESTAMP 'infinity'
 query II
 explain SELECT COUNT(*) FROM s.edge_ts_tbl WHERE ts < TIMESTAMP 'infinity'
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 query II
 explain SELECT COUNT(*) FROM s.edge_ts_tbl WHERE ts::DATE > DATE '-infinity'
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # finite typed literals are pushed
 query II
@@ -278,7 +278,7 @@ SELECT COUNT(*) FROM s.edge_ts_tbl WHERE ts::DATE < CAST('infinity' AS DATE)
 query II
 explain SELECT COUNT(*) FROM s.edge_ts_tbl WHERE ts::DATE < CAST('infinity' AS DATE)
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # ---- avg(DISTINCT) deduplicates the original values, not the DOUBLE casts ----
 query I
@@ -289,7 +289,7 @@ SELECT avg(DISTINCT v) FROM s.edge_tbl
 query II
 explain SELECT avg(DISTINCT v) FROM s.edge_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # plain avg is still pushed
 query II
@@ -315,7 +315,7 @@ January
 query II
 explain SELECT monthname(d) FROM s.edge_date_tbl
 ----
-physical_plan	<REGEX>:.*PROJECTION.*
+physical_plan	<REGEX>:.*Projection.*
 
 # ---- casts of literals are folded locally: MySQL's CAST parses numeric strings and time
 # ---- zone offsets differently (CAST('1e2' AS SIGNED) = 1, CAST('5.7' AS SIGNED) = 5,
@@ -369,7 +369,7 @@ SELECT sum(i) FROM s.edge_tbl HAVING sum(i) > 5
 query II
 explain SELECT sum(i) FROM s.edge_tbl HAVING sum(i) > 5
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # HAVING with GROUP BY is still pushed
 query II
@@ -410,4 +410,4 @@ explain WITH cte_with_a_name_that_is_longer_than_the_mysql_limit_of_sixty_four_c
 )
 SELECT COUNT(*) FROM cte_with_a_name_that_is_longer_than_the_mysql_limit_of_sixty_four_characters
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*

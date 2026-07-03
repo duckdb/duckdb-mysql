@@ -28,7 +28,7 @@ MySQLTransaction &GetMySQLTransaction(CatalogTransaction transaction) {
 void MySQLSchemaEntry::TryDropEntry(ClientContext &context, CatalogType catalog_type, const string &name) {
 	DropInfo info;
 	info.type = catalog_type;
-	info.name = Identifier(name);
+	info.SetName(Identifier(name));
 	info.cascade = false;
 	info.if_not_found = OnEntryNotFound::RETURN_NULL;
 	DropEntry(context, info);
@@ -36,7 +36,7 @@ void MySQLSchemaEntry::TryDropEntry(ClientContext &context, CatalogType catalog_
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) {
 	auto &base_info = info.Base();
-	auto table_name = base_info.table;
+	auto table_name = base_info.GetTableName();
 	if (base_info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
 		// CREATE OR REPLACE - drop any existing entries first (if any)
 		TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name.GetIdentifierName());
@@ -66,7 +66,7 @@ string GetMySQLCreateIndex(CreateIndexInfo &info, TableCatalogEntry &tbl) {
 		sql += " UNIQUE";
 	}
 	sql += " INDEX ";
-	sql += MySQLUtils::WriteIdentifier(info.index_name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetIndexName().GetIdentifierName());
 	sql += " ON ";
 	sql += MySQLUtils::WriteIdentifier(tbl.name.GetIdentifierName());
 	sql += "(";
@@ -98,7 +98,7 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateIndex(CatalogTransaction tran
 string GetMySQLCreateView(CreateViewInfo &info) {
 	string sql;
 	sql = "CREATE VIEW ";
-	sql += MySQLUtils::WriteIdentifier(info.view_name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetViewName().GetIdentifierName());
 	sql += " ";
 	if (!info.aliases.empty()) {
 		sql += "(";
@@ -123,18 +123,18 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateView(CatalogTransaction trans
 	}
 	if (info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT ||
 	    info.on_conflict == OnCreateConflict::IGNORE_ON_CONFLICT) {
-		auto current_entry = GetEntry(transaction, CatalogType::VIEW_ENTRY, info.view_name);
+		auto current_entry = GetEntry(transaction, CatalogType::VIEW_ENTRY, info.GetViewName());
 		if (current_entry) {
 			if (info.on_conflict == OnCreateConflict::IGNORE_ON_CONFLICT) {
 				return current_entry;
 			}
 			// CREATE OR REPLACE - drop any existing entries first (if any)
-			TryDropEntry(transaction.GetContext(), CatalogType::VIEW_ENTRY, info.view_name.GetIdentifierName());
+			TryDropEntry(transaction.GetContext(), CatalogType::VIEW_ENTRY, info.GetViewName().GetIdentifierName());
 		}
 	}
 	auto &mysql_transaction = GetMySQLTransaction(transaction);
 	mysql_transaction.Query(GetMySQLCreateView(info));
-	return tables.RefreshTable(transaction.GetContext(), info.view_name.GetIdentifierName());
+	return tables.RefreshTable(transaction.GetContext(), info.GetViewName().GetIdentifierName());
 }
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateType(CatalogTransaction transaction, CreateTypeInfo &info) {

@@ -26,7 +26,7 @@ SELECT SUM(s.remote_tbl.v) FROM s.remote_tbl JOIN local_tbl ON (s.remote_tbl.i =
 query II
 explain SELECT SUM(s.remote_tbl.v) FROM s.remote_tbl JOIN local_tbl ON (s.remote_tbl.i = local_tbl.i)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # local table on the left side
 query I
@@ -43,7 +43,7 @@ SELECT SUM(v) FROM s.remote_tbl WHERE i IN (SELECT i FROM local_tbl)
 query II
 explain SELECT SUM(v) FROM s.remote_tbl WHERE i IN (SELECT i FROM local_tbl)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # NOT IN subquery over a local table -- i NOT IN {0..4} → i=5..9 → v=50+60+70+80+90=350
 query I
@@ -61,7 +61,7 @@ query II
 explain SELECT SUM(v) FROM s.remote_tbl WHERE EXISTS (
     SELECT 1 FROM local_tbl WHERE local_tbl.i = s.remote_tbl.i)
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # scalar subquery over a local table used in SELECT list
 # returns max(local_tbl.i) = 4 for every row

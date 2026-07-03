@@ -214,11 +214,11 @@ string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
 	if (info.on_conflict == OnCreateConflict::IGNORE_ON_CONFLICT) {
 		ss << "IF NOT EXISTS ";
 	}
-	if (!info.schema.empty()) {
-		ss << MySQLUtils::WriteIdentifier(info.schema.GetIdentifierName());
+	if (!info.GetQualifiedName().Schema().empty()) {
+		ss << MySQLUtils::WriteIdentifier(info.GetQualifiedName().Schema().GetIdentifierName());
 		ss << ".";
 	}
-	ss << MySQLUtils::WriteIdentifier(info.table.GetIdentifierName());
+	ss << MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());
 	ss << MySQLColumnsToSQL(info.columns, info.constraints);
 	ss << ";";
 	return ss.str();
@@ -235,7 +235,7 @@ optional_ptr<CatalogEntry> MySQLTableSet::CreateTable(ClientContext &context, Bo
 void MySQLTableSet::AlterTable(ClientContext &context, RenameTableInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	string sql = "ALTER TABLE ";
-	sql += MySQLUtils::WriteIdentifier(info.name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " RENAME TO ";
 	sql += MySQLUtils::WriteIdentifier(info.new_table_name.GetIdentifierName());
 	transaction.Query(sql);
@@ -244,7 +244,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameTableInfo &info) {
 void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	string sql = "ALTER TABLE ";
-	sql += MySQLUtils::WriteIdentifier(info.name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " RENAME COLUMN  ";
 	sql += MySQLUtils::WriteIdentifier(info.old_name.GetIdentifierName());
 	sql += " TO ";
@@ -256,7 +256,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
 void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	string sql = "ALTER TABLE ";
-	sql += MySQLUtils::WriteIdentifier(info.name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " ADD COLUMN  ";
 	if (info.if_column_not_exists) {
 		sql += "IF NOT EXISTS ";
@@ -270,7 +270,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
 void MySQLTableSet::AlterTable(ClientContext &context, RemoveColumnInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	string sql = "ALTER TABLE ";
-	sql += MySQLUtils::WriteIdentifier(info.name.GetIdentifierName());
+	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " DROP COLUMN  ";
 	if (info.if_column_exists) {
 		throw NotImplementedException("DROP COLUMN IF EXISTS not supported in MySQL");

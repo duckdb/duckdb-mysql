@@ -82,7 +82,7 @@ SELECT COUNT(*) FROM (SELECT i FROM s.set_tbl1 UNION ALL SELECT * FROM range(3) 
 query II
 explain SELECT COUNT(*) FROM (SELECT i FROM s.set_tbl1 UNION ALL SELECT * FROM range(3) t(i)) t
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # Three-way UNION ALL of fully-remote tables -- should push
 statement ok
@@ -146,4 +146,4 @@ SELECT COUNT(*) FROM (SELECT i FROM s.set_tbl1 UNION ALL BY NAME SELECT i FROM s
 query II
 explain SELECT COUNT(*) FROM (SELECT i FROM s.set_tbl1 UNION ALL BY NAME SELECT i FROM s.set_tbl2) t
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*

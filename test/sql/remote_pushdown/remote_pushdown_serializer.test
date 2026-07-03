@@ -40,7 +40,7 @@ SELECT ROUND(MAX(ln(i + 1))::DOUBLE, 6), MAX(log(2, i + 1)) FROM s.ser_tbl
 query II
 explain SELECT MAX(ln(i + 1)), MAX(log(2, i + 1)) FROM s.ser_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- string literals with backslashes and quotes are escaped for MySQL ----
 query I

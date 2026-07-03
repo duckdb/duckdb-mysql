@@ -60,7 +60,7 @@ physical_plan	<!REGEX>:.*MYSQL_SCAN.*
 query II
 explain SELECT i, now() FROM s.cf_tbl
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # ---- volatile functions are not folded ----
 # random() must be evaluated per row; it is also vetoed from pushdown
@@ -72,7 +72,7 @@ SELECT COUNT(*) FROM (SELECT random() AS r FROM s.cf_tbl) t WHERE r >= 0 AND r <
 query II
 explain SELECT random() FROM s.cf_tbl
 ----
-physical_plan	<REGEX>:.*MYSQL_SCAN.*
+physical_plan	<REGEX>:.*Mysql Scan.*
 
 # ---- constant expressions that error during folding keep the query local, so the user
 # ---- sees DuckDB's error message instead of a remote error

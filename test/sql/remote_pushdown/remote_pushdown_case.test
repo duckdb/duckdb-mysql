@@ -42,7 +42,7 @@ query II
 explain SELECT SUM(i) FROM s.case_tbl
     WHERE (CASE WHEN i < 5 THEN INTERVAL '1' DAY ELSE INTERVAL '2' DAY END) = INTERVAL '1' DAY
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- CASE with HUGEINT branch: MySQL has no HUGEINT type ----
 # 99999999999999999999 exceeds BIGINT range; DuckDB stores it as HUGEINT
@@ -56,7 +56,7 @@ SELECT CASE WHEN i = 0 THEN 99999999999999999999 ELSE i END FROM s.case_tbl WHER
 query II
 explain SELECT SUM(CASE WHEN i = 0 THEN 99999999999999999999 ELSE i END) FROM s.case_tbl
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- CASE with LIST branch: list_value() is not in MySQL ----
 # list_value is not in the whitelist → should not push; DuckDB handles it locally
@@ -69,7 +69,7 @@ query II
 explain SELECT COUNT(*) FROM s.case_tbl
     WHERE list_sum(CASE WHEN i < 5 THEN [1, 2] ELSE [3, 4] END) > 3
 ----
-physical_plan	<REGEX>:.*AGGREGATE.*
+physical_plan	<REGEX>:.*Aggregate.*
 
 # ---- CASE implicit integer/varchar coercion ----
 # both MySQL and DuckDB coerce i to VARCHAR when mixing int and string branches
