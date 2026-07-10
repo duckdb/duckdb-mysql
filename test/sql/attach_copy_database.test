@@ -1,0 +1,96 @@
+# name: test/sql/attach_copy_database.test
+# description: Test copying MySQL DB into DuckDB one
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# prepare schemas
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL)
+
+statement ok
+CALL mysql_execute('s', 'DROP DATABASE IF EXISTS duckdb_test_db1')
+
+statement ok
+CALL mysql_execute('s', 'DROP DATABASE IF EXISTS duckdb_test_db2')
+
+statement ok
+CALL mysql_execute('s', 'CREATE DATABASE duckdb_test_db1')
+
+statement ok
+CALL mysql_execute('s', 'CREATE DATABASE duckdb_test_db2')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE duckdb_test_db1.tab1(col1 INT)')
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO duckdb_test_db1.tab1 VALUES(42)')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE duckdb_test_db2.tab2(col2 INT)')
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO duckdb_test_db2.tab2 VALUES(43)')
+
+statement ok
+DETACH s
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL, SCHEMA duckdb_test_db1, READ_ONLY)
+
+statement ok
+USE s
+
+query III
+SHOW SCHEMAS
+----
+memory	main	false
+s	duckdb_test_db1	true
+
+statement ok
+ATTACH ':memory:' AS mem1
+
+statement ok
+COPY FROM DATABASE s TO mem1
+
+statement ok
+USE mem1
+
+query I
+FROM duckdb_test_db1.tab1
+----
+42
+
+statement error
+FROM duckdb_test_db2.tab2
+----
+Catalog Error: Table with name "duckdb_test_db2.tab2" does not exist because schema "duckdb_test_db2" does not exist.
+
+# cleanup
+
+statement ok
+USE memory
+
+statement ok
+DETACH mem1
+
+statement ok
+DETACH s
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL)
+
+statement ok
+CALL mysql_execute('s', 'DROP SCHEMA duckdb_test_db1')
+
+statement ok
+CALL mysql_execute('s', 'DROP SCHEMA duckdb_test_db2')
+
+statement ok
+USE memory
+
+statement ok
+DETACH s
