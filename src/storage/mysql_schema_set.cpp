@@ -11,14 +11,26 @@ static bool MySQLSchemaIsInternal(const string &name) {
 	return false;
 }
 
-MySQLSchemaSet::MySQLSchemaSet(Catalog &catalog) : MySQLCatalogSet(catalog) {
+MySQLSchemaSet::MySQLSchemaSet(Catalog &catalog, vector<string> schemas_to_load_p)
+    : MySQLCatalogSet(catalog), schemas_to_load(std::move(schemas_to_load_p)) {
 }
 
 void MySQLSchemaSet::LoadEntries(ClientContext &context) {
-	auto query = R"(
+	string query = R"(
 SELECT schema_name
-FROM information_schema.schemata;
+FROM information_schema.schemata
 )";
+
+	if (!schemas_to_load.empty()) {
+		query += "WHERE schema_name IN (";
+		for (idx_t i = 0; i < schemas_to_load.size(); i++) {
+			if (i > 0) {
+				query += ", ";
+			}
+			query += MySQLUtils::WriteLiteral(schemas_to_load[i]);
+		}
+		query += ")";
+	}
 
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto result = transaction.Query(query);

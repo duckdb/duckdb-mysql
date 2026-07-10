@@ -44,13 +44,14 @@
 namespace duckdb {
 
 MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, string attach_path_p,
-                           AccessMode access_mode, shared_ptr<MySQLConnectionPool> pool_p)
+                           AccessMode access_mode, vector<string> schemas_to_load,
+                           shared_ptr<MySQLConnectionPool> pool_p)
     : Catalog(db_p), connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
-      access_mode(access_mode), schemas(*this), connection_pool(std::move(pool_p)) {
+      access_mode(access_mode), schemas(*this, schemas_to_load), connection_pool(std::move(pool_p)) {
 	MySQLConnectionParameters connection_params;
 	unordered_set<string> unused;
 	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
-	default_schema = connection_params.db;
+	default_schema = schemas_to_load.size() > 0 ? schemas_to_load[0] : connection_params.db;
 
 	auto pooled = connection_pool->ForceAcquire();
 	auto server_info = mysql_get_server_info(pooled->GetConn());

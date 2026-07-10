@@ -16,13 +16,15 @@ struct CreateSchemaInfo;
 
 class MySQLSchemaSet : public MySQLCatalogSet {
 public:
-	explicit MySQLSchemaSet(Catalog &catalog);
+	explicit MySQLSchemaSet(Catalog &catalog, vector<string> schemas_to_load);
 
 public:
 	optional_ptr<CatalogEntry> CreateSchema(ClientContext &context, CreateSchemaInfo &info);
 
 protected:
 	void LoadEntries(ClientContext &context) override;
+
+	vector<string> schemas_to_load;
 };
 
 } // namespace duckdb

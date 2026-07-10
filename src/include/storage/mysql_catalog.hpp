@@ -20,7 +20,7 @@ class MySQLSchemaEntry;
 class MySQLCatalog : public Catalog {
 public:
 	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode,
-	                      shared_ptr<MySQLConnectionPool> pool_p);
+	                      vector<string> schemas_to_load, shared_ptr<MySQLConnectionPool> pool_p);
 	~MySQLCatalog();
 
 	string connection_string;

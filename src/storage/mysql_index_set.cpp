@@ -33,7 +33,7 @@ void MySQLIndexSet::LoadEntries(ClientContext &context) {
 	auto query = StringUtil::Replace(R"(
 SELECT DISTINCT TABLE_NAME, INDEX_NAME
 FROM INFORMATION_SCHEMA.STATISTICS
-WHERE TABLE_SCHEMA = 'mysqlscanner';
+WHERE TABLE_SCHEMA = ${SCHEMA_NAME};
 )",
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name.GetIdentifierName()));
 
