@@ -1,0 +1,44 @@
+# name: test/sql/attach_comments.test
+# description: Test that MySQL table and column comments propagate through DuckDB metadata
+# group: [sql]
+
+require postgres_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS comment_test');
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE comment_test (name TEXT COMMENT ''this is a column comment'', value INTEGER) COMMENT = ''this is a table comment''');
+
+statement ok
+CALL mysql_clear_cache();
+
+# Verify the table comment appears in duckdb_tables()
+statement ok
+USE s
+
+query I
+SELECT comment FROM duckdb_tables() WHERE table_name = 'comment_test';
+----
+this is a table comment
+
+# Verify the column comment appears in duckdb_columns()
+query I
+SELECT comment FROM duckdb_columns() WHERE table_name = 'comment_test' AND column_name = 'name';
+----
+this is a column comment
+
+# Cleanup
+statement ok
+CALL mysql_execute('s', 'DROP TABLE comment_test');
+
+statement ok
+USE memory
+
+statement ok
+DETACH s

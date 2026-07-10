@@ -41,6 +41,9 @@ void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQL
 		}
 		column.SetDefaultValue(std::move(expressions[0]));
 	}
+	if (!result.IsNull(column_index + 8)) {
+		column.SetComment(result.GetString(column_index + 8));
+	}
 	auto &create_info = *table_info.create_info;
 	if (is_nullable != "YES") {
 		auto column_idx = create_info.columns.LogicalColumnCount();
@@ -51,10 +54,14 @@ void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQL
 
 void MySQLTableSet::LoadEntries(ClientContext &context) {
 	auto query = StringUtil::Replace(R"(
-SELECT table_name, column_name, data_type, column_type, column_default, is_nullable, numeric_precision, numeric_scale
-FROM information_schema.columns
-WHERE table_schema=${SCHEMA_NAME}
-ORDER BY table_name, ordinal_position;
+SELECT c.table_name, c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment
+FROM information_schema.columns c
+LEFT JOIN information_schema.tables t
+	ON t.TABLE_CATALOG = c.TABLE_CATALOG
+	AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+	AND t.TABLE_NAME = c.TABLE_NAME
+WHERE c.table_schema=${SCHEMA_NAME}
+ORDER BY c.table_name, c.ordinal_position;
 )",
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name.GetIdentifierName()));
 
@@ -71,6 +78,9 @@ ORDER BY table_name, ordinal_position;
 				tables.push_back(std::move(info));
 			}
 			info = make_uniq<MySQLTableInfo>(schema, table_name);
+			if (!result->IsNull(8)) {
+				info->create_info->comment = result->GetString(8);
+			}
 		}
 		AddColumn(context, *result, *info, 1);
 	}
@@ -85,10 +95,14 @@ ORDER BY table_name, ordinal_position;
 
 string GetTableInfoQuery(const string &schema_name, const string &table_name) {
 	return StringUtil::Replace(StringUtil::Replace(R"(
-SELECT column_name, data_type, column_type, column_default, is_nullable, numeric_precision, numeric_scale
-FROM information_schema.columns
-WHERE table_schema=${SCHEMA_NAME} AND table_name=${TABLE_NAME}
-ORDER BY table_name, ordinal_position;
+SELECT c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment
+FROM information_schema.columns c
+LEFT JOIN information_schema.tables t
+	ON t.TABLE_CATALOG = c.TABLE_CATALOG
+	AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+	AND t.TABLE_NAME = c.TABLE_NAME
+WHERE c.table_schema=${SCHEMA_NAME} AND c.table_name=${TABLE_NAME}
+ORDER BY c.table_name, c.ordinal_position;
 )",
 	                                               "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema_name)),
 	                           "${TABLE_NAME}", MySQLUtils::WriteLiteral(table_name));
@@ -100,6 +114,9 @@ unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(ClientContext &context, M
 	auto query = GetTableInfoQuery(schema.name.GetIdentifierName(), table_name);
 	auto result = transaction.Query(query);
 	auto table_info = make_uniq<MySQLTableInfo>(schema, table_name);
+	if (!result->IsNull(7)) {
+		table_info->create_info->comment = result->GetString(8);
+	}
 	while (result->Next()) {
 		AddColumn(context, *result, *table_info, 0);
 	}
