@@ -1,4 +1,8 @@
 #include "storage/mysql_execute_query.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
+#include "duckdb/planner/logical_operator.hpp"
 #include "storage/mysql_table_entry.hpp"
 #include "duckdb/planner/operator/logical_delete.hpp"
 #include "storage/mysql_catalog.hpp"

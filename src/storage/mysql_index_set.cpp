@@ -1,4 +1,6 @@
 #include "storage/mysql_index_set.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/catalog/catalog.hpp"
 #include "storage/mysql_schema_entry.hpp"
 #include "storage/mysql_transaction.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "duckdb/common/optional_ptr.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/types.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"

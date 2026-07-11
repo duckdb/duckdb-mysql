@@ -1,5 +1,7 @@
 #define DUCKDB_BUILD_LOADABLE_EXTENSION
 #include "duckdb.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/config.hpp"
 
 #include "mysql_connection_pool.hpp"
 #include "mysql_scanner.hpp"

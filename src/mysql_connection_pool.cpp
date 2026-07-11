@@ -1,4 +1,5 @@
 #include "mysql_connection_pool.hpp"
+#include "duckdb/main/client_context.hpp"
 
 #include <chrono>
 #include <cstring>

@@ -1,4 +1,5 @@
 #include "mysql_types.hpp"
+#include "duckdb/main/client_context.hpp"
 
 namespace duckdb {
 

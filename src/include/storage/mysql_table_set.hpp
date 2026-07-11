@@ -9,6 +9,8 @@
 #pragma once
 
 #include "storage/mysql_catalog_set.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "storage/mysql_table_entry.hpp"
 
 namespace duckdb {

@@ -9,6 +9,7 @@
 #pragma once
 
 #include "dbconnector/pool.hpp"
+#include "duckdb/main/client_context.hpp"
 
 #include "mysql_connection.hpp"
 #include "network_calibration.hpp"

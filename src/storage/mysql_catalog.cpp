@@ -1,4 +1,7 @@
 #include "storage/mysql_catalog.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
 #include "duckdb/main/attached_database.hpp"

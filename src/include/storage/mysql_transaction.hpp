@@ -8,6 +8,8 @@
 #pragma once
 
 #include "duckdb/transaction/transaction.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/catalog/catalog.hpp"
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"
 

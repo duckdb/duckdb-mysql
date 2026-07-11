@@ -9,6 +9,8 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/catalog/catalog.hpp"
 
 #include "mysql_connection.hpp"
 #include "mysql_connection_pool.hpp"
