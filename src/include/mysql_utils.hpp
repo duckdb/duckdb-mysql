@@ -114,6 +114,8 @@ struct MySQLConnectionParameters {
 
 enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION };
 
+enum class MySQLResultStreamingUser { UNINITIALIZED, REQUIRE_STREAMING, FORCE_MATERIALIZATION };
+
 enum class MySQLConnectorInterface { UNINITIALIZED, BASIC, PREPARED_STATEMENT };
 
 class MySQLUtils {

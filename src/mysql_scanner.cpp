@@ -78,7 +78,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		select += " WHERE " + filter_string;
 	}
 
-	auto query_result = con.Query(select, MySQLResultStreaming::FORCE_MATERIALIZATION);
+	auto query_result = con.Query(select, bind_data.optimizer_streaming);
 	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
 
 	return result;
@@ -210,6 +210,19 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		params = StructValue::GetChildren(struct_val);
 	}
 
+	auto user_streaming = MySQLResultStreamingUser::UNINITIALIZED;
+	auto streaming_it = input.named_parameters.find("stream_results");
+	if (streaming_it != input.named_parameters.end()) {
+		Value &bool_val = streaming_it->second;
+		if (!bool_val.IsNull()) {
+			if (BooleanValue::Get(bool_val)) {
+				user_streaming = MySQLResultStreamingUser::REQUIRE_STREAMING;
+			} else {
+				user_streaming = MySQLResultStreamingUser::FORCE_MATERIALIZATION;
+			}
+		}
+	}
+
 	try {
 		auto &transaction = MySQLTransaction::Get(context, catalog);
 		MySQLConnection &conn = transaction.GetConnection();
@@ -226,7 +239,8 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
-		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()));
+		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()),
+		                                     user_streaming);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -242,11 +256,26 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
+	auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
+		auto result_streaming = MySQLResultStreaming::UNINITIALIZED;
+		if (bind_data.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
+		    bind_data.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
+			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
+		} else if (bind_data.optimizer_streaming != MySQLResultStreaming::ALLOW_STREAMING &&
+		           bind_data.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
+			throw BinderException(
+			    "Query result streaming requested in the 'mysql_query' function parameter cannot be performed due to "
+			    "multiple MySQL scans in the query."
+			    "If streaming is required, consider using a separate attached catalog for each 'mysql_query' call - "
+			    "will run on a separate connection without transcactional guarantees");
+		} else {
+			result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+		}
 		auto &transaction = MySQLTransaction::Get(context, *gstate.catalog);
 		MySQLConnection &conn = transaction.GetConnection();
-		gstate.result = conn.Query(gstate.query, gstate.params, MySQLResultStreaming::FORCE_MATERIALIZATION);
+		gstate.result = conn.Query(gstate.query, gstate.params, result_streaming);
 	}
 	MySQLScan(context, data, output);
 }
@@ -257,7 +286,6 @@ MySQLQueryFunction::MySQLQueryFunction()
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
-	// TODO: reimplement me
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
 }
 

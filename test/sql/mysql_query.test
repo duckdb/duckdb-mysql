@@ -175,67 +175,76 @@ FROM mysql_query('simple', 'SELECT * FROM tbl_issue65')
 
 
 query I
-FROM mysql_query('simple', 'SELECT ''foo''',
-  stream_results=TRUE)
+FROM mysql_query('simple', 'SELECT ''foo''', stream_results=TRUE)
 ----
 foo
 
 query I
-FROM mysql_query('simple', 'SELECT ''foo''',
-  stream_results=FALSE)
-----
-foo
-
-query I
-FROM mysql_query('simple', 'SELECT ''foo''',
-  stream_results=NULL)
-----
-foo
-
-query I
-FROM mysql_query('simple', 'SELECT ?',
-  params=row('foo'),
-  stream_results=TRUE)
-----
-foo
-
-query I
-FROM mysql_query('simple', 'SELECT ?',
-  params=row('foo'),
-  stream_results=FALSE)
-----
-foo
-
-query I
-FROM mysql_query('simple', 'SELECT ?',
-  params=row('foo'),
-  stream_results=NULL)
-----
-foo
-
-query I
-FROM mysql_query('simple', 'SELECT 42 col1', stream_results=FALSE)
+FROM mysql_query('simple', 'SELECT ''foo''', stream_results=NULL)
 UNION ALL
-FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
+FROM mysql_query('simple', 'SELECT ''bar''', stream_results=NULL)
+----
+foo
+bar
+
+query I
+FROM mysql_query('simple', 'SELECT ''foo''', stream_results=FALSE)
+UNION ALL
+FROM mysql_query('simple', 'SELECT ''bar''', stream_results=FALSE)
+----
+foo
+bar
+
+statement error
+FROM mysql_query('simple', 'SELECT ''foo''', stream_results=TRUE)
+UNION ALL
+FROM mysql_query('simple', 'SELECT ''bar''', stream_results=TRUE)
+----
+Binder Error
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS simple2 (TYPE MYSQL_SCANNER)
+
+query I
+FROM mysql_query('simple', 'SELECT ''foo''', stream_results=TRUE)
+UNION ALL
+FROM mysql_query('simple2', 'SELECT ''bar''', stream_results=TRUE)
+----
+foo
+bar
+
+statement ok
+DETACH simple2
+
+query I
+FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=TRUE)
 ----
 42
-43
 
 query I
-FROM mysql_query('simple', 'SELECT 42 col1', stream_results=TRUE)
-UNION ALL
-FROM mysql_query('simple', 'SELECT 43 col1', stream_results=FALSE)
+SELECT column_type FROM (DESCRIBE FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=TRUE))
 ----
-42
-43
+VARCHAR
 
 query I
-FROM mysql_query('simple', 'SELECT 42 col1', stream_results=NULL)
-UNION ALL
-FROM mysql_query('simple', 'SELECT 43 col1', stream_results=NULL)
+FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=NULL)
 ----
 42
-43
+
+query I
+SELECT column_type FROM (DESCRIBE FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=NULL))
+----
+VARCHAR
+
+query I
+FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=FALSE)
+----
+42
+
+query I
+SELECT column_type FROM (DESCRIBE FROM mysql_query('simple', 'SELECT ?', params=row(42), stream_results=FALSE))
+----
+VARCHAR
 
 query I
 FROM mysql_query('simple', 'UPDATE booleans SET b = TRUE WHERE 1 < 0')

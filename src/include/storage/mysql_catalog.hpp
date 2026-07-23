@@ -83,7 +83,9 @@ public:
 
 	void ClearCache();
 
+	static void MaterializeMySQLScans(PhysicalOperator &op);
 	static bool IsMySQLScan(const string &name);
+	static bool IsMySQLQuery(const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
 	//! The server version, fetched when the database was attached

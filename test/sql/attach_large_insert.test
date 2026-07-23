@@ -60,3 +60,34 @@ query I
 SELECT COUNT(*) FROM s.tbl
 ----
 400000
+
+statement ok
+CREATE OR REPLACE TABLE s.tbl1(i INT);
+
+query I
+INSERT INTO s.tbl FROM range(100000)
+----
+100000
+
+query I
+UPDATE s.tbl SET i = i + 1 WHERE i IN (SELECT i AS j FROM s.tbl1) 
+----
+
+statement error
+UPDATE s.tbl SET i = divide(i, 1) + 1 WHERE i IN (SELECT i AS j FROM s.tbl1) 
+----
+Binder Error: UPDATE syntax not supported
+
+statement error
+UPDATE s.tbl SET i = i + 1 WHERE i IN (FROM mysql_query('s', 'SELECT i FROM tbl1')) 
+----
+Binder Error: UPDATE syntax not supported
+
+statement ok
+DROP TABLE s.tbl1
+
+statement ok
+DROP TABLE s.tbl
+
+statement ok
+DETACH s

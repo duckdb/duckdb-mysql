@@ -44,7 +44,8 @@ MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string 
 idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
                                     bool prepared) {
 	if (MySQLConnection::DebugPrintQueries()) {
-		Printer::Print(query + "\n");
+		string msg = StringUtil::Format("%s /* streaming=%s */\n", query, streaming ? "TRUE" : "FALSE");
+		Printer::Print(msg);
 	}
 
 	lock_guard<mutex> l(query_lock);

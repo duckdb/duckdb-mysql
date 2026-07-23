@@ -503,8 +503,29 @@ string MySQLCatalog::GetDBPath() {
 	return attach_path;
 }
 
+void MySQLCatalog::MaterializeMySQLScans(PhysicalOperator &op) {
+	if (op.type == PhysicalOperatorType::TABLE_SCAN) {
+		auto &table_scan = op.Cast<PhysicalTableScan>();
+		auto &function_name = table_scan.function.name.GetIdentifierName();
+		if (MySQLCatalog::IsMySQLScan(function_name)) {
+			auto &bind_data = table_scan.bind_data->Cast<MySQLBindData>();
+			bind_data.optimizer_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+		} else if (MySQLCatalog::IsMySQLQuery(function_name)) {
+			auto &bind_data = table_scan.bind_data->Cast<MySQLQueryBindData>();
+			bind_data.optimizer_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+		}
+	}
+	for (auto &child : op.children) {
+		MaterializeMySQLScans(child);
+	}
+}
+
 bool MySQLCatalog::IsMySQLScan(const string &name) {
 	return name == "mysql_scan";
+}
+
+bool MySQLCatalog::IsMySQLQuery(const string &name) {
+	return name == "mysql_query";
 }
 
 DatabaseSize MySQLCatalog::GetDatabaseSize(ClientContext &context) {

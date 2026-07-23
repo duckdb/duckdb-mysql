@@ -328,6 +328,7 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 	}
 
 	D_ASSERT(plan);
+	MySQLCatalog::MaterializeMySQLScans(*plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
 	auto &insert = planner.Make<MySQLInsert>(op, op.table, op.column_index_map);
 	insert.children.push_back(inner_plan);
@@ -336,6 +337,7 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 
 PhysicalOperator &MySQLCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                   LogicalCreateTable &op, PhysicalOperator &plan) {
+	MySQLCatalog::MaterializeMySQLScans(plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, plan);
 	auto &insert = planner.Make<MySQLInsert>(op, op.schema, std::move(op.info));
 	insert.children.push_back(inner_plan);

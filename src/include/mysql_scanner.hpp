@@ -30,6 +30,7 @@ struct MySQLBindData : public FunctionData {
 	vector<MySQLType> mysql_types;
 	vector<string> names;
 	vector<LogicalType> types;
+	MySQLResultStreaming optimizer_streaming = MySQLResultStreaming::UNINITIALIZED;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
@@ -41,14 +42,18 @@ public:
 };
 
 struct MySQLQueryBindData : public FunctionData {
-	MySQLQueryBindData(Catalog &catalog, string query_p, vector<Value> params_p, vector<MySQLField> fields_p)
-	    : catalog(catalog), query(std::move(query_p)), params(std::move(params_p)), fields(std::move(fields_p)) {
+	MySQLQueryBindData(Catalog &catalog, string query_p, vector<Value> params_p, vector<MySQLField> fields_p,
+	                   MySQLResultStreamingUser user_streaming_p)
+	    : catalog(catalog), query(std::move(query_p)), params(std::move(params_p)), fields(std::move(fields_p)),
+	      user_streaming(user_streaming_p) {
 	}
 
 	Catalog &catalog;
 	string query;
 	vector<Value> params;
 	vector<MySQLField> fields;
+	MySQLResultStreamingUser user_streaming = MySQLResultStreamingUser::UNINITIALIZED;
+	MySQLResultStreaming optimizer_streaming = MySQLResultStreaming::UNINITIALIZED;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {
