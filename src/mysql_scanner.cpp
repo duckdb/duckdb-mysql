@@ -21,18 +21,12 @@ namespace duckdb {
 struct MySQLLocalState : public LocalTableFunctionState {};
 
 struct MySQLGlobalState : public GlobalTableFunctionState {
-	explicit MySQLGlobalState(MySQLCatalog &catalog_p, string query_p, vector<Value> params_p,
-	                          vector<MySQLField> fields_p)
-	    : catalog(&catalog_p), query(std::move(query_p)), params(std::move(params_p)), fields(std::move(fields_p)) {
+	explicit MySQLGlobalState() {
 	}
 
 	explicit MySQLGlobalState(unique_ptr<MySQLResult> result_p) : result(std::move(result_p)) {
 	}
 
-	optional_ptr<MySQLCatalog> catalog;
-	string query;
-	vector<Value> params;
-	vector<MySQLField> fields;
 	unique_ptr<MySQLResult> result;
 
 	idx_t MaxThreads() const override {
@@ -224,9 +218,10 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	}
 
 	try {
-		auto &transaction = MySQLTransaction::Get(context, catalog);
+		MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
 		MySQLConnection &conn = transaction.GetConnection();
-		auto stmt = conn.Prepare(sql);
+		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
+		idx_t transaction_id = reinterpret_cast<idx_t>(&transaction);
 		if (stmt->Fields().size() > 0) {
 			for (auto &field : stmt->Fields()) {
 				names.push_back(field.name);
@@ -240,7 +235,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
 		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()),
-		                                     user_streaming);
+		                                     user_streaming, std::move(stmt), transaction_id);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -249,22 +244,19 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
                                                                       TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->CastNoConst<MySQLQueryBindData>();
-	auto &catalog = bind_data.catalog.Cast<MySQLCatalog>();
-	return make_uniq<MySQLGlobalState>(catalog, std::move(bind_data.query), std::move(bind_data.params),
-	                                   std::move(bind_data.fields));
+	return make_uniq<MySQLGlobalState>();
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-	auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
+	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
 		auto result_streaming = MySQLResultStreaming::UNINITIALIZED;
-		if (bind_data.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
-		    bind_data.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
+		if (bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
+		    bdata.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
 			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
-		} else if (bind_data.optimizer_streaming != MySQLResultStreaming::ALLOW_STREAMING &&
-		           bind_data.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
+		} else if (bdata.optimizer_streaming != MySQLResultStreaming::ALLOW_STREAMING &&
+		           bdata.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
 			throw BinderException(
 			    "Query result streaming requested in the 'mysql_query' function parameter cannot be performed due to "
 			    "multiple MySQL scans in the query."
@@ -273,9 +265,14 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		} else {
 			result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 		}
-		auto &transaction = MySQLTransaction::Get(context, *gstate.catalog);
+		auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
+		idx_t current_transaction_id = reinterpret_cast<idx_t>(&transaction);
 		MySQLConnection &conn = transaction.GetConnection();
-		gstate.result = conn.Query(gstate.query, gstate.params, result_streaming);
+		if (bdata.prepared_transaction_id == current_transaction_id) {
+			gstate.result = conn.Query(*bdata.prepared_stmt, bdata.params, result_streaming);
+		} else {
+			gstate.result = conn.Query(bdata.query, bdata.params, result_streaming);
+		}
 	}
 	MySQLScan(context, data, output);
 }
@@ -290,9 +287,10 @@ MySQLQueryFunction::MySQLQueryFunction()
 }
 
 static void MySQLExecuteScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
+	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
-		auto &transaction = Transaction::Get(context, *gstate.catalog).Cast<MySQLTransaction>();
+		MySQLTransaction &transaction = MySQLTransaction::Get(context, bdata.catalog);
 		if (transaction.GetAccessMode() == AccessMode::READ_ONLY) {
 			throw PermissionException("mysql_execute cannot be run in a read-only connection");
 		}

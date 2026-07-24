@@ -9,17 +9,119 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
+# no parameters same transaction
+
 statement ok
 BEGIN TRANSACTION
 
 statement ok
-PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT ?', params=row(?))
+PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT 42')
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
+
+query I
+EXECUTE p1
+----
+42
+
+statement ok
+COMMIT
+
+# no parameters
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT 42')
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
 
 statement ok
 COMMIT
 
 statement ok
 BEGIN TRANSACTION
+
+query I
+EXECUTE p1
+----
+42
+
+statement ok
+COMMIT
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
+
+query I
+EXECUTE p1
+----
+42
+
+# literal parameter
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT ?', params=row(42::INTEGER))
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN TRANSACTION
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
+
+query I
+EXECUTE p1
+----
+42
+
+statement ok
+COMMIT
+
+# external parameter
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+PREPARE p1 AS SELECT * FROM mysql_query('s', 'SELECT ?', params=row(?))
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
+
+statement ok
+COMMIT
+
+statement ok
+BEGIN TRANSACTION
+
+query I
+FROM mysql_query('s', 'SELECT 43')
+----
+43
 
 query I
 EXECUTE p1('foo')
@@ -30,6 +132,11 @@ statement ok
 COMMIT
 
 query I
-EXECUTE p1('bar')
+FROM mysql_query('s', 'SELECT 43')
 ----
-bar
+43
+
+query I
+EXECUTE p1(42)
+----
+42
