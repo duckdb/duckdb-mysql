@@ -90,6 +90,10 @@ MySQLConnection &MySQLTransaction::GetConnection() {
 	return pooled_connection.GetConnection();
 }
 
+uint64_t MySQLTransaction::GetConnectionId() {
+	return pooled_connection.Id();
+}
+
 unique_ptr<MySQLResult> MySQLTransaction::Query(const string &query) {
 	EnsureConnection();
 

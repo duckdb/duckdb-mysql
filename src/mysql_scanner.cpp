@@ -221,7 +221,6 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
 		MySQLConnection &conn = transaction.GetConnection();
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
-		idx_t transaction_id = reinterpret_cast<idx_t>(&transaction);
 		if (stmt->Fields().size() > 0) {
 			for (auto &field : stmt->Fields()) {
 				names.push_back(field.name);
@@ -235,7 +234,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
 		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()),
-		                                     user_streaming, std::move(stmt), transaction_id);
+		                                     user_streaming, std::move(stmt), transaction.GetConnectionId());
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -266,9 +265,8 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 			result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 		}
 		auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
-		idx_t current_transaction_id = reinterpret_cast<idx_t>(&transaction);
 		MySQLConnection &conn = transaction.GetConnection();
-		if (bdata.prepared_transaction_id == current_transaction_id) {
+		if (transaction.GetConnectionId() == bdata.prepare_connection_id) {
 			gstate.result = conn.Query(*bdata.prepared_stmt, bdata.params, result_streaming);
 		} else {
 			gstate.result = conn.Query(bdata.query, bdata.params, result_streaming);

@@ -30,6 +30,7 @@ public:
 	void Rollback();
 
 	MySQLConnection &GetConnection();
+	uint64_t GetConnectionId();
 	//! Whether a transaction has been started on the remote server - if so, queries must be
 	//! executed through the transaction's connection so they see uncommitted changes
 	bool HasStartedTransaction() const {
