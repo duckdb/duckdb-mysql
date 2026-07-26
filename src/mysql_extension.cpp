@@ -133,6 +133,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 	MySQLQueryFunction query_function;
 	loader.RegisterFunction(query_function);
 
+	MySQLPinConnectionFunction pin_connection_function;
+	loader.RegisterFunction(pin_connection_function);
+
+	MySQLClosePinnedConnectionFunction close_pinned_connection_function;
+	loader.RegisterFunction(close_pinned_connection_function);
+
 	SecretType secret_type;
 	secret_type.name = "mysql";
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;

@@ -1,6 +1,8 @@
 #include "duckdb.hpp"
 #include "duckdb/main/client_context.hpp"
 
+#include "dbconnector/defer.hpp"
+
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
@@ -21,12 +23,25 @@ namespace duckdb {
 struct MySQLLocalState : public LocalTableFunctionState {};
 
 struct MySQLGlobalState : public GlobalTableFunctionState {
-	explicit MySQLGlobalState() {
+	explicit MySQLGlobalState(MySQLPooledConnection pinned_connection_p)
+	    : pinned_connection(std::move(pinned_connection_p)) {
 	}
 
 	explicit MySQLGlobalState(unique_ptr<MySQLResult> result_p) : result(std::move(result_p)) {
 	}
 
+	~MySQLGlobalState() {
+		if (!pinned_connection) {
+			return;
+		}
+		try {
+			pinned_connection.PinBack();
+		} catch (...) {
+			// suppress
+		}
+	}
+
+	MySQLPooledConnection pinned_connection;
 	unique_ptr<MySQLResult> result;
 
 	idx_t MaxThreads() const override {
@@ -44,8 +59,6 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	auto &bind_data = input.bind_data->CastNoConst<MySQLBindData>();
 	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
 	auto &con = transaction.GetConnection();
-
-	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
 
 	string select;
 	select += "SELECT ";
@@ -173,24 +186,21 @@ MySQLScanFunction::MySQLScanFunction()
 //===--------------------------------------------------------------------===//
 // MySQL Query
 //===--------------------------------------------------------------------===//
-static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
-                                               vector<LogicalType> &return_types, vector<string> &names) {
-	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
-		throw BinderException("Parameters to mysql_query cannot be NULL");
-	}
 
-	auto db_name = input.inputs[0].GetValue<string>();
+static MySQLCatalog &GetCatalogByName(ClientContext &context, const std::string &name) {
 	auto &db_manager = DatabaseManager::Get(context);
-	auto db = db_manager.GetDatabase(context, Identifier(db_name));
+	auto db = db_manager.GetDatabase(context, Identifier(name));
 	if (!db) {
-		throw BinderException("Failed to find attached database \"%s\" referenced in mysql_query", db_name);
+		throw BinderException("Failed to find attached database \"%s\"", name);
 	}
 	auto &catalog = db->GetCatalog();
 	if (catalog.GetCatalogType() != "mysql") {
-		throw BinderException("Attached database \"%s\" does not refer to a MySQL database", db_name);
+		throw BinderException("Attached database \"%s\" does not refer to a MySQL database", name);
 	}
-	auto sql = input.inputs[1].GetValue<string>();
+	return catalog.Cast<MySQLCatalog>();
+}
 
+static vector<Value> ExtractParams(TableFunctionBindInput &input) {
 	vector<Value> params;
 	auto params_it = input.named_parameters.find("params");
 	if (params_it != input.named_parameters.end()) {
@@ -203,7 +213,10 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		}
 		params = StructValue::GetChildren(struct_val);
 	}
+	return params;
+}
 
+static MySQLResultStreamingUser ExtractUserStreaming(TableFunctionBindInput &input) {
 	auto user_streaming = MySQLResultStreamingUser::UNINITIALIZED;
 	auto streaming_it = input.named_parameters.find("stream_results");
 	if (streaming_it != input.named_parameters.end()) {
@@ -216,10 +229,63 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			}
 		}
 	}
+	return user_streaming;
+}
+
+uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
+	uint64_t pinned_connection_id = 0;
+	auto conn_it = input.named_parameters.find("connection");
+	if (conn_it != input.named_parameters.end()) {
+		Value &conn_val = conn_it->second;
+		if (conn_val.IsNull()) {
+			throw BinderException("Specified connection must be not null");
+		}
+		pinned_connection_id = UBigIntValue::Get(conn_val);
+	}
+	return pinned_connection_id;
+}
+
+static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
+                                               vector<LogicalType> &return_types, vector<string> &names) {
+	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
+		throw BinderException("Parameters to mysql_query cannot be NULL");
+	}
+
+	string db_name = input.inputs[0].GetValue<string>();
+	MySQLCatalog &catalog = GetCatalogByName(context, db_name);
+	auto sql = input.inputs[1].GetValue<string>();
+	vector<Value> params = ExtractParams(input);
+	MySQLResultStreamingUser user_streaming = ExtractUserStreaming(input);
+	uint64_t pinned_connection_id = ExtractPinnedConnId(input);
 
 	try {
-		MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
-		MySQLConnection &conn = transaction.GetConnection();
+		optional_ptr<MySQLConnection> conn_ptr = nullptr;
+		MySQLPooledConnection pinned_connection;
+		uint64_t prepare_connection_id = 0;
+		if (pinned_connection_id > 0) {
+			pinned_connection = catalog.GetConnectionPool().UnpinConnection(pinned_connection_id);
+			MySQLConnection &conn = pinned_connection.GetConnection();
+			conn_ptr = &conn;
+			prepare_connection_id = pinned_connection.Id();
+		} else {
+			MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
+			MySQLConnection &conn = transaction.GetConnection();
+			conn_ptr = &conn;
+			prepare_connection_id = transaction.GetConnectionId();
+		}
+
+		auto deferred_pin = dbconnector::Defer([&pinned_connection, &catalog] {
+			if (!pinned_connection) {
+				return;
+			}
+			try {
+				catalog.GetConnectionPool().PinConnection(std::move(pinned_connection));
+			} catch (...) {
+				// suppress
+			}
+		});
+
+		MySQLConnection &conn = *conn_ptr;
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
 		if (stmt->Fields().size() > 0) {
 			for (auto &field : stmt->Fields()) {
@@ -230,11 +296,14 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			return_types.emplace_back(LogicalType::BOOLEAN);
 			names.emplace_back("Success");
 		}
+
 		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
+
 		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()),
-		                                     user_streaming, std::move(stmt), transaction.GetConnectionId());
+		                                     user_streaming, std::move(stmt), prepare_connection_id,
+		                                     pinned_connection_id);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -243,30 +312,51 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
                                                                       TableFunctionInitInput &input) {
-	return make_uniq<MySQLGlobalState>();
+	auto &bdata = input.bind_data->CastNoConst<MySQLQueryBindData>();
+	MySQLPooledConnection pinned_connection;
+	if (bdata.pinned_connection_id > 0) {
+		pinned_connection = bdata.catalog.GetConnectionPool().UnpinConnection(bdata.pinned_connection_id);
+	}
+	return make_uniq<MySQLGlobalState>(std::move(pinned_connection));
+}
+
+static MySQLResultStreaming ResolveStreaming(MySQLQueryBindData &bdata) {
+	auto result_streaming = MySQLResultStreaming::UNINITIALIZED;
+	if (bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
+	    bdata.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
+		return MySQLResultStreaming::ALLOW_STREAMING;
+	}
+	if (bdata.optimizer_streaming != MySQLResultStreaming::ALLOW_STREAMING &&
+	    bdata.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
+		throw BinderException(
+		    "Query result streaming requested in the 'mysql_query' function parameter cannot be performed due to "
+		    "multiple MySQL scans in the query."
+		    "If streaming is required, consider using a separate attached catalog for each 'mysql_query' call - "
+		    "will run on a separate connection without transcactional guarantees");
+	}
+	return MySQLResultStreaming::FORCE_MATERIALIZATION;
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
-		auto result_streaming = MySQLResultStreaming::UNINITIALIZED;
-		if (bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
-		    bdata.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
-			result_streaming = MySQLResultStreaming::ALLOW_STREAMING;
-		} else if (bdata.optimizer_streaming != MySQLResultStreaming::ALLOW_STREAMING &&
-		           bdata.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
-			throw BinderException(
-			    "Query result streaming requested in the 'mysql_query' function parameter cannot be performed due to "
-			    "multiple MySQL scans in the query."
-			    "If streaming is required, consider using a separate attached catalog for each 'mysql_query' call - "
-			    "will run on a separate connection without transcactional guarantees");
+		MySQLResultStreaming result_streaming = ResolveStreaming(bdata);
+		optional_ptr<MySQLConnection> conn_ptr = nullptr;
+		uint64_t current_connection_id = 0;
+		if (gstate.pinned_connection) {
+			MySQLConnection &conn = gstate.pinned_connection.GetConnection();
+			conn_ptr = &conn;
+			current_connection_id = gstate.pinned_connection.Id();
 		} else {
-			result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+			auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
+			MySQLConnection &conn = transaction.GetConnection();
+			conn_ptr = &conn;
+			current_connection_id = transaction.GetConnectionId();
 		}
-		auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
-		MySQLConnection &conn = transaction.GetConnection();
-		if (transaction.GetConnectionId() == bdata.prepare_connection_id) {
+
+		MySQLConnection &conn = *conn_ptr;
+		if (current_connection_id == bdata.prepare_connection_id) {
 			gstate.result = conn.Query(*bdata.prepared_stmt, bdata.params, result_streaming);
 		} else {
 			gstate.result = conn.Query(bdata.query, bdata.params, result_streaming);
@@ -282,6 +372,7 @@ MySQLQueryFunction::MySQLQueryFunction()
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
+	named_parameters["connection"] = LogicalType::UBIGINT;
 }
 
 static void MySQLExecuteScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
@@ -302,6 +393,63 @@ MySQLExecuteFunction::MySQLExecuteFunction()
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
+	named_parameters["connection"] = LogicalType::UBIGINT;
+}
+
+static void MySQLPinConnection(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnifiedVectorFormat catalog_name_data;
+	args.data[0].ToUnifiedFormat(catalog_name_data);
+	if (!catalog_name_data.validity.RowIsValid(0)) {
+		throw InvalidInputException("Specified attached database name must be not null");
+	}
+
+	auto catalog_name_strt = UnifiedVectorFormat::GetData<string_t>(catalog_name_data)[0];
+	string catalog_name(catalog_name_strt.GetData(), catalog_name_strt.GetSize());
+
+	auto &catalog = GetCatalogByName(state.GetContext(), catalog_name);
+	auto &pool = catalog.GetConnectionPool();
+
+	auto conn = pool.ForceAcquire();
+	uint64_t conn_id = pool.PinConnection(std::move(conn));
+
+	auto result_data = FlatVector::GetDataMutable<uint64_t>(result);
+	result_data[0] = conn_id;
+}
+
+MySQLPinConnectionFunction::MySQLPinConnectionFunction()
+    : ScalarFunction("mysql_pin_connection", {LogicalType::VARCHAR}, LogicalType::UBIGINT, MySQLPinConnection) {
+	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	SetStability(FunctionStability::VOLATILE);
+}
+
+static void MySQLClosePinnedConnection(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnifiedVectorFormat catalog_name_data;
+	args.data[0].ToUnifiedFormat(catalog_name_data);
+	if (!catalog_name_data.validity.RowIsValid(0)) {
+		throw InvalidInputException("Specified catalog name must be not null");
+	}
+	auto catalog_name_strt = UnifiedVectorFormat::GetData<string_t>(catalog_name_data)[0];
+	string catalog_name(catalog_name_strt.GetData(), catalog_name_strt.GetSize());
+
+	UnifiedVectorFormat conn_id_data;
+	args.data[1].ToUnifiedFormat(conn_id_data);
+	if (!conn_id_data.validity.RowIsValid(0)) {
+		throw InvalidInputException("Specified connection ID must be not null");
+	}
+	auto conn_id = UnifiedVectorFormat::GetData<uint64_t>(conn_id_data)[0];
+
+	auto &catalog = GetCatalogByName(state.GetContext(), catalog_name);
+	{ auto conn = catalog.GetConnectionPool().UnpinConnection(conn_id); }
+
+	auto &result_validity = FlatVector::ValidityMutable(result);
+	result_validity.SetInvalid(0);
+}
+
+MySQLClosePinnedConnectionFunction::MySQLClosePinnedConnectionFunction()
+    : ScalarFunction("mysql_close_pinned_connection", {LogicalType::VARCHAR, LogicalType::UBIGINT},
+                     LogicalType::BOOLEAN, MySQLClosePinnedConnection) {
+	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	SetStability(FunctionStability::VOLATILE);
 }
 
 } // namespace duckdb
