@@ -53,10 +53,11 @@ static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const My
 
 MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
                          const string &connection_string_p, unsigned long connection_id_p,
-                         MySQLResultStreaming streaming_p, idx_t affected_rows_p, vector<MySQLField> fields_p)
+                         MySQLResultStreaming streaming_p, idx_t affected_rows_p, vector<MySQLField> fields_p,
+                         MySQLResultStatementLifetime stmt_lifetime_p)
     : query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
       connection_string(connection_string_p), connection_id(connection_id_p), streaming(streaming_p),
-      affected_rows(affected_rows_p), fields(std::move(fields_p)) {
+      affected_rows(affected_rows_p), fields(std::move(fields_p)), stmt_lifetime(stmt_lifetime_p) {
 	if (affected_rows != static_cast<idx_t>(-1)) {
 		this->exhausted = true;
 		return;
@@ -86,6 +87,9 @@ MySQLResult::~MySQLResult() {
 	bool stream_active = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	if (stream_active && !exhausted) {
 		TryCancelQuery();
+	}
+	if (stmt_lifetime == MySQLResultStatementLifetime::BORROWED) {
+		stmt.release();
 	}
 }
 

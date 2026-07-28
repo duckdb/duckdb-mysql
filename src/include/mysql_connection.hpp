@@ -68,7 +68,8 @@ public:
 	void Execute(const string &query, const vector<Value> &params);
 	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
 	unique_ptr<MySQLResult> Query(const string &query, const vector<Value> &params, MySQLResultStreaming streaming);
-	unique_ptr<MySQLResult> Query(MySQLStatement &stmt, const vector<Value> &params, MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> QueryStmt(MySQLStatement &stmt, const vector<Value> &params,
+	                                  MySQLResultStreaming streaming);
 	unique_ptr<MySQLStatement> Prepare(const string &query);
 
 	vector<IndexInfo> GetIndexInfo(const string &table_name);

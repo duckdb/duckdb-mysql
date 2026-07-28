@@ -147,16 +147,18 @@ unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, const vector
 	return QueryInternal(query, params, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::Query(MySQLStatement &stmt, const vector<Value> &params,
-                                               MySQLResultStreaming streaming) {
+unique_ptr<MySQLResult> MySQLConnection::QueryStmt(MySQLStatement &stmt, const vector<Value> &params,
+                                                   MySQLResultStreaming streaming) {
 
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	bool prepared = true;
 	idx_t affected_rows = MySQLExecute(stmt.get(), stmt.Query(), params, result_streaming, prepared);
-	auto stmt_ptr = stmt.release();
+	MYSQL_STMT *stmt_ptr_bare = stmt.get();
+	// owning pointer here only because it is required by result interface, stmt won't be destroyed
+	MySQLStatementPtr stmt_ptr(stmt_ptr_bare, MySQLStatementDelete);
 	unsigned long connection_id = connection->GetID();
 	return make_uniq<MySQLResult>(stmt.Query(), std::move(stmt_ptr), type_config, connection_string, connection_id,
-	                              streaming, affected_rows, stmt.FieldsCopy());
+	                              streaming, affected_rows, stmt.FieldsCopy(), MySQLResultStatementLifetime::BORROWED);
 }
 
 unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {

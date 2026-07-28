@@ -38,10 +38,10 @@ SELECT mysql_close_pinned_connection('s', 0)
 not found in the specified attached database
 
 statement ok
-SELECT mysql_close_pinned_connection('s', $conn)
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
 
 statement error
-SELECT mysql_close_pinned_connection('s', $conn)
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
 ----
 not found in the specified attached database
 
@@ -52,17 +52,17 @@ statement ok
 SET VARIABLE conn = mysql_pin_connection('s')
 
 statement ok
-CALL mysql_execute('s', 'SET @@session.time_zone = "+00:42"', connection=$conn)
+CALL mysql_execute('s', 'SET @@session.time_zone = "+00:42"', connection=getvariable('conn'))
 
 query I
-FROM mysql_query('s', 'SELECT TIMEDIFF(NOW(), UTC_TIMESTAMP);', connection=$conn)
+FROM mysql_query('s', 'SELECT TIMEDIFF(NOW(), UTC_TIMESTAMP);', connection=getvariable('conn'))
 ----
 00:42:00
 
 statement error
-FROM mysql_query('s', 'SELECT 42', connection=$conn)
+FROM mysql_query('s', 'SELECT 42', connection=getvariable('conn'))
 UNION ALL
-FROM mysql_query('s', 'SELECT 43', connection=$conn)
+FROM mysql_query('s', 'SELECT 43', connection=getvariable('conn'))
 ----
 not found in the specified attached database
 
@@ -70,18 +70,18 @@ statement ok
 SET VARIABLE conn2 = mysql_pin_connection('s')
 
 query I
-FROM mysql_query('s', 'SELECT 42', connection=$conn)
+FROM mysql_query('s', 'SELECT 42', connection=getvariable('conn'))
 UNION ALL
-FROM mysql_query('s', 'SELECT 43', connection=$conn2)
+FROM mysql_query('s', 'SELECT 43', connection=getvariable('conn2'))
 ----
 42
 43
 
 statement ok
-SELECT mysql_close_pinned_connection('s', $conn2)
+SELECT mysql_close_pinned_connection('s', getvariable('conn2'))
 
 statement ok
-SELECT mysql_close_pinned_connection('s', $conn)
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
 
 statement ok
 RESET VARIABLE conn1

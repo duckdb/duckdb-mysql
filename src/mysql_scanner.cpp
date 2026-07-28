@@ -1,22 +1,24 @@
-#include "duckdb.hpp"
-#include "duckdb/main/client_context.hpp"
+#include "mysql_scanner.hpp"
 
 #include "dbconnector/defer.hpp"
 
+#include "duckdb.hpp"
+#include "duckdb/common/printer.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/attached_database.hpp"
+#include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/main/query_result.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
-#include "mysql_scanner.hpp"
-#include "mysql_result.hpp"
+
 #include "mysql_connection_pool.hpp"
-#include "storage/mysql_transaction.hpp"
-#include "duckdb/main/query_result.hpp"
-#include "storage/mysql_table_set.hpp"
-#include "storage/mysql_catalog.hpp"
 #include "mysql_filter_pushdown.hpp"
-#include "duckdb/main/database_manager.hpp"
-#include "duckdb/main/attached_database.hpp"
-#include "duckdb/common/printer.hpp"
+#include "mysql_parameter.hpp"
+#include "mysql_result.hpp"
+#include "storage/mysql_catalog.hpp"
+#include "storage/mysql_table_set.hpp"
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 
@@ -42,6 +44,7 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 	}
 
 	MySQLPooledConnection pinned_connection;
+	vector<Value> params;
 	unique_ptr<MySQLResult> result;
 
 	idx_t MaxThreads() const override {
@@ -204,6 +207,10 @@ static vector<Value> ExtractParams(TableFunctionBindInput &input) {
 	vector<Value> params;
 	auto params_it = input.named_parameters.find("params");
 	if (params_it != input.named_parameters.end()) {
+		auto params_handle_it = input.named_parameters.find("params_handle");
+		if (params_handle_it != input.named_parameters.end()) {
+			throw BinderException("Either \"params\" or \"params_handle\" option can be specified, not both");
+		}
 		Value &struct_val = params_it->second;
 		if (struct_val.IsNull()) {
 			throw BinderException("Query parameters cannot be NULL");
@@ -213,7 +220,26 @@ static vector<Value> ExtractParams(TableFunctionBindInput &input) {
 		}
 		params = StructValue::GetChildren(struct_val);
 	}
+
 	return params;
+}
+
+static int64_t ExtractParamsHandle(TableFunctionBindInput &input) {
+	auto params_handle_it = input.named_parameters.find("params_handle");
+	if (params_handle_it != input.named_parameters.end()) {
+		Value &bigint_val = params_handle_it->second;
+		if (bigint_val.IsNull()) {
+			throw BinderException("Query parameters handle cannot be NULL");
+		}
+		int64_t params_handle = BigIntValue::Get(bigint_val);
+		auto params_ptr = MySQLParameterHandles::Remove(params_handle);
+		if (params_ptr.get() == nullptr) {
+			throw BinderException("Parameters not found, ID: %lld", params_handle);
+		}
+		MySQLParameterHandles::Add(std::move(params_ptr));
+		return params_handle;
+	}
+	return 0;
 }
 
 static MySQLResultStreamingUser ExtractUserStreaming(TableFunctionBindInput &input) {
@@ -255,6 +281,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	MySQLCatalog &catalog = GetCatalogByName(context, db_name);
 	auto sql = input.inputs[1].GetValue<string>();
 	vector<Value> params = ExtractParams(input);
+	int64_t params_handle = ExtractParamsHandle(input);
 	MySQLResultStreamingUser user_streaming = ExtractUserStreaming(input);
 	uint64_t pinned_connection_id = ExtractPinnedConnId(input);
 
@@ -301,9 +328,9 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
 
-		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), std::move(stmt->FieldsCopy()),
-		                                     user_streaming, std::move(stmt), prepare_connection_id,
-		                                     pinned_connection_id);
+		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), params_handle,
+		                                     std::move(stmt->FieldsCopy()), user_streaming, std::move(stmt),
+		                                     prepare_connection_id, pinned_connection_id);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -321,7 +348,6 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 }
 
 static MySQLResultStreaming ResolveStreaming(MySQLQueryBindData &bdata) {
-	auto result_streaming = MySQLResultStreaming::UNINITIALIZED;
 	if (bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
 	    bdata.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
 		return MySQLResultStreaming::ALLOW_STREAMING;
@@ -335,6 +361,26 @@ static MySQLResultStreaming ResolveStreaming(MySQLQueryBindData &bdata) {
 		    "will run on a separate connection without transcactional guarantees");
 	}
 	return MySQLResultStreaming::FORCE_MATERIALIZATION;
+}
+
+static const vector<Value> &ResolveParams(const MySQLQueryBindData &bdata, MySQLGlobalState &gstate) {
+	if (bdata.params_handle == 0) {
+		// fixed bind-time params, live until the prepared statement is deallocated
+		return bdata.params;
+	}
+
+	// execute-time params, consumed on execution, must be param-rebind before every execution
+	auto params_ptr = MySQLParameterHandles::Remove(bdata.params_handle);
+	if (params_ptr.get() == nullptr) {
+		throw BinderException("Parameters not found, ID: %lld", bdata.params_handle);
+	}
+	gstate.params.clear();
+	for (Value &par : *params_ptr) {
+		gstate.params.emplace_back(std::move(par));
+	}
+	params_ptr->clear();
+	MySQLParameterHandles::Add(std::move(params_ptr));
+	return gstate.params;
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
@@ -356,10 +402,15 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		}
 
 		MySQLConnection &conn = *conn_ptr;
+		const vector<Value> &params = ResolveParams(bdata, gstate);
 		if (current_connection_id == bdata.prepare_connection_id) {
-			gstate.result = conn.Query(*bdata.prepared_stmt, bdata.params, result_streaming);
+			gstate.result = conn.QueryStmt(*bdata.prepared_stmt, params, result_streaming);
+		} else if (bdata.params_handle != 0) {
+			throw InvalidInputException(
+			    "MySQL connection is no longer available to reuse the prepared statement. Use 'params' option instead "
+			    "of 'params_handle' if re-preparing of the statement is acceptable.");
 		} else {
-			gstate.result = conn.Query(bdata.query, bdata.params, result_streaming);
+			gstate.result = conn.Query(bdata.query, params, result_streaming);
 		}
 	}
 	MySQLScan(context, data, output);
@@ -371,6 +422,7 @@ MySQLQueryFunction::MySQLQueryFunction()
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
+	named_parameters["params_handle"] = LogicalType::BIGINT;
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
 	named_parameters["connection"] = LogicalType::UBIGINT;
 }
@@ -393,6 +445,7 @@ MySQLExecuteFunction::MySQLExecuteFunction()
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
 	named_parameters["params"] = LogicalType::ANY;
+	named_parameters["params_handle"] = LogicalType::BIGINT;
 	named_parameters["connection"] = LogicalType::UBIGINT;
 }
 
@@ -450,6 +503,12 @@ MySQLClosePinnedConnectionFunction::MySQLClosePinnedConnectionFunction()
                      LogicalType::BOOLEAN, MySQLClosePinnedConnection) {
 	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
 	SetStability(FunctionStability::VOLATILE);
+}
+
+MySQLQueryBindData::~MySQLQueryBindData() {
+	if (params_handle > 0) {
+		MySQLParameterHandles::Remove(params_handle);
+	}
 }
 
 } // namespace duckdb

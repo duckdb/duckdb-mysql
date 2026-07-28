@@ -53,13 +53,6 @@ static void ValidatePoolAcquireMode(ClientContext &context, SetScope scope, Valu
 	}
 }
 
-static void ValidateUnitInterval(ClientContext &context, SetScope scope, Value &parameter) {
-	auto val = parameter.GetValue<double>();
-	if (val < 0.0 || val > 1.0) {
-		throw InvalidInputException("Value must be between 0.0 and 1.0, got %f", val);
-	}
-}
-
 unique_ptr<BaseSecret> CreateMySQLSecretFunction(ClientContext &, CreateSecretInput &input) {
 	// apply any overridden settings
 	vector<string> prefix_paths;
@@ -138,6 +131,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	MySQLClosePinnedConnectionFunction close_pinned_connection_function;
 	loader.RegisterFunction(close_pinned_connection_function);
+
+	MySQLCreateParamsFunction create_params_function;
+	loader.RegisterFunction(create_params_function);
+
+	MySQLBindParamsFunction bind_params_function;
+	loader.RegisterFunction(bind_params_function);
 
 	SecretType secret_type;
 	secret_type.name = "mysql";

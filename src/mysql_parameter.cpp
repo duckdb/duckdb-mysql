@@ -1,8 +1,13 @@
 #include "mysql_parameter.hpp"
 
+#include "dbconnector/defer.hpp"
+
 #include "duckdb/common/types/datetime.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/vector/struct_vector.hpp"
+
+#include "mysql_scanner.hpp"
 
 namespace duckdb {
 
@@ -170,6 +175,89 @@ MYSQL_BIND MySQLParameter::CreateBind() {
 	}
 
 	return bind;
+}
+
+int64_t MySQLParameterHandles::Add(unique_ptr<vector<Value>> params) {
+	if (params.get() == nullptr) {
+		throw InvalidInputException("Cannot register invalid empty params");
+	}
+	lock_guard<mutex> guard(lock);
+	int64_t params_id = reinterpret_cast<int64_t>(params.get());
+	auto res = registry.insert(params_id);
+	bool inserted = res.second;
+	if (!inserted) {
+		throw InvalidInputException("Parameters are already registered, ID: %lld" + std::to_string(params_id));
+	}
+	params.release();
+	return params_id;
+}
+
+unique_ptr<vector<Value>> MySQLParameterHandles::Remove(int64_t params_id) {
+	lock_guard<mutex> guard(lock);
+	auto removed_count = registry.erase(params_id);
+	if (removed_count == 0) {
+		return unique_ptr<vector<Value>>(nullptr);
+	}
+	vector<Value> *params_ptr = reinterpret_cast<vector<Value> *>(params_id);
+	return unique_ptr<vector<Value>>(params_ptr);
+}
+
+static void MySQLCreateParams(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto params_ptr = make_uniq<vector<Value>>();
+	auto result_data = FlatVector::GetDataMutable<int64_t>(result);
+	result_data[0] = MySQLParameterHandles::Add(std::move(params_ptr));
+}
+
+MySQLCreateParamsFunction::MySQLCreateParamsFunction()
+    : ScalarFunction("mysql_create_params", vector<LogicalType>(), LogicalType::BIGINT, MySQLCreateParams) {
+	SetStability(FunctionStability::VOLATILE);
+}
+
+static void MySQLBindParams(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnifiedVectorFormat params_id_data;
+	args.data[0].ToUnifiedFormat(params_id_data);
+	if (!params_id_data.validity.RowIsValid(0)) {
+		throw InvalidInputException("Specified query parameters ID must be not null");
+	}
+	auto params_id = UnifiedVectorFormat::GetData<int64_t>(params_id_data)[0];
+
+	Vector &params_vec = args.data[1];
+	LogicalTypeId params_vec_id = params_vec.GetType().id();
+	if (params_vec_id != LogicalTypeId::STRUCT && params_vec_id != LogicalTypeId::TUPLE) {
+		throw InvalidInputException("Specified query parameters must be a STRUCT");
+	}
+	UnifiedVectorFormat params_data;
+	params_vec.ToUnifiedFormat(params_data);
+	if (!params_data.validity.RowIsValid(0)) {
+		throw InvalidInputException("Specified query parameters STRUCT must be not null");
+	}
+	vector<Vector> &field_vectors = StructVector::GetEntries(params_vec);
+	vector<Value> params;
+	for (Vector &field_vec : field_vectors) {
+		Value par = field_vec.GetValue(0);
+		params.emplace_back(std::move(par));
+	}
+
+	auto params_ptr = MySQLParameterHandles::Remove(params_id);
+	if (params_ptr.get() == nullptr) {
+		throw InvalidInputException("Specified parameters handle not found, ID: %lld", params_id);
+	}
+	auto deferred_params = dbconnector::Defer([&params_ptr] { MySQLParameterHandles::Add(std::move(params_ptr)); });
+	params_ptr->clear();
+
+	for (Value &par : params) {
+		params_ptr->emplace_back(std::move(par));
+	}
+
+	auto &result_validity = FlatVector::ValidityMutable(result);
+	result_validity.SetInvalid(0);
+}
+
+MySQLBindParamsFunction::MySQLBindParamsFunction()
+    : ScalarFunction("mysql_bind_params", {LogicalType::BIGINT, LogicalType::ANY}, LogicalType::BOOLEAN,
+                     MySQLBindParams) {
+	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
+	SetStability(FunctionStability::VOLATILE);
 }
 
 } // namespace duckdb

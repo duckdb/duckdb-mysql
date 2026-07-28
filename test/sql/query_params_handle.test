@@ -1,0 +1,145 @@
+# name: test/sql/query_params_handle.test
+# description: Test mysql_query with parameters handle
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s (TYPE mysql);
+
+# create test table
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS params_handle_test');
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE params_handle_test(col1 INTEGER)');
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO params_handle_test VALUES (42), (43), (44)');
+
+# use dedicated connection
+
+statement ok
+SET VARIABLE conn = mysql_pin_connection('s')
+
+statement ok
+SET VARIABLE p1 = mysql_create_params();
+
+statement ok
+PREPARE stmt1 AS FROM mysql_query('s', 'SELECT col1 FROM params_handle_test WHERE col1 IN (?, ?)',
+  params_handle=getvariable('p1'),
+  connection=getvariable('conn'))
+
+statement error
+SELECT mysql_bind_params(NULL, row(42, 43));
+----
+Specified query parameters ID must be not null
+
+statement error
+SELECT mysql_bind_params(getvariable('p1'), NULL::STRUCT);
+----
+Specified query parameters STRUCT must be not null
+
+statement error
+SELECT mysql_bind_params(getvariable('p1'), 42);
+----
+Specified query parameters must be a STRUCT
+
+statement ok
+SELECT mysql_bind_params(getvariable('p1'), row(42, 43));
+
+query I
+EXECUTE stmt1
+----
+42
+43
+
+statement ok
+SELECT mysql_bind_params(getvariable('p1'), row(42, 44));
+
+query I
+EXECUTE stmt1
+----
+42
+44
+
+statement ok
+DEALLOCATE stmt1
+
+statement error
+SELECT mysql_bind_params(getvariable('p1'), row(42, 44));
+----
+Specified parameters handle not found
+
+statement ok
+RESET VARIABLE p1
+
+statement ok
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
+
+# no dedicated connection, same connection on a DuckDB transaction
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+SET VARIABLE p2 = mysql_create_params();
+
+statement ok
+PREPARE stmt2 AS FROM mysql_query('s', 'SELECT col1 FROM params_handle_test WHERE col1 IN (?, ?)',
+  params_handle=getvariable('p2'))
+
+statement ok
+SELECT mysql_bind_params(getvariable('p2'), row(42, 43));
+
+query I
+EXECUTE stmt2
+----
+42
+43
+
+statement ok
+SELECT mysql_bind_params(getvariable('p2'), row(42, 44));
+
+query I
+EXECUTE stmt2
+----
+42
+44
+
+statement ok
+DEALLOCATE stmt2
+
+statement ok
+RESET VARIABLE p2
+
+statement ok
+COMMIT
+
+# different connections
+
+statement ok
+SET VARIABLE p3 = mysql_create_params();
+
+statement ok
+PREPARE stmt3 AS FROM mysql_query('s', 'SELECT col1 FROM params_handle_test WHERE col1 IN (?, ?)',
+  params_handle=getvariable('p3'))
+
+statement ok
+SELECT mysql_bind_params(getvariable('p3'), row(42, 43));
+
+statement error
+EXECUTE stmt3
+----
+MySQL connection is no longer available to reuse the prepared statement
+
+# cleanup
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE params_handle_test');
+
+statement ok
+DETACH s

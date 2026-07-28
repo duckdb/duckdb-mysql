@@ -26,4 +26,14 @@ struct MySQLParameter {
 	MYSQL_BIND CreateBind();
 };
 
+class MySQLParameterHandles {
+	inline static mutex lock;
+	inline static std::set<int64_t> registry;
+
+public:
+	static int64_t Add(unique_ptr<vector<Value>> params);
+
+	static unique_ptr<vector<Value>> Remove(int64_t params_id);
+};
+
 } // namespace duckdb

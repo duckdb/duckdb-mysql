@@ -23,11 +23,14 @@ inline void MySQLResultDelete(MYSQL_RES *res) {
 	mysql_free_result(res);
 }
 
+enum struct MySQLResultStatementLifetime { OWNED, BORROWED };
+
 class MySQLResult {
 public:
 	MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
 	            const string &connection_string_p, unsigned long connection_id_p, MySQLResultStreaming streaming_p,
-	            idx_t affected_rows_p, vector<MySQLField> fields_p = vector<MySQLField>());
+	            idx_t affected_rows_p, vector<MySQLField> fields_p = vector<MySQLField>(),
+	            MySQLResultStatementLifetime stmt_lifetime_p = MySQLResultStatementLifetime::OWNED);
 
 	~MySQLResult();
 
@@ -52,6 +55,8 @@ private:
 	idx_t affected_rows = static_cast<idx_t>(-1);
 
 	vector<MySQLField> fields;
+
+	MySQLResultStatementLifetime stmt_lifetime = MySQLResultStatementLifetime::OWNED;
 
 	DataChunk data_chunk;
 	idx_t row_idx = static_cast<idx_t>(-1);
