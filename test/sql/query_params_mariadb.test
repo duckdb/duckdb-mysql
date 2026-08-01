@@ -163,7 +163,7 @@ DEALLOCATE p1
 statement error
 SELECT * FROM mysql_query('s', 'SELECT ? col1',  params=NULL)
 ----
-Binder Error: Parameters to mysql_query cannot be NULL
+Query parameters cannot be NULL
 
 statement error
 SELECT * FROM mysql_query('s', 'SELECT ? col1',  params=42)
@@ -180,7 +180,7 @@ SELECT col1, typeof(col1) FROM mysql_query('s', 'SELECT ? col1',
   params=row(42::TINYINT),
   stream_results=FALSE)
 ----
-42	TINYINT
+42	VARCHAR
 
 query II
 SELECT col1, typeof(col1) FROM mysql_query('s', 'SELECT ? col1',

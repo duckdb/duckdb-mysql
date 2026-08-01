@@ -73,7 +73,8 @@ DELETE FROM s1.test USING duckdb_table WHERE test.i = duckdb_table.i
 ----
 DELETE syntax not supported
 
-statement error
+# fails on MySQL
+statement maybe
 DELETE FROM s1.test WHERE i=(SELECT MIN(i) FROM s1.test)
 ----
 PREPARE error

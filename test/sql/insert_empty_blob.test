@@ -1,4 +1,4 @@
-# name: test/sql/insert_empy_blob.test
+# name: test/sql/insert_empty_blob.test
 # description: Test inserting empy blob
 # group: [sql]
 
@@ -19,6 +19,6 @@ statement ok
 INSERT INTO empty_blob_tbl VALUES (''::BLOB)
 
 query I
-SELECT * FROM blob_tbl
+SELECT * FROM empty_blob_tbl
 ----
 (empty)

@@ -1,0 +1,32 @@
+# name: test/sql/remote_pushdown/remote_pushdown_edge_cases_mysql.test
+# description: Edge cases found by probing MySQL vs DuckDB - domain errors, alias resolution,
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+# ---- LIKE is pushed with byte-wise semantics and no escape character ----
+# backslash is not an escape character in DuckDB's LIKE; MySQL defaults to backslash
+statement ok
+CREATE OR REPLACE TABLE s.edge_like_tbl AS SELECT 'a\b' AS w UNION ALL SELECT 'ab' UNION ALL SELECT 'AB'
+
+query I
+SELECT COUNT(*) FROM s.edge_like_tbl WHERE w LIKE 'a\%'
+----
+1
+
+query I
+SELECT COUNT(*) FROM s.edge_like_tbl WHERE w NOT LIKE 'a%'
+----
+1
+
+query II
+explain SELECT COUNT(*) FROM s.edge_like_tbl WHERE w LIKE 'a\%'
+----
+physical_plan	<!REGEX>:.*FILTER.*

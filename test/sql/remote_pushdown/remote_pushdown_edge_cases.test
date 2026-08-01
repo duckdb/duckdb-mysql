@@ -108,26 +108,6 @@ explain SELECT lpad(w, 5, 'x') FROM s.edge_str_tbl
 ----
 physical_plan	<!REGEX>:.*PROJECTION.*
 
-# ---- LIKE is pushed with byte-wise semantics and no escape character ----
-# backslash is not an escape character in DuckDB's LIKE; MySQL defaults to backslash
-statement ok
-CREATE OR REPLACE TABLE s.edge_like_tbl AS SELECT 'a\b' AS w UNION ALL SELECT 'ab' UNION ALL SELECT 'AB'
-
-query I
-SELECT COUNT(*) FROM s.edge_like_tbl WHERE w LIKE 'a\%'
-----
-1
-
-query I
-SELECT COUNT(*) FROM s.edge_like_tbl WHERE w NOT LIKE 'a%'
-----
-1
-
-query II
-explain SELECT COUNT(*) FROM s.edge_like_tbl WHERE w LIKE 'a\%'
-----
-physical_plan	<!REGEX>:.*FILTER.*
-
 # ---- select-list aliases in WHERE cannot be pushed (MySQL error 1054) ----
 query I
 SELECT i + 1 AS j FROM s.edge_tbl WHERE j = 5

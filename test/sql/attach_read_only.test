@@ -14,7 +14,8 @@ CREATE TABLE s.read_only_tbl(i INTEGER);
 ----
 read-only mode
 
+# TODO: MySQL vs MariaDB different errors
 statement error
 CALL mysql_execute('s', 'CREATE TABLE test_execute_tbl(i INTEGER)')
 ----
-cannot be run in a read-only connection
+<REGEX>:(Binder Error:.*|Permission Error:.*)

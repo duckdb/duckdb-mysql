@@ -972,8 +972,28 @@ static bool MySQLJoinTreeHasCoalescingJoin(const TableRef &ref) {
 	return MySQLJoinTreeHasCoalescingJoin(*join.left) || MySQLJoinTreeHasCoalescingJoin(*join.right);
 }
 
+static bool ExpressionHasAggregate(const ParsedExpression &expr) {
+	if (expr.GetExpressionClass() == ExpressionClass::FUNCTION) {
+		auto &func = expr.Cast<FunctionExpression>();
+		auto &func_name = func.FunctionName().GetIdentifierName();
+		static const case_insensitive_set_t AGGREGATE_FUNCTIONS = {"count",       "count_star", "sum",     "avg",
+		                                                           "min",         "max",        "stddev",  "stddev_pop",
+		                                                           "stddev_samp", "variance",   "var_pop", "var_samp"};
+		if (AGGREGATE_FUNCTIONS.count(func_name) > 0) {
+			return true;
+		}
+	}
+	bool has_aggregate = false;
+	ParsedExpressionIterator::EnumerateChildren(expr, [&](const ParsedExpression &child) {
+		if (ExpressionHasAggregate(child)) {
+			has_aggregate = true;
+		}
+	});
+	return has_aggregate;
+}
+
 //! Check whether a list of ORDER BY entries can be rewritten for MySQL (see MySQLRewriteOrderEntries)
-static bool MySQLSupportsOrderEntries(const vector<OrderByNode> &orders,
+static bool MySQLSupportsOrderEntries(const MySQLVersion &version, const vector<OrderByNode> &orders,
                                       optional_ptr<const vector<unique_ptr<ParsedExpression>>> select_list) {
 	for (auto &order : orders) {
 		// note: explicit NULLS FIRST / NULLS LAST is supported - the serializer encodes the NULL
@@ -982,6 +1002,24 @@ static bool MySQLSupportsOrderEntries(const vector<OrderByNode> &orders,
 		if (expr.GetExpressionClass() == ExpressionClass::STAR) {
 			// ORDER BY ALL is DuckDB-specific
 			return false;
+		}
+		// SELECT ... COUNT(*) cnt FROM ... GROUP BY ... ORDER BY cnt
+		// MariaDB: reference 'cnt' not supported (reference to group function)
+		if (expr.GetExpressionClass() == ExpressionClass::COLUMN_REF) {
+			auto &colref = expr.Cast<ColumnRefExpression>();
+			if (!colref.IsQualified() && select_list) {
+				auto &colname = colref.GetColumnName().GetIdentifierName();
+				for (auto &select_item : *select_list) {
+					auto &alias = select_item->GetAlias().GetIdentifierName();
+					if (!alias.empty() && StringUtil::CIEquals(alias, colname)) {
+						if (ExpressionHasAggregate(*select_item)) {
+							if (version.server_type == MySQLServerType::MARIADB) {
+								return false;
+							}
+						}
+					}
+				}
+			}
 		}
 		if (expr.GetExpressionClass() == ExpressionClass::CONSTANT) {
 			auto &val = expr.Cast<ConstantExpression>().GetValue();
@@ -1051,13 +1089,13 @@ static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t ma
 	return BigIntValue::Get(bigint_value) <= maximum_value;
 }
 
-static bool MySQLSupportsResultModifiers(const QueryNode &node,
+static bool MySQLSupportsResultModifiers(const MySQLVersion &version, const QueryNode &node,
                                          optional_ptr<const vector<unique_ptr<ParsedExpression>>> select_list) {
 	for (auto &modifier : node.modifiers) {
 		switch (modifier->type) {
 		case ResultModifierType::ORDER_MODIFIER: {
 			auto &order_mod = modifier->Cast<OrderModifier>();
-			if (!MySQLSupportsOrderEntries(order_mod.orders, select_list)) {
+			if (!MySQLSupportsOrderEntries(version, order_mod.orders, select_list)) {
 				return false;
 			}
 			break;
@@ -1128,7 +1166,7 @@ static bool MySQLSupportsCTEMap(const CommonTableExpressionMap &cte_map) {
 	return true;
 }
 
-static bool MySQLSupportsWindow(const WindowExpression &window) {
+static bool MySQLSupportsWindow(const MySQLVersion &version, const WindowExpression &window) {
 	if (window.IgnoreNulls()) {
 		// MySQL has no IGNORE NULLS
 		return false;
@@ -1173,7 +1211,7 @@ static bool MySQLSupportsWindow(const WindowExpression &window) {
 		return false;
 	}
 	// the NULL ordering of the window ORDER BY must be made explicit when serializing
-	if (!MySQLSupportsOrderEntries(window.OrderBy(), nullptr)) {
+	if (!MySQLSupportsOrderEntries(version, window.OrderBy(), nullptr)) {
 		return false;
 	}
 	auto &children = window.GetArguments();
@@ -1189,6 +1227,10 @@ static bool MySQLSupportsWindow(const WindowExpression &window) {
 		// MySQL requires a literal non-negative offset; DuckDB also accepts negative offsets
 		// and arbitrary expressions
 		if (children.size() >= 2 && !MySQLIsIntegerLiteralAtLeast(children[1].GetExpression(), 0)) {
+			return false;
+		}
+		// MariaDB does not support the third arg
+		if (children.size() > 2 && version.server_type == MySQLServerType::MARIADB) {
 			return false;
 		}
 		break;
@@ -1349,7 +1391,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			// window functions require MySQL 8.0 / MariaDB 10.2
 			return false;
 		}
-		return MySQLSupportsWindow(window);
+		return MySQLSupportsWindow(version, window);
 	}
 	case ExpressionClass::COMPARISON: {
 		switch (expr.GetExpressionType()) {
@@ -1483,7 +1525,7 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 				}
 			}
 		}
-		return MySQLSupportsResultModifiers(node, &select.select_list);
+		return MySQLSupportsResultModifiers(version, node, &select.select_list);
 	}
 	case QueryNodeType::SET_OPERATION_NODE: {
 		auto &setop = node.Cast<SetOperationNode>();
@@ -1498,7 +1540,7 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 			}
 		}
 		// there is no select list to resolve positional ORDER BY references against
-		return MySQLSupportsResultModifiers(node, nullptr);
+		return MySQLSupportsResultModifiers(version, node, nullptr);
 	}
 	case QueryNodeType::RECURSIVE_CTE_NODE: {
 		auto &cte = node.Cast<RecursiveCTENode>();
@@ -1510,7 +1552,7 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 			// USING KEY is DuckDB-specific
 			return false;
 		}
-		return MySQLSupportsResultModifiers(node, nullptr);
+		return MySQLSupportsResultModifiers(version, node, nullptr);
 	}
 	case QueryNodeType::UPDATE_QUERY_NODE: {
 		auto &update = node.Cast<UpdateQueryNode>();
@@ -1542,7 +1584,7 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 		if (update.set_info->condition && !SupportsPushdown(*update.set_info->condition)) {
 			return false;
 		}
-		return MySQLSupportsResultModifiers(node, nullptr);
+		return MySQLSupportsResultModifiers(version, node, nullptr);
 	}
 	case QueryNodeType::DELETE_QUERY_NODE: {
 		auto &del = node.Cast<DeleteQueryNode>();
@@ -1568,7 +1610,7 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 		if (del.condition && !SupportsPushdown(*del.condition)) {
 			return false;
 		}
-		return MySQLSupportsResultModifiers(node, nullptr);
+		return MySQLSupportsResultModifiers(version, node, nullptr);
 	}
 	case QueryNodeType::INSERT_QUERY_NODE:
 		return false;

@@ -117,8 +117,6 @@ jobs:
   linux-mariadb:
     name: Linux MariaDB (amd64)
     runs-on: ubuntu-latest
-    # TODO: enable me
-    if: ${{ false }}
     needs: linux
     env:
       GEN: ninja

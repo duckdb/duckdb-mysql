@@ -47,7 +47,21 @@ SELECT i, g, DENSE_RANK() OVER (PARTITION BY g ORDER BY i) AS dr FROM s.win_tbl 
 7	1	3
 8	2	3
 
-# LAG / LEAD
+# LAG / LEAD 2 arg
+query II
+SELECT i, COALESCE(LAG(v, 1) OVER (ORDER BY i), -1) AS prev FROM s.win_tbl ORDER BY i
+----
+0	-1
+1	0
+2	10
+3	20
+4	30
+5	40
+6	50
+7	60
+8	70
+
+# LAG / LEAD 3 arg - pushed down to MySQL only
 query II
 SELECT i, LAG(v, 1, -1) OVER (ORDER BY i) AS prev FROM s.win_tbl ORDER BY i
 ----

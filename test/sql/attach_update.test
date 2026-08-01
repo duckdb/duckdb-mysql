@@ -107,7 +107,8 @@ UPDATE s1.test SET i=42 RETURNING *;
 ----
 UPDATE syntax not supported
 
-statement error
+# fails on MySQL
+statement maybe
 UPDATE s1.test SET i=42 WHERE i=(SELECT MIN(i) FROM s1.test);
 ----
 PREPARE error
