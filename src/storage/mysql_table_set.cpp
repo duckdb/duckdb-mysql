@@ -116,10 +116,14 @@ unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(ClientContext &context, M
 	auto query = GetTableInfoQuery(schema.name.GetIdentifierName(), table_name);
 	auto result = transaction.Query(query);
 	auto table_info = make_uniq<MySQLTableInfo>(schema, table_name);
-	if (!result->IsNull(7)) {
-		table_info->create_info->comment = result->GetString(8);
-	}
+	bool first = true;
 	while (result->Next()) {
+		if (first) {
+			if (!result->IsNull(7)) {
+				table_info->create_info->comment = result->GetString(7);
+			}
+			first = false;
+		}
 		AddColumn(context, *result, *table_info, 0);
 	}
 	return table_info;

@@ -37,6 +37,30 @@ this is a column comment
 statement ok
 CALL mysql_execute('s', 'DROP TABLE comment_test');
 
+# table-only comment
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS table_comment_test');
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE table_comment_test (name TEXT, value INTEGER) COMMENT = ''this is a table comment''');
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+SELECT comment FROM duckdb_tables() WHERE table_name = 'table_comment_test';
+----
+this is a table comment
+
+query I
+SELECT comment FROM duckdb_columns() WHERE table_name = 'table_comment_test' AND column_name = 'name';
+----
+(empty)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE table_comment_test');
+
 statement ok
 USE memory
 
