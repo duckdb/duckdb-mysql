@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_error_recovery.test
+# name: test/sql/connection_pool/connection_pool_error_recovery.test
 # description: Test connection pool behavior after query errors
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

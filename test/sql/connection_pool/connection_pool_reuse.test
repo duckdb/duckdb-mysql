@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_reuse.test
+# name: test/sql/connection_pool/connection_pool_reuse.test
 # description: Test that connections are properly reused and state is reset
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

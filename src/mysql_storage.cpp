@@ -4,7 +4,7 @@
 #include "duckdb/catalog/catalog.hpp"
 
 #include "mysql_storage.hpp"
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_catalog.hpp"
 #include "duckdb/main/settings.hpp"
 #include "duckdb/parser/parsed_data/attach_info.hpp"

@@ -12,7 +12,7 @@
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
 
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_parameter.hpp"
 #include "mysql_result.hpp"

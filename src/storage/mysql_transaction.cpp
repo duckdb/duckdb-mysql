@@ -25,8 +25,6 @@ MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManag
 	if (context.TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
 		time_zone = mysql_session_time_zone.ToString();
 	}
-
-	acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
 }
 
 MySQLTransaction::~MySQLTransaction() = default;
@@ -63,7 +61,10 @@ void MySQLTransaction::EnsureConnection() {
 	if (pooled_connection) {
 		return;
 	}
-	pooled_connection = catalog.GetConnectionPool().Acquire(acquire_mode, time_zone);
+	pooled_connection = catalog.GetConnectionPool().Acquire();
+	if (!time_zone.empty()) {
+		pooled_connection.GetConnection().Execute("SET TIME_ZONE = ?", {Value(time_zone)});
+	}
 }
 
 MySQLConnection &MySQLTransaction::GetConnection() {

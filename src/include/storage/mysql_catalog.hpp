@@ -17,7 +17,7 @@
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
 #include "mysql_connection.hpp"
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
 
 namespace duckdb {
@@ -88,6 +88,7 @@ public:
 	static bool IsMySQLQuery(const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
+	shared_ptr<MySQLConnectionPool> GetConnectionPoolPtr();
 	//! The server version, fetched when the database was attached
 	const MySQLVersion &GetVersion() const {
 		return version;

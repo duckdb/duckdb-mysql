@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_multiple_catalogs.test
+# name: test/sql/connection_pool/connection_pool_multiple_catalogs.test
 # description: Test connection pool with multiple attached MySQL catalogs
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

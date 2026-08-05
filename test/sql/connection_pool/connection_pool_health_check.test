@@ -1,0 +1,58 @@
+# name: test/sql/connection_pool/connection_pool_health_check.test
+# description: Test connection pool health check query
+# group: [connection_pool]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query I
+SELECT current_setting('mysql_pool_health_check_query')
+----
+(empty)
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+statement ok
+DETACH s
+
+statement ok
+SET GLOBAL mysql_pool_health_check_query = 'SELECT_FAIL'
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query I
+SELECT current_setting('mysql_pool_health_check_query')
+----
+SELECT_FAIL
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	0
+
+query I
+FROM mysql_query('s', 'SELECT 42')
+----
+42
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	0
+
+statement ok
+RESET GLOBAL mysql_pool_health_check_query
+
+statement ok
+DETACH s

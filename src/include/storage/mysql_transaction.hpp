@@ -11,7 +11,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "mysql_connection.hpp"
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 
 namespace duckdb {
 class MySQLCatalog;
@@ -51,7 +51,6 @@ private:
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	AccessMode access_mode;
 	string time_zone;
-	dbconnector::pool::AcquireMode acquire_mode = dbconnector::pool::AcquireMode::FORCE;
 };
 
 } // namespace duckdb

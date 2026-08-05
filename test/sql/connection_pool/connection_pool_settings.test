@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_settings.test
+# name: test/sql/connection_pool/connection_pool_settings.test
 # description: Test connection pool configuration settings
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

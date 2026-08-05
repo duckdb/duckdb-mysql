@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_disabled.test
+# name: test/sql/connection_pool/connection_pool_disabled.test
 # description: Test pool_size=0 (pooling disabled) creates fresh connections and cross-validation
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

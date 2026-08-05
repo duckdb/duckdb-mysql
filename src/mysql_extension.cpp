@@ -3,7 +3,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
 
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "mysql_scanner.hpp"
 #include "mysql_storage.hpp"
 #include "mysql_scanner_extension.hpp"
@@ -138,6 +138,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	MySQLBindParamsFunction bind_params_function;
 	loader.RegisterFunction(bind_params_function);
 
+	MySQLConfigurePoolFunction configure_pool_function;
+	loader.RegisterFunction(configure_pool_function);
+
 	SecretType secret_type;
 	secret_type.name = "mysql";
 	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
@@ -180,33 +183,41 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption(
 	    "mysql_pool_size",
 	    "Maximum number of connections per MySQL catalog (default: min(cpu_count, 4 <= cpu_count * 1.5 <= 32))",
-	    LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.max_connections), ValidatePoolSize);
+	    LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.max_connections), ValidatePoolSize, SetScope::GLOBAL);
 	config.AddExtensionOption("mysql_pool_wait_timeout_millis",
 	                          "Timeout in milliseconds when waiting for a connection from the pool (default: 30000)",
-	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.wait_timeout_millis));
+	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.wait_timeout_millis), nullptr,
+	                          SetScope::GLOBAL);
 	config.AddExtensionOption("mysql_pool_connection_max_lifetime_millis",
 	                          "Maximum age in milliseconds of a pooled connection since it was first opened. When "
 	                          "exceeded, the connection is closed instead of being returned to the cache (default: 0 - "
 	                          "disabled)",
-	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.max_lifetime_millis));
+	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.max_lifetime_millis), nullptr,
+	                          SetScope::GLOBAL);
 	config.AddExtensionOption("mysql_pool_connection_idle_timeout_millis",
 	                          "Maximum time in milliseconds a connection can sit idle in the cache before being closed "
 	                          "(default: 60000 - disabled)",
-	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.idle_timeout_millis));
+	                          LogicalType::UBIGINT, Value::UBIGINT(default_pool_config.idle_timeout_millis), nullptr,
+	                          SetScope::GLOBAL);
 	config.AddExtensionOption("mysql_pool_enable_reaper_thread",
 	                          "Whether to run a dedicated thread that periodically scans the pool and removes expired "
 	                          "connections (default: true)",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(default_pool_config.start_reaper_thread));
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(default_pool_config.start_reaper_thread), nullptr,
+	                          SetScope::GLOBAL);
 	config.AddExtensionOption(
 	    "mysql_pool_acquire_mode",
 	    "How to acquire connections from the pool: 'force' (always connect, ignore pool limit), "
 	    "'wait' (block until available), 'try' (fail immediately if unavailable) (default: force)",
 	    LogicalType::VARCHAR, Value(dbconnector::pool::AcquireModeHelpers::ToString(default_pool_config.acquire_mode)),
-	    ValidatePoolAcquireMode);
+	    MySQLConnectionPool::ValidatePoolAcquireMode, SetScope::GLOBAL);
 	config.AddExtensionOption(
 	    "mysql_pool_enable_thread_local_cache",
 	    "Enable thread-local connection caching for faster same-thread connection reuse (default: false)",
-	    LogicalType::BOOLEAN, Value::BOOLEAN(default_pool_config.tl_cache_enabled));
+	    LogicalType::BOOLEAN, Value::BOOLEAN(default_pool_config.tl_cache_enabled), nullptr, SetScope::GLOBAL);
+	config.AddExtensionOption("mysql_pool_health_check_query",
+	                          "The query that is used to check that the connection is healthy. 'mysql_ping()' is used "
+	                          "instead of  query if this parameter is empty (default)",
+	                          LogicalType::VARCHAR, string(), nullptr, SetScope::GLOBAL);
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	OptimizerExtension::Register(config, std::move(mysql_optimizer));

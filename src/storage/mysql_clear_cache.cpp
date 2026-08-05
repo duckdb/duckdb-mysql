@@ -4,7 +4,7 @@
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "mysql_scanner.hpp"
 #include "mysql_types.hpp"
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "storage/mysql_catalog.hpp"
@@ -35,7 +35,7 @@ static void ClearMySQLCaches(ClientContext &context) {
 		}
 		auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
 		mysql_catalog.ClearCache();
-		mysql_catalog.GetConnectionPool().UpdateTypeConfig(new_config);
+		mysql_catalog.GetConnectionPool().SetTypeConfig(new_config);
 	}
 }
 

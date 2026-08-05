@@ -1,0 +1,207 @@
+# name: test/sql/connection_pool/connection_pool_configure.test
+# description: Test connection pool live configuration
+# group: [connection_pool]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET mysql_pool_size = 8
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL)
+
+statement ok
+RESET GLOBAL mysql_pool_size
+
+query IIIIIIIIII
+SELECT catalog_name, max_connections, /*cache_hits,*/ cache_misses, try_failures, thread_local_cache_enabled, max_lifetime_millis, idle_timeout_millis, reaper_thread_running, reaper_thread_period_millis, health_check_query
+FROM mysql_configure_pool()
+ORDER BY catalog_name
+----
+s	8	1	0	FALSE	0	60000	1	30000	(empty)
+s1	8	1	0	FALSE	0	60000	1	30000	(empty)
+
+query II
+SELECT catalog_name, acquire_mode
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	force
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', acquire_mode='wait')
+----
+s
+
+query II
+SELECT catalog_name, acquire_mode
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	wait
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', max_connections=42)
+----
+s
+
+query II
+SELECT catalog_name, max_connections 
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	42
+
+query II
+SELECT catalog_name, max_connections 
+FROM mysql_configure_pool()
+ORDER BY catalog_name
+----
+s	42
+s1	8
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', wait_timeout_millis=42000)
+----
+s
+
+query II
+SELECT catalog_name, wait_timeout_millis
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	42000
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', enable_thread_local_cache=FALSE)
+----
+s
+
+query II
+SELECT catalog_name, thread_local_cache_enabled
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	FALSE
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', max_lifetime_millis=42000)
+----
+s
+
+query II
+SELECT catalog_name, max_lifetime_millis
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	42000
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', idle_timeout_millis=42000)
+----
+s
+
+query II
+SELECT catalog_name, idle_timeout_millis 
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	42000
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', enable_reaper_thread=TRUE)
+----
+s
+
+query II
+SELECT catalog_name, reaper_thread_running
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	TRUE
+
+query I
+SELECT catalog_name
+FROM mysql_configure_pool(catalog_name='s', health_check_query='')
+----
+s
+
+query II
+SELECT catalog_name, health_check_query 
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	(empty)
+
+statement error
+FROM mysql_configure_pool(max_connections=42)
+----
+'catalog_name' argument must be specified
+
+statement error
+FROM mysql_configure_pool(catalog_name='fail', max_connections=42)
+----
+Catalog not found
+
+statement ok
+DETACH s1
+
+statement ok
+DETACH s
+
+# health check query
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query II
+SELECT catalog_name, health_check_query
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	(empty)
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+query I
+FROM mysql_query('s', 'SELECT 42')
+----
+42
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+query II
+SELECT catalog_name, health_check_query
+FROM mysql_configure_pool(catalog_name='s', health_check_query='SELECT_FAIL')
+----
+s	SELECT_FAIL
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+query I
+FROM mysql_query('s', 'SELECT 42')
+----
+42
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	0
+
+statement ok
+DETACH s

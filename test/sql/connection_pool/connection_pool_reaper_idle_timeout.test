@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_reaper_idle_timeout.test
+# name: test/sql/connection_pool/connection_pool_reaper_idle_timeout.test
 # description: Test the reaper thread for connection pool
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

@@ -1,6 +1,6 @@
-# name: test/sql/connection_pool_transactions.test
+# name: test/sql/connection_pool/connection_pool_transactions.test
 # description: Test that connection pool properly handles transaction pinning
-# group: [sql]
+# group: [connection_pool]
 
 require mysql_scanner
 

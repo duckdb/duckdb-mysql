@@ -3,6 +3,7 @@ add_library(
   mysql_catalog.cpp
   mysql_catalog_set.cpp
   mysql_clear_cache.cpp
+  mysql_connection_pool.cpp
   mysql_execute_query.cpp
   mysql_index.cpp
   mysql_index_entry.cpp

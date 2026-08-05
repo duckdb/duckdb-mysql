@@ -1692,4 +1692,8 @@ MySQLConnectionPool &MySQLCatalog::GetConnectionPool() {
 	return *connection_pool;
 }
 
+shared_ptr<MySQLConnectionPool> MySQLCatalog::GetConnectionPoolPtr() {
+	return connection_pool;
+}
+
 } // namespace duckdb

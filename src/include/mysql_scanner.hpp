@@ -13,7 +13,7 @@
 #include "duckdb/catalog/catalog.hpp"
 
 #include "mysql_connection.hpp"
-#include "mysql_connection_pool.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
