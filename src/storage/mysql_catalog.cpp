@@ -57,8 +57,8 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 	default_schema = schemas_to_load.size() > 0 ? schemas_to_load[0] : connection_params.db;
 
 	auto pooled = connection_pool->ForceAcquire();
-	auto server_info = mysql_get_server_info(pooled->GetConn());
-	version = MySQLVersion::Parse(server_info ? server_info : "");
+	auto server_info = pooled->GetServerInfo();
+	version = MySQLVersion::Parse(server_info);
 }
 
 MySQLCatalog::~MySQLCatalog() = default;

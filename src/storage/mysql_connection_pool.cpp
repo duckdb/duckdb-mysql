@@ -33,54 +33,12 @@ std::unique_ptr<MySQLConnection> MySQLConnectionPool::CreateNewConnection() {
 }
 
 bool MySQLConnectionPool::CheckConnectionHealthy(MySQLConnection &conn) {
-	if (!conn.IsOpen()) {
-		return false;
-	}
-
 	string health_check_query = GetHealthCheckQuery();
-	if (!health_check_query.empty()) {
-		try {
-			conn.Query(health_check_query, MySQLResultStreaming::FORCE_MATERIALIZATION);
-			return true;
-		} catch (...) {
-			return false;
-		}
-	}
-
-	MYSQL *mysql_conn = conn.GetConn();
-	if (mysql_ping(mysql_conn) != 0) {
-		unsigned int err = mysql_errno(mysql_conn);
-		(void)err;
-		return false;
-	}
-	return true;
+	return conn.IsConnectionHealthy(health_check_query);
 }
 
 void MySQLConnectionPool::ResetConnection(MySQLConnection &conn) {
-	MYSQL *mysql_conn = conn.GetConn();
-
-#if defined(MARIADB_VERSION_ID) || (defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 50703)
-	if (mysql_reset_connection(mysql_conn) != 0) {
-		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
-	}
-#else
-	if (mysql_change_user(mysql_conn, nullptr, nullptr, nullptr) != 0) {
-		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
-	}
-#endif
-
-	if (mysql_query(mysql_conn, "SET autocommit=1") != 0) {
-		throw IOException("Failed to set autocommit after connection reset: %s", mysql_error(mysql_conn));
-	}
-
-	if (mysql_set_character_set(mysql_conn, "utf8mb4") != 0) {
-		throw IOException("Failed to set character set after connection reset: %s", mysql_error(mysql_conn));
-	}
-
-	const char *charset = mysql_character_set_name(mysql_conn);
-	if (strcmp(charset, "utf8mb4") != 0) {
-		throw IOException("Character set verification failed: expected utf8mb4, got %s", charset);
-	}
+	conn.Reset();
 }
 
 //===--------------------------------------------------------------------===//

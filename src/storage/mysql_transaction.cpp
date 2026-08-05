@@ -30,14 +30,21 @@ MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManag
 MySQLTransaction::~MySQLTransaction() = default;
 
 void MySQLTransaction::Start() {
+	lock_guard<mutex> guard(transaction_state_lock);
 	transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 }
 
 void MySQLTransaction::Commit() {
-	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
-		transaction_state = MySQLTransactionState::TRANSACTION_FINISHED;
+	if (!transactions_enabled) {
+		return;
+	}
+
+	lock_guard<mutex> guard(transaction_state_lock);
+
+	if (transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
 		try {
 			pooled_connection.GetConnection().Execute("COMMIT");
+			transaction_state = MySQLTransactionState::TRANSACTION_FINISHED;
 		} catch (...) {
 			pooled_connection.Invalidate();
 			throw;
@@ -46,10 +53,16 @@ void MySQLTransaction::Commit() {
 }
 
 void MySQLTransaction::Rollback() {
-	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
-		transaction_state = MySQLTransactionState::TRANSACTION_FINISHED;
+	if (!transactions_enabled) {
+		return;
+	}
+
+	lock_guard<mutex> guard(transaction_state_lock);
+
+	if (transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
 		try {
 			pooled_connection.GetConnection().Execute("ROLLBACK");
+			transaction_state = MySQLTransactionState::TRANSACTION_FINISHED;
 		} catch (...) {
 			pooled_connection.Invalidate();
 			throw;
@@ -58,36 +71,53 @@ void MySQLTransaction::Rollback() {
 }
 
 void MySQLTransaction::EnsureConnection() {
+	lock_guard<mutex> guard(pooled_connection_lock);
+
 	if (pooled_connection) {
 		return;
 	}
-	pooled_connection = catalog.GetConnectionPool().Acquire();
-	if (!time_zone.empty()) {
-		pooled_connection.GetConnection().Execute("SET TIME_ZONE = ?", {Value(time_zone)});
-	}
-}
 
-MySQLConnection &MySQLTransaction::GetConnection() {
-	EnsureConnection();
+	auto pc = catalog.GetConnectionPool().Acquire();
 
 	auto ctx = context.lock();
 	if (ctx) {
-		pooled_connection.GetConnection().SetTypeConfig(MySQLTypeConfig(*ctx));
+		pc.GetConnection().SetTypeConfig(MySQLTypeConfig(*ctx));
 	}
 
-	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
-		transaction_state = MySQLTransactionState::TRANSACTION_STARTED;
+	if (!time_zone.empty()) {
+		pc.GetConnection().Execute("SET TIME_ZONE = ?", {Value(time_zone)});
+	}
+
+	this->pooled_connection = std::move(pc);
+}
+
+void MySQLTransaction::StartTransactionInternal() {
+	if (!transactions_enabled) {
+		return;
+	}
+
+	lock_guard<mutex> guard(transaction_state_lock);
+
+	if (transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
 		string query = "START TRANSACTION";
 		if (access_mode == AccessMode::READ_ONLY) {
 			query += " READ ONLY";
 		}
 		try {
 			pooled_connection.GetConnection().Execute(query);
+			transaction_state = MySQLTransactionState::TRANSACTION_STARTED;
 		} catch (...) {
 			pooled_connection.Invalidate();
 			throw;
 		}
 	}
+}
+
+MySQLConnection &MySQLTransaction::GetConnection() {
+	EnsureConnection();
+
+	StartTransactionInternal();
+
 	return pooled_connection.GetConnection();
 }
 
@@ -98,20 +128,8 @@ uint64_t MySQLTransaction::GetConnectionId() {
 unique_ptr<MySQLResult> MySQLTransaction::Query(const string &query) {
 	EnsureConnection();
 
-	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
-		transaction_state = MySQLTransactionState::TRANSACTION_STARTED;
-		string transaction_start = "START TRANSACTION";
-		if (access_mode == AccessMode::READ_ONLY) {
-			transaction_start += " READ ONLY";
-		}
-		try {
-			pooled_connection.GetConnection().Execute(transaction_start);
-			return pooled_connection.GetConnection().Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
-		} catch (...) {
-			pooled_connection.Invalidate();
-			throw;
-		}
-	}
+	StartTransactionInternal();
+
 	try {
 		return pooled_connection.GetConnection().Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	} catch (...) {

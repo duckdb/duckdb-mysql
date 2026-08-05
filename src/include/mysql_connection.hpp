@@ -77,17 +77,6 @@ public:
 	bool IsOpen();
 	void Close();
 
-	shared_ptr<OwnedMySQLConnection> GetConnection() {
-		return connection;
-	}
-
-	MYSQL *GetConn() {
-		if (!connection || !connection->connection) {
-			throw InternalException("MySQLConnection::GetConn - no connection available");
-		}
-		return connection->connection;
-	}
-
 	static void DebugSetPrintQueries(bool print);
 	static bool DebugPrintQueries();
 
@@ -95,11 +84,22 @@ public:
 		type_config = std::move(new_config);
 	}
 
+	bool IsConnectionHealthy(const string &health_check_query);
+	void Reset();
+	string GetServerInfo();
+
 private:
 	unique_ptr<MySQLResult> QueryInternal(const string &query, const vector<Value> &params,
 	                                      MySQLResultStreaming streaming, MySQLConnectorInterface con_interface);
 	idx_t MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
 	                   bool prepared = false);
+
+	MYSQL *GetConn() {
+		if (!connection || !connection->connection) {
+			throw InternalException("MySQLConnection::GetConn - no connection available");
+		}
+		return connection->connection;
+	}
 
 	mutex query_lock;
 	shared_ptr<OwnedMySQLConnection> connection;

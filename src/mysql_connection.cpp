@@ -48,7 +48,7 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const
 		Printer::Print(msg);
 	}
 
-	lock_guard<mutex> l(query_lock);
+	lock_guard<mutex> guard(query_lock);
 
 	if (!stmt) { // basic interface
 		auto con = GetConn();
@@ -128,10 +128,15 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(const string &query, cons
 		return unique_ptr<MySQLResult>(nullptr);
 	}
 
-	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
-	if (!stmt) {
-		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+	auto stmt = MySQLStatementPtr(nullptr, MySQLStatementDelete);
+	{
+		lock_guard<mutex> guard(query_lock);
+		stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
+		if (!stmt) {
+			throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+		}
 	}
+
 	idx_t affected_rows = MySQLExecute(stmt.get(), query, params, result_streaming);
 	unsigned long connection_id = connection->GetID();
 	return make_uniq<MySQLResult>(query, std::move(stmt), type_config, connection_string, connection_id, streaming,
@@ -162,6 +167,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryStmt(MySQLStatement &stmt, const v
 }
 
 unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
+	lock_guard<mutex> guard(query_lock);
 	auto con = GetConn();
 
 	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
@@ -190,7 +196,7 @@ void MySQLConnection::Execute(const string &query, const vector<Value> &params) 
 }
 
 bool MySQLConnection::IsOpen() {
-	return connection.get();
+	return connection.get() != nullptr;
 }
 
 void MySQLConnection::Close() {
@@ -210,6 +216,66 @@ void MySQLConnection::DebugSetPrintQueries(bool print) {
 
 bool MySQLConnection::DebugPrintQueries() {
 	return debug_mysql_print_queries;
+}
+
+bool MySQLConnection::IsConnectionHealthy(const string &health_check_query) {
+	if (!IsOpen()) {
+		return false;
+	}
+
+	if (!health_check_query.empty()) {
+		try {
+			Query(health_check_query, MySQLResultStreaming::FORCE_MATERIALIZATION);
+			return true;
+		} catch (...) {
+			return false;
+		}
+	}
+
+	lock_guard<mutex> guard(query_lock);
+
+	MYSQL *mysql_conn = GetConn();
+	if (mysql_ping(mysql_conn) != 0) {
+		unsigned int err = mysql_errno(mysql_conn);
+		(void)err;
+		return false;
+	}
+	return true;
+}
+
+void MySQLConnection::Reset() {
+	lock_guard<mutex> guard(query_lock);
+
+	MYSQL *mysql_conn = GetConn();
+
+#if defined(MARIADB_VERSION_ID) || (defined(MYSQL_VERSION_ID) && MYSQL_VERSION_ID >= 50703)
+	if (mysql_reset_connection(mysql_conn) != 0) {
+		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
+	}
+#else
+	if (mysql_change_user(mysql_conn, nullptr, nullptr, nullptr) != 0) {
+		throw IOException("Failed to reset MySQL connection: %s", mysql_error(mysql_conn));
+	}
+#endif
+
+	if (mysql_query(mysql_conn, "SET autocommit=1") != 0) {
+		throw IOException("Failed to set autocommit after connection reset: %s", mysql_error(mysql_conn));
+	}
+
+	if (mysql_set_character_set(mysql_conn, "utf8mb4") != 0) {
+		throw IOException("Failed to set character set after connection reset: %s", mysql_error(mysql_conn));
+	}
+
+	const char *charset = mysql_character_set_name(mysql_conn);
+	if (strcmp(charset, "utf8mb4") != 0) {
+		throw IOException("Character set verification failed: expected utf8mb4, got %s", charset);
+	}
+}
+
+string MySQLConnection::GetServerInfo() {
+	auto conn = GetConn();
+	const char *server_info = mysql_get_server_info(conn);
+	return server_info != nullptr ? string(server_info) : string();
 }
 
 } // namespace duckdb

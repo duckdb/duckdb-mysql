@@ -29,7 +29,7 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 	    : pinned_connection(std::move(pinned_connection_p)) {
 	}
 
-	explicit MySQLGlobalState(unique_ptr<MySQLResult> result_p) : result(std::move(result_p)) {
+	explicit MySQLGlobalState(string scan_query_p) : scan_query(std::move(scan_query_p)) {
 	}
 
 	~MySQLGlobalState() {
@@ -45,6 +45,7 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 
 	MySQLPooledConnection pinned_connection;
 	vector<Value> params;
+	string scan_query;
 	unique_ptr<MySQLResult> result;
 
 	idx_t MaxThreads() const override {
@@ -60,8 +61,6 @@ static unique_ptr<FunctionData> MySQLBind(ClientContext &context, TableFunctionB
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->CastNoConst<MySQLBindData>();
-	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
-	auto &con = transaction.GetConnection();
 
 	string select;
 	select += "SELECT ";
@@ -88,10 +87,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		select += " WHERE " + filter_string;
 	}
 
-	auto query_result = con.Query(select, bind_data.optimizer_streaming);
-	auto result = make_uniq<MySQLGlobalState>(std::move(query_result));
-
-	return result;
+	return make_uniq<MySQLGlobalState>(std::move(select));
 }
 
 static unique_ptr<LocalTableFunctionState> MySQLInitLocalState(ExecutionContext &context, TableFunctionInitInput &input,
@@ -101,6 +97,13 @@ static unique_ptr<LocalTableFunctionState> MySQLInitLocalState(ExecutionContext 
 
 static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
+
+	if (!gstate.result) {
+		auto &bdata = data.bind_data->CastNoConst<MySQLBindData>();
+		auto &transaction = MySQLTransaction::Get(context, bdata.table.catalog);
+		auto &con = transaction.GetConnection();
+		gstate.result = con.Query(gstate.scan_query, bdata.optimizer_streaming);
+	}
 
 	while (true) {
 		if (gstate.result->Exhausted()) {
