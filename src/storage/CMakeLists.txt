@@ -18,8 +18,7 @@ add_library(
   mysql_statistics.cpp
   mysql_table_entry.cpp
   mysql_table_set.cpp
-  mysql_transaction.cpp
-  mysql_transaction_manager.cpp)
+  mysql_transaction.cpp)
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:mysql_ext_storage>
     PARENT_SCOPE)
