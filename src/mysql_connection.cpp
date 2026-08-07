@@ -189,6 +189,10 @@ void MySQLConnection::Execute(const string &query) {
 	Execute(query, vector<Value>());
 }
 
+void MySQLConnection::Execute(ClientContext &, const string &query) {
+	Execute(query, vector<Value>());
+}
+
 void MySQLConnection::Execute(const string &query, const vector<Value> &params) {
 	MySQLConnectorInterface con_interface =
 	    params.size() > 0 ? MySQLConnectorInterface::PREPARED_STATEMENT : MySQLConnectorInterface::BASIC;

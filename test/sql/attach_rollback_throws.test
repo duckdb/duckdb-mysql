@@ -1,0 +1,82 @@
+# name: test/sql/attach_rollback_throws.test
+# description: Test that a throw on a server ROLLBACK or COMMIT does not leak a pool connection
+# group: [sql]
+
+require mysql_scanner
+
+require-env POSTGRES_TEST_DATABASE_AVAILABLE
+
+# ROLLBACK throws
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL)
+
+# a connection is opened on ATTACH and kept in the pool
+query II
+SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+# kill MySQL backend of our connection, ROLLBACK is attempted and fails
+statement error
+CALL mysql_execute('s', 'KILL connection_id()')
+----
+connection_id
+
+# connection must have been discarded, as it cannot pass the health check on returning it to the pool
+query II
+SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')
+----
+s	0
+
+statement ok
+DETACH s
+
+# COMMIT throws
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s1 (TYPE MYSQL)
+
+statement ok
+SET VARIABLE s1_cid = (SELECT cid FROM mysql_query('s', 'SELECT connection_id() AS cid'))
+
+statement ok
+USE s
+
+statement ok
+BEGIN TRANSACTION
+
+query I
+FROM mysql_query('s', 'SELECT 42')
+----
+42
+
+statement ok
+CALL mysql_execute('s1', 'KILL ?', params=row(getvariable(s1_cid)))
+
+query II
+SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+statement error
+COMMIT
+----
+COMMIT
+
+query II
+SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')
+----
+s	0
+
+statement ok
+DETACH s1
+
+statement ok
+USE memory
+
+statement ok
+DETACH s
