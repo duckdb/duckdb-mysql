@@ -27,3 +27,18 @@ statement error
 CALL mysql_execute('s', 'CREATE TABLE test_execute_tbl(i INTEGER)')
 ----
 already exists
+
+query I
+FROM mysql_execute('s', 'DROP TABLE IF EXISTS query_dml_test')
+----
+0
+
+query II
+SELECT column_name, column_type FROM (
+  DESCRIBE FROM mysql_execute('s', 'DROP TABLE IF EXISTS query_dml_test')
+)
+----
+rowcount	BIGINT
+
+statement ok
+DETACH s

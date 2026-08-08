@@ -1,5 +1,8 @@
 #include "mysql_result.hpp"
 
+#include <cstdint>
+#include <limits>
+
 #include "duckdb/common/types/datetime.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
@@ -258,6 +261,13 @@ idx_t MySQLResult::AffectedRows() {
 		                        query.c_str());
 	}
 	return affected_rows;
+}
+
+int64_t MySQLResult::AffectedRowsSigned() {
+	if (affected_rows > (std::numeric_limits<int64_t>::max)()) {
+		return -1;
+	}
+	return static_cast<int64_t>(affected_rows);
 }
 
 const vector<MySQLField> &MySQLResult::Fields() {

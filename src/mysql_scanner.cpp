@@ -24,6 +24,8 @@ namespace duckdb {
 
 struct MySQLLocalState : public LocalTableFunctionState {};
 
+enum class MySQLQueryExecState { UNINITIALIZED, EXECUTED, EXHAUSTED };
+
 struct MySQLGlobalState : public GlobalTableFunctionState {
 	explicit MySQLGlobalState(MySQLPooledConnection pinned_connection_p)
 	    : pinned_connection(std::move(pinned_connection_p)) {
@@ -47,6 +49,7 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 	vector<Value> params;
 	string scan_query;
 	unique_ptr<MySQLResult> result;
+	MySQLQueryExecState exec_state = MySQLQueryExecState::UNINITIALIZED;
 
 	idx_t MaxThreads() const override {
 		return 1;
@@ -98,11 +101,12 @@ static unique_ptr<LocalTableFunctionState> MySQLInitLocalState(ExecutionContext 
 static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 
-	if (!gstate.result) {
+	if (gstate.exec_state == MySQLQueryExecState::UNINITIALIZED) {
 		auto &bdata = data.bind_data->CastNoConst<MySQLBindData>();
 		auto &transaction = MySQLTransaction::Get(context, bdata.table.catalog);
 		auto &con = transaction.GetConnection();
 		gstate.result = con.Query(gstate.scan_query, bdata.optimizer_streaming);
+		gstate.exec_state = MySQLQueryExecState::EXECUTED;
 	}
 
 	while (true) {
@@ -323,8 +327,8 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 				return_types.push_back(field.duckdb_type);
 			}
 		} else {
-			return_types.emplace_back(LogicalType::BOOLEAN);
-			names.emplace_back("Success");
+			return_types.emplace_back(LogicalType::BIGINT);
+			names.emplace_back("rowcount");
 		}
 
 		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
@@ -389,7 +393,11 @@ static const vector<Value> &ResolveParams(const MySQLQueryBindData &bdata, MySQL
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
-	if (!gstate.result) {
+	if (gstate.exec_state == MySQLQueryExecState::EXHAUSTED) {
+		output.SetChildCardinality(0);
+		return;
+	}
+	if (gstate.exec_state == MySQLQueryExecState::UNINITIALIZED) {
 		MySQLResultStreaming result_streaming = ResolveStreaming(bdata);
 		optional_ptr<MySQLConnection> conn_ptr = nullptr;
 		uint64_t current_connection_id = 0;
@@ -415,6 +423,14 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		} else {
 			gstate.result = conn.Query(bdata.query, params, result_streaming);
 		}
+		gstate.exec_state = MySQLQueryExecState::EXECUTED;
+	}
+	if (bdata.fields.size() == 0) {
+		int64_t rowcount = gstate.result->AffectedRowsSigned();
+		output.data[0].SetValue(0, Value::BIGINT(rowcount));
+		output.SetChildCardinality(1);
+		gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
+		return;
 	}
 	MySQLScan(context, data, output);
 }

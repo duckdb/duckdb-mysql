@@ -43,6 +43,7 @@ public:
 	bool Next();
 	bool Exhausted();
 	idx_t AffectedRows();
+	int64_t AffectedRowsSigned();
 	const vector<MySQLField> &Fields();
 
 private:

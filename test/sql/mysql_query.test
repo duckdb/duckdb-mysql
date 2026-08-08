@@ -246,9 +246,42 @@ SELECT column_type FROM (DESCRIBE FROM mysql_query('simple', 'SELECT ?', params=
 ----
 VARCHAR
 
+# test DML
+
 query I
-FROM mysql_query('simple', 'UPDATE booleans SET b = TRUE WHERE 1 < 0')
+FROM mysql_query('simple', 'DROP TABLE IF EXISTS query_dml_test')
 ----
+0
+
+query I
+FROM mysql_query('simple', 'CREATE TABLE query_dml_test(col1 INT)')
+----
+0
+
+query I
+FROM mysql_query('simple', 'INSERT INTO query_dml_test values(41), (42)')
+----
+2
+
+query I
+FROM mysql_query('simple', 'UPDATE query_dml_test SET col1 = 43')
+----
+2
+
+query I
+FROM mysql_query('simple', 'UPDATE query_dml_test SET col1 = 44 WHERE 1 < 0')
+----
+0
+
+query II
+SELECT column_name, column_type FROM (
+  DESCRIBE FROM mysql_query('simple', 'UPDATE query_dml_test SET col1 = 44 WHERE 1 < 0')
+)
+----
+rowcount	BIGINT
+
+statement ok
+CALL mysql_query('simple', 'DROP TABLE query_dml_test')
 
 statement ok
 DETACH simple;
