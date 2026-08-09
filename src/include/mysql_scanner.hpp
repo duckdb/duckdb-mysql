@@ -51,6 +51,13 @@ struct MySQLQueryBindData : public FunctionData {
 	      fields(std::move(fields_p)), user_streaming(user_streaming_p), prepared_stmt(std::move(prepared_stmt_p)),
 	      prepare_connection_id(prepare_connection_id_p), pinned_connection_id(pinned_connection_id_p) {
 	}
+
+	MySQLQueryBindData(MySQLCatalog &catalog, string query_p, MySQLResultStreamingUser user_streaming_p,
+	                   uint64_t pinned_connection_id_p)
+	    : catalog(catalog), query(std::move(query_p)), user_streaming(user_streaming_p),
+	      pinned_connection_id(pinned_connection_id_p) {
+	}
+
 	~MySQLQueryBindData();
 
 	MySQLCatalog &catalog;
@@ -62,8 +69,8 @@ struct MySQLQueryBindData : public FunctionData {
 	MySQLResultStreaming optimizer_streaming = MySQLResultStreaming::UNINITIALIZED;
 
 	unique_ptr<MySQLStatement> prepared_stmt;
-	uint64_t prepare_connection_id;
-	uint64_t pinned_connection_id;
+	uint64_t prepare_connection_id = 0;
+	uint64_t pinned_connection_id = 0;
 
 public:
 	unique_ptr<FunctionData> Copy() const override {

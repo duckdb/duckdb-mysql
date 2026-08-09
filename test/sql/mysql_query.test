@@ -283,5 +283,60 @@ rowcount	BIGINT
 statement ok
 CALL mysql_query('simple', 'DROP TABLE query_dml_test')
 
+# non-preparable statement
+
+statement error
+CALL mysql_query('simple', 'PREPARE p1 FROM ''SELECT 42''')
+----
+Failed to prepare
+
+statement error
+CALL mysql_query('simple', 'PREPARE p1 FROM ''SELECT 42''', prepare=FALSE, params=row(42))
+----
+query parameters cannot be used with 'prepare=FALSE'
+
+statement error
+CALL mysql_query('simple', 'PREPARE p1 FROM ''SELECT 42''', prepare=FALSE, stream_results=TRUE)
+----
+Query result streaming cannot be used along with 'prepare=FALSE' option
+
+# use the same connection
+
+statement ok
+BEGIN TRANSACTION
+
+statement ok
+CALL mysql_query('simple', 'PREPARE p1 FROM ''SELECT 42''', prepare=FALSE)
+
+query I
+FROM mysql_query('simple', 'EXECUTE p1', prepare=FALSE)
+----
+-1
+
+query II
+SELECT column_name, column_type FROM (
+  DESCRIBE FROM mysql_query('simple', 'EXECUTE p1', prepare=FALSE)
+)
+----
+rowcount	BIGINT
+
+query II
+SELECT column_name, column_type FROM (
+  DESCRIBE FROM mysql_execute('simple', 'EXECUTE p1', prepare=FALSE)
+)
+----
+rowcount	BIGINT
+
+statement ok
+CALL mysql_query('simple', 'DEALLOCATE PREPARE p1', prepare=FALSE)
+
+statement error
+FROM mysql_query('simple', 'EXECUTE p1', prepare=FALSE)
+----
+Failed to run query
+
+statement ok
+ROLLBACK
+
 statement ok
 DETACH simple;

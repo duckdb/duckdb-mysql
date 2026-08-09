@@ -278,6 +278,17 @@ uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
 	return pinned_connection_id;
 }
 
+bool ExtractPrepare(TableFunctionBindInput &input) {
+	auto it = input.named_parameters.find("prepare");
+	if (it != input.named_parameters.end()) {
+		Value &bool_val = it->second;
+		if (!bool_val.IsNull()) {
+			return BooleanValue::Get(bool_val);
+		}
+	}
+	return true;
+}
+
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -322,6 +333,15 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		});
 
 		MySQLConnection &conn = *conn_ptr;
+		if (!ExtractPrepare(input)) {
+			if (params.size() > 0 || params_handle != 0) {
+				throw BinderException("query parameters cannot be used with 'prepare=FALSE'");
+			}
+			return_types.emplace_back(LogicalType::BIGINT);
+			names.emplace_back("rowcount");
+			return make_uniq<MySQLQueryBindData>(catalog, sql, user_streaming, pinned_connection_id);
+		}
+
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
 		if (stmt->Fields().size() > 0) {
 			for (auto &field : stmt->Fields()) {
@@ -362,7 +382,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 }
 
 static MySQLResultStreaming ResolveStreaming(MySQLQueryBindData &bdata) {
-	if (bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
+	if (bdata.prepared_stmt && bdata.optimizer_streaming == MySQLResultStreaming::ALLOW_STREAMING &&
 	    bdata.user_streaming != MySQLResultStreamingUser::FORCE_MATERIALIZATION) {
 		return MySQLResultStreaming::ALLOW_STREAMING;
 	}
@@ -373,6 +393,9 @@ static MySQLResultStreaming ResolveStreaming(MySQLQueryBindData &bdata) {
 		    "multiple MySQL scans in the query."
 		    "If streaming is required, consider using a separate attached catalog for each 'mysql_query' call - "
 		    "will run on a separate connection without transcactional guarantees");
+	}
+	if (!bdata.prepared_stmt && bdata.user_streaming == MySQLResultStreamingUser::REQUIRE_STREAMING) {
+		throw BinderException("Query result streaming cannot be used along with 'prepare=FALSE' option");
 	}
 	return MySQLResultStreaming::FORCE_MATERIALIZATION;
 }
@@ -397,13 +420,23 @@ static const vector<Value> &ResolveParams(const MySQLQueryBindData &bdata, MySQL
 	return gstate.params;
 }
 
+static void SetRowCount(DataChunk &output, int64_t count) {
+	Vector &vec = output.data[0];
+	D_ASSERT(vec.GetType() == LogicalType::BIGINT);
+	int64_t *data = FlatVector::GetDataMutable<int64_t>(vec);
+	data[0] = count;
+	output.SetChildCardinality(1);
+}
+
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
+
 	if (gstate.exec_state == MySQLQueryExecState::EXHAUSTED) {
 		output.SetChildCardinality(0);
 		return;
 	}
+
 	if (gstate.exec_state == MySQLQueryExecState::UNINITIALIZED) {
 		MySQLResultStreaming result_streaming = ResolveStreaming(bdata);
 		optional_ptr<MySQLConnection> conn_ptr = nullptr;
@@ -421,6 +454,14 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 
 		MySQLConnection &conn = *conn_ptr;
 		const vector<Value> &params = ResolveParams(bdata, gstate);
+
+		if (!bdata.prepared_stmt) {
+			conn.Execute(bdata.query);
+			SetRowCount(output, -1);
+			gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
+			return;
+		}
+
 		if (current_connection_id == bdata.prepare_connection_id) {
 			gstate.result = conn.QueryStmt(*bdata.prepared_stmt, params, result_streaming);
 		} else if (bdata.params_handle != 0) {
@@ -432,15 +473,13 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		}
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;
 	}
+
 	if (bdata.fields.size() == 0) {
-		Vector &vec = output.data[0];
-		D_ASSERT(vec.GetType() == LogicalType::BIGINT);
-		int64_t *data = FlatVector::GetDataMutable<int64_t>(vec);
-		data[0] = gstate.result->AffectedRowsSigned();
-		output.SetChildCardinality(1);
+		SetRowCount(output, gstate.result->AffectedRowsSigned());
 		gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
 		return;
 	}
+
 	MySQLScan(context, data, output);
 }
 
@@ -453,6 +492,7 @@ MySQLQueryFunction::MySQLQueryFunction()
 	named_parameters["params_handle"] = LogicalType::BIGINT;
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
 	named_parameters["connection"] = LogicalType::UBIGINT;
+	named_parameters["prepare"] = LogicalType::BOOLEAN;
 }
 
 MySQLExecuteFunction::MySQLExecuteFunction()
@@ -463,6 +503,7 @@ MySQLExecuteFunction::MySQLExecuteFunction()
 	named_parameters["params"] = LogicalType::ANY;
 	named_parameters["params_handle"] = LogicalType::BIGINT;
 	named_parameters["connection"] = LogicalType::UBIGINT;
+	named_parameters["prepare"] = LogicalType::BOOLEAN;
 }
 
 static void MySQLPinConnection(DataChunk &args, ExpressionState &state, Vector &result) {
