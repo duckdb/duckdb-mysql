@@ -14,8 +14,12 @@ CREATE TABLE s.read_only_tbl(i INTEGER);
 ----
 read-only mode
 
-# TODO: MySQL vs MariaDB different errors
 statement error
 CALL mysql_execute('s', 'CREATE TABLE test_execute_tbl(i INTEGER)')
 ----
-<REGEX>:(Binder Error:.*|Permission Error:.*)
+<REGEX>:.*(statements that do not produce result sets cannot be run in a read-only connection|Failed to prepare MySQL query).*
+
+statement error
+CALL mysql_query('s', 'CREATE TABLE test_execute_tbl(i INTEGER)')
+----
+<REGEX>:.*(statements that do not produce result sets cannot be run in a read-only connection|Failed to prepare MySQL query).*

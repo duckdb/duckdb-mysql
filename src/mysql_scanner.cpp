@@ -292,6 +292,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	MySQLResultStreamingUser user_streaming = ExtractUserStreaming(input);
 	uint64_t pinned_connection_id = ExtractPinnedConnId(input);
 
+	bool tran_restrict_dml = false;
 	try {
 		optional_ptr<MySQLConnection> conn_ptr = nullptr;
 		MySQLPooledConnection pinned_connection;
@@ -306,6 +307,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			MySQLConnection &conn = transaction.GetConnection();
 			conn_ptr = &conn;
 			prepare_connection_id = transaction.GetConnectionId();
+			tran_restrict_dml = transaction.GetAccessMode() == AccessMode::READ_ONLY;
 		}
 
 		auto deferred_pin = dbconnector::Defer([&pinned_connection, &catalog] {
@@ -326,6 +328,11 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 				names.push_back(field.name);
 				return_types.push_back(field.duckdb_type);
 			}
+		} else if (tran_restrict_dml) {
+			// check is bind-time only, while different transaction can be used exec-time - we are not checking whether
+			// it is writable
+			throw PermissionException(
+			    "statements that do not produce result sets cannot be run in a read-only connection");
 		} else {
 			return_types.emplace_back(LogicalType::BIGINT);
 			names.emplace_back("rowcount");
@@ -426,8 +433,10 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;
 	}
 	if (bdata.fields.size() == 0) {
-		int64_t rowcount = gstate.result->AffectedRowsSigned();
-		output.data[0].SetValue(0, Value::BIGINT(rowcount));
+		Vector &vec = output.data[0];
+		D_ASSERT(vec.GetType() == LogicalType::BIGINT);
+		int64_t *data = FlatVector::GetDataMutable<int64_t>(vec);
+		data[0] = gstate.result->AffectedRowsSigned();
 		output.SetChildCardinality(1);
 		gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
 		return;
@@ -446,20 +455,8 @@ MySQLQueryFunction::MySQLQueryFunction()
 	named_parameters["connection"] = LogicalType::UBIGINT;
 }
 
-static void MySQLExecuteScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
-	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
-	if (!gstate.result) {
-		MySQLTransaction &transaction = MySQLTransaction::Get(context, bdata.catalog);
-		if (transaction.GetAccessMode() == AccessMode::READ_ONLY) {
-			throw PermissionException("mysql_execute cannot be run in a read-only connection");
-		}
-	}
-	return MySQLQueryScan(context, data, output);
-}
-
 MySQLExecuteFunction::MySQLExecuteFunction()
-    : TableFunction("mysql_execute", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLExecuteScan, MySQLQueryBind,
+    : TableFunction("mysql_execute", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLQueryScan, MySQLQueryBind,
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
