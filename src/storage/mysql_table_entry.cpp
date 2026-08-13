@@ -8,6 +8,7 @@
 #include "storage/mysql_transaction.hpp"
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/storage/table_storage_info.hpp"
+#include "mysql_filter_pushdown.hpp"
 #include "mysql_scanner.hpp"
 
 namespace duckdb {
@@ -107,6 +108,9 @@ TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_pt
 
 	auto function = MySQLScanFunction();
 	function.filter_pushdown = GetBoolSetting(context, "mysql_enable_filter_pushdown");
+	if (function.filter_pushdown) {
+		function.pushdown_expression = MySQLFilterPushdown::CanPushExpressionDown;
+	}
 	return function;
 }
 

@@ -18,17 +18,14 @@
 namespace duckdb {
 
 // This is a MySQL-specific variant of dbconnector::table_scan::FilterPushdown.
-// The main difference is the handling of string constants: MySQL string comparisons are
-// collation-dependent (case-insensitive with the default collation) while DuckDB compares
-// bytes. We compare against binary strings (CAST(... AS BINARY)) to match DuckDB's semantics.
 
 static string WriteFilterConstant(const Value &constant) {
 	using namespace dbconnector::query;
 	auto config = QueryWriter::CreateConfig('`', QuoteEscapeStyle::BACKSLASH, "x'", "");
 	auto constant_string = QueryWriter::WriteConstant(config, constant);
-	if (constant.type().id() == LogicalTypeId::VARCHAR) {
-		// force a binary (byte-wise) comparison to match DuckDB's string comparison semantics
-		return "CAST(" + constant_string + " AS BINARY)";
+	if (!constant.IsNull() && constant.type().id() == LogicalTypeId::VARCHAR) {
+		// apply a binary collation to match DuckDB's string comparison semantics
+		return constant_string + " COLLATE \"utf8mb4_bin\"";
 	}
 	return constant_string;
 }
@@ -106,7 +103,7 @@ static string WriteNonFiniteComparison(const string &column_name, ExpressionType
 	return always_true ? column_name + " IS NOT NULL" : "FALSE";
 }
 
-static string TransformComparisonOperator(ExpressionType type) {
+static string GetComparizonOperator(ExpressionType type) {
 	switch (type) {
 	case ExpressionType::COMPARE_EQUAL:
 		return "=";
@@ -120,10 +117,27 @@ static string TransformComparisonOperator(ExpressionType type) {
 		return "<=";
 	case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
 		return ">=";
+	case ExpressionType::COMPARE_DISTINCT_FROM:
+		return "<=>";
+	case ExpressionType::COMPARE_NOT_DISTINCT_FROM:
+		return "<=>";
 	default:
 		// unsupported comparison type
 		return string();
 	}
+}
+
+static string WriteComparison(ExpressionType type, const string &column_name, const string &constant_string) {
+	string operator_string = GetComparizonOperator(type);
+	if (operator_string.empty()) {
+		return string();
+	}
+	string res = StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
+	// "a IS DISTINCT b" is trasformed to "NOT (a <=> b)"
+	if (type == ExpressionType::COMPARE_DISTINCT_FROM) {
+		res = "NOT (" + res + ")";
+	}
+	return res;
 }
 
 static bool IsDirectReference(const Expression &expr) {
@@ -138,8 +152,8 @@ static bool IsDirectReference(const Expression &expr) {
 
 static string TransformFilterExpression(const string &column_name, const Expression &expr);
 
-static string CreateConjunctionExpression(const string &column_name, const vector<unique_ptr<Expression>> &filters,
-                                          const string &op) {
+static string CreateConjunction(const string &column_name, const vector<unique_ptr<Expression>> &filters,
+                                const string &op) {
 	vector<string> filter_entries;
 	for (auto &filter : filters) {
 		auto new_filter = TransformFilterExpression(column_name, *filter);
@@ -154,43 +168,79 @@ static string CreateConjunctionExpression(const string &column_name, const vecto
 	return "(" + StringUtil::Join(filter_entries, " " + op + " ") + ")";
 }
 
-static string TransformFilterExpression(const string &column_name, const Expression &expr) {
-	if (BoundComparisonExpression::IsComparison(expr)) {
-		auto &comparison = expr.Cast<BoundFunctionExpression>();
-		auto comparison_type = comparison.GetExpressionType();
-		auto &left = BoundComparisonExpression::Left(comparison);
-		auto &right = BoundComparisonExpression::Right(comparison);
-		const Value *constant = nullptr;
-		if (IsDirectReference(left) && right.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
-			constant = &right.Cast<BoundConstantExpression>().GetValue();
-		} else if (left.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT && IsDirectReference(right)) {
-			constant = &left.Cast<BoundConstantExpression>().GetValue();
-			comparison_type = FlipComparisonExpression(comparison_type);
-		} else {
-			return string();
-		}
-		auto constant_range = GetConstantRange(*constant);
-		if (constant_range != MySQLConstantRange::FINITE) {
-			// the constant cannot be represented in MySQL - but the column can never contain
-			// a non-finite value either, so the comparison has a known outcome
-			return WriteNonFiniteComparison(column_name, comparison_type, constant_range);
-		}
-		auto operator_string = TransformComparisonOperator(comparison_type);
-		if (operator_string.empty()) {
-			return string();
-		}
-		auto constant_string = WriteFilterConstant(*constant);
-		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
+static string CreateIsNull(const string &column_name, const BoundOperatorExpression &op) {
+	if (op.GetChildren().size() == 1 && IsDirectReference(*op.GetChildren()[0])) {
+		return column_name + " IS NULL";
 	}
+	return string();
+}
 
+static string CreateIsNotNull(const string &column_name, const BoundOperatorExpression &op) {
+	if (op.GetChildren().size() == 1 && IsDirectReference(*op.GetChildren()[0])) {
+		return column_name + " IS NOT NULL";
+	}
+	return string();
+}
+
+static string CreateCompareIn(const string &column_name, const BoundOperatorExpression &op) {
+	if (op.GetChildren().empty() || !IsDirectReference(*op.GetChildren()[0])) {
+		return string();
+	}
+	string in_list;
+	for (idx_t i = 1; i < op.GetChildren().size(); i++) {
+		if (op.GetChildren()[i]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
+			return string();
+		}
+		auto &constant = op.GetChildren()[i]->Cast<BoundConstantExpression>().GetValue();
+		if (GetConstantRange(constant) != MySQLConstantRange::FINITE) {
+			// the column can never contain a non-finite value - drop the element
+			continue;
+		}
+		if (!in_list.empty()) {
+			in_list += ", ";
+		}
+		in_list += WriteFilterConstant(constant);
+	}
+	if (in_list.empty()) {
+		// all elements were non-finite - the filter matches no rows
+		return "FALSE";
+	}
+	return column_name + " IN (" + in_list + ")";
+}
+
+static string CreateComparison(const string &column_name, const Expression &expr) {
+	auto &comparison = expr.Cast<BoundFunctionExpression>();
+	auto comparison_type = comparison.GetExpressionType();
+	auto &left = BoundComparisonExpression::Left(comparison);
+	auto &right = BoundComparisonExpression::Right(comparison);
+	const Value *constant = nullptr;
+	if (IsDirectReference(left) && right.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT) {
+		constant = &right.Cast<BoundConstantExpression>().GetValue();
+	} else if (left.GetExpressionClass() == ExpressionClass::BOUND_CONSTANT && IsDirectReference(right)) {
+		constant = &left.Cast<BoundConstantExpression>().GetValue();
+		comparison_type = FlipComparisonExpression(comparison_type);
+	} else {
+		return string();
+	}
+	auto constant_range = GetConstantRange(*constant);
+	if (constant_range != MySQLConstantRange::FINITE) {
+		// the constant cannot be represented in MySQL - but the column can never contain
+		// a non-finite value either, so the comparison has a known outcome
+		return WriteNonFiniteComparison(column_name, comparison_type, constant_range);
+	}
+	auto constant_string = WriteFilterConstant(*constant);
+	return WriteComparison(comparison_type, column_name, constant_string);
+}
+
+static string TransformFilterExpression(const string &column_name, const Expression &expr) {
 	switch (expr.GetExpressionClass()) {
 	case ExpressionClass::BOUND_CONJUNCTION: {
 		auto &conjunction = expr.Cast<BoundConjunctionExpression>();
 		switch (conjunction.GetExpressionType()) {
 		case ExpressionType::CONJUNCTION_AND:
-			return CreateConjunctionExpression(column_name, conjunction.GetChildren(), "AND");
+			return CreateConjunction(column_name, conjunction.GetChildren(), "AND");
 		case ExpressionType::CONJUNCTION_OR:
-			return CreateConjunctionExpression(column_name, conjunction.GetChildren(), "OR");
+			return CreateConjunction(column_name, conjunction.GetChildren(), "OR");
 		default:
 			return string();
 		}
@@ -199,40 +249,11 @@ static string TransformFilterExpression(const string &column_name, const Express
 		auto &op = expr.Cast<BoundOperatorExpression>();
 		switch (op.GetExpressionType()) {
 		case ExpressionType::OPERATOR_IS_NULL:
-			if (op.GetChildren().size() == 1 && IsDirectReference(*op.GetChildren()[0])) {
-				return column_name + " IS NULL";
-			}
-			return string();
+			return CreateIsNull(column_name, op);
 		case ExpressionType::OPERATOR_IS_NOT_NULL:
-			if (op.GetChildren().size() == 1 && IsDirectReference(*op.GetChildren()[0])) {
-				return column_name + " IS NOT NULL";
-			}
-			return string();
-		case ExpressionType::COMPARE_IN: {
-			if (op.GetChildren().empty() || !IsDirectReference(*op.GetChildren()[0])) {
-				return string();
-			}
-			string in_list;
-			for (idx_t i = 1; i < op.GetChildren().size(); i++) {
-				if (op.GetChildren()[i]->GetExpressionClass() != ExpressionClass::BOUND_CONSTANT) {
-					return string();
-				}
-				auto &constant = op.GetChildren()[i]->Cast<BoundConstantExpression>().GetValue();
-				if (GetConstantRange(constant) != MySQLConstantRange::FINITE) {
-					// the column can never contain a non-finite value - drop the element
-					continue;
-				}
-				if (!in_list.empty()) {
-					in_list += ", ";
-				}
-				in_list += WriteFilterConstant(constant);
-			}
-			if (in_list.empty()) {
-				// all elements were non-finite - the filter matches no rows
-				return "FALSE";
-			}
-			return column_name + " IN (" + in_list + ")";
-		}
+			return CreateIsNotNull(column_name, op);
+		case ExpressionType::COMPARE_IN:
+			return CreateCompareIn(column_name, op);
 		default:
 			return string();
 		}
@@ -250,11 +271,30 @@ static string TransformFilterExpression(const string &column_name, const Express
 		if (func.Function().GetName() == DynamicFilterScalarFun::NAME) {
 			return string();
 		}
-		return string();
+
+		switch (expr.GetExpressionType()) {
+		case ExpressionType::COMPARE_EQUAL:
+		case ExpressionType::COMPARE_NOTEQUAL:
+		case ExpressionType::COMPARE_LESSTHAN:
+		case ExpressionType::COMPARE_GREATERTHAN:
+		case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+		case ExpressionType::COMPARE_DISTINCT_FROM:
+		case ExpressionType::COMPARE_NOT_DISTINCT_FROM: {
+			return CreateComparison(column_name, expr);
+		}
+		default:
+			return string();
+		}
 	}
 	default:
 		return string();
 	}
+}
+
+bool MySQLFilterPushdown::CanPushExpressionDown(ClientContext &, const LogicalGet &, Expression &expr) {
+	string filter = TransformFilterExpression("dummy", expr);
+	return !filter.empty();
 }
 
 string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
