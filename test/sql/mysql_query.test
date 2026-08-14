@@ -338,5 +338,24 @@ Failed to run query
 statement ok
 ROLLBACK
 
+# suppress DML output
+statement ok
+CALL mysql_query('simple', 'DROP TABLE IF EXISTS dml_output_test')
+
+statement ok
+CALL mysql_query('simple', 'CREATE TABLE dml_output_test (col1 INT)')
+
+statement ok
+CALL mysql_query('simple', 'INSERT INTO dml_output_test values(41),(42)')
+
+# unittester ignores StatementReturnType::NOTHING
+query I
+CALL mysql_query('simple', 'UPDATE dml_output_test SET col1 = 43', suppress_dml_output=TRUE)
+----
+2
+
+statement ok
+CALL mysql_query('simple', 'DROP TABLE dml_output_test')
+
 statement ok
 DETACH simple;

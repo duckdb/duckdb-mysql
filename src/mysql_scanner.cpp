@@ -278,15 +278,15 @@ uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
 	return pinned_connection_id;
 }
 
-bool ExtractPrepare(TableFunctionBindInput &input) {
-	auto it = input.named_parameters.find("prepare");
+bool ExtractFlag(TableFunctionBindInput &input, const string &name, bool default_val) {
+	auto it = input.named_parameters.find(Identifier(name));
 	if (it != input.named_parameters.end()) {
 		Value &bool_val = it->second;
 		if (!bool_val.IsNull()) {
 			return BooleanValue::Get(bool_val);
 		}
 	}
-	return true;
+	return default_val;
 }
 
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
@@ -333,7 +333,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		});
 
 		MySQLConnection &conn = *conn_ptr;
-		if (!ExtractPrepare(input)) {
+		if (!ExtractFlag(input, "prepare", true)) {
 			if (params.size() > 0 || params_handle != 0) {
 				throw BinderException("query parameters cannot be used with 'prepare=FALSE'");
 			}
@@ -356,6 +356,9 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		} else {
 			return_types.emplace_back(LogicalType::BIGINT);
 			names.emplace_back("rowcount");
+			if (ExtractFlag(input, "suppress_dml_output", false)) {
+				input.table_function.call_return_type = StatementReturnType::NOTHING;
+			}
 		}
 
 		// the remote result can contain duplicate column names (e.g. "SELECT a.id, b.id ...") -
@@ -493,6 +496,7 @@ MySQLQueryFunction::MySQLQueryFunction()
 	named_parameters["stream_results"] = LogicalType::BOOLEAN;
 	named_parameters["connection"] = LogicalType::UBIGINT;
 	named_parameters["prepare"] = LogicalType::BOOLEAN;
+	named_parameters["suppress_dml_output"] = LogicalType::BOOLEAN;
 }
 
 MySQLExecuteFunction::MySQLExecuteFunction()

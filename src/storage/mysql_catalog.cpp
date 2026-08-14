@@ -566,6 +566,9 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const s
 	vector<unique_ptr<ParsedExpression>> args;
 	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
 	args.push_back(make_uniq<ConstantExpression>(Value(sql)));
+	args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
+	                                               make_uniq<ColumnRefExpression>("suppress_dml_output"),
+	                                               make_uniq<ConstantExpression>(Value::BOOLEAN(true))));
 	auto func_ref = make_uniq<TableFunctionRef>();
 	func_ref->function = make_uniq<FunctionExpression>("mysql_query", std::move(args));
 	return func_ref;
