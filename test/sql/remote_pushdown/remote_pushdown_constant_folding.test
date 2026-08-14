@@ -26,7 +26,7 @@ SELECT COUNT(*) FROM s.cf_tbl WHERE i < sqrt(16)
 query II
 explain SELECT COUNT(*) FROM s.cf_tbl WHERE i < sqrt(16)
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # division is normally vetoed (division by zero: inf vs NULL) - constant operands fold
 query I
@@ -37,7 +37,7 @@ SELECT COUNT(*) FROM s.cf_tbl WHERE i > 8 / 2
 query II
 explain SELECT COUNT(*) FROM s.cf_tbl WHERE i > 8 / 2
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- time-window filters: now()/today() with interval arithmetic fold to plain literals ----
 query I
@@ -48,12 +48,12 @@ SELECT COUNT(*) FROM s.cf_tbl WHERE ts > now()::TIMESTAMP - INTERVAL 100 YEAR
 query II
 explain SELECT COUNT(*) FROM s.cf_tbl WHERE ts > now()::TIMESTAMP - INTERVAL 100 YEAR
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 query II
 explain SELECT COUNT(*) FROM s.cf_tbl WHERE ts::DATE >= (now()::TIMESTAMP - INTERVAL 100 YEAR)::DATE
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # now() itself returns TIMESTAMP WITH TIME ZONE, which cannot be represented in MySQL -
 # the folded constant is vetoed and the query stays local
@@ -109,7 +109,7 @@ SELECT COUNT(*) FROM (SELECT i FROM s.cf_tbl ORDER BY i LIMIT 2 + 3) t
 query II
 explain SELECT i FROM s.cf_tbl ORDER BY i LIMIT 2 + 3
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- aggregates over constants are not folded but remain correct ----
 # count(5) counts rows - the constant binder rejects it, the regular path pushes it
@@ -121,7 +121,7 @@ SELECT COUNT(5) FROM s.cf_tbl
 query II
 explain SELECT COUNT(5) FROM s.cf_tbl
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- the folded value keeps DuckDB's semantics, not MySQL's ----
 # MySQL's CAST would truncate '7.6' to 7; DuckDB rounds to 8

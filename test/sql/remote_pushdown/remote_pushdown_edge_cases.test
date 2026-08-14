@@ -199,7 +199,7 @@ SELECT COUNT(*) FROM s.edge_tbl WHERE TIMESTAMP '2000-01-01' < TIMESTAMP 'infini
 query II
 explain SELECT COUNT(*) FROM s.edge_tbl WHERE TIMESTAMP '2000-01-01' < TIMESTAMP 'infinity'
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # comparisons of a column against an infinite literal cannot be folded and stay local
 statement ok
@@ -224,7 +224,7 @@ physical_plan	<REGEX>:.*Mysql Scan.*
 query II
 explain SELECT COUNT(*) FROM s.edge_tbl WHERE TIMESTAMP '2000-01-01' < TIMESTAMP '2001-01-01'
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- casts of malformed literals: MySQL returns 0 / NULL where DuckDB errors ----
 statement error
@@ -308,7 +308,7 @@ SELECT COUNT(*) FROM s.edge_tbl WHERE CAST('1e2' AS BIGINT) = 100
 query II
 explain SELECT COUNT(*) FROM s.edge_tbl WHERE CAST('1e2' AS BIGINT) = 100
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # DuckDB rounds '7.6' to 8; MySQL would truncate to 7
 query I
@@ -319,7 +319,7 @@ SELECT COUNT(*) FROM s.edge_tbl WHERE i > CAST('7.6' AS BIGINT)
 query II
 explain SELECT COUNT(*) FROM s.edge_tbl WHERE i > CAST('7.6' AS BIGINT)
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # DuckDB ignores the time zone offset; MySQL would convert to the session time zone
 query I
@@ -332,7 +332,7 @@ query II
 explain SELECT COUNT(*) FROM s.edge_tbl
     WHERE CAST('2020-01-01 12:00:00+02' AS TIMESTAMP) = TIMESTAMP '2020-01-01 12:00:00'
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- HAVING without GROUP BY: MySQL filters rows resolving the select list, DuckDB
 # ---- treats the query as an aggregation (binder error for bare columns)
@@ -355,7 +355,7 @@ physical_plan	<REGEX>:.*Mysql Scan.*
 query II
 explain SELECT i % 2 AS g, sum(i) FROM s.edge_tbl GROUP BY g HAVING sum(i) > 5
 ----
-physical_plan	<!REGEX>:.*MYSQL_SCAN.*
+physical_plan	<!REGEX>:.*Mysql Scan.*
 
 # ---- ORDER BY with a non-integer literal is a binder error in DuckDB; MySQL ignores it ----
 statement error

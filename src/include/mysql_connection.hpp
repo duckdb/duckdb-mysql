@@ -49,6 +49,11 @@ struct OwnedMySQLConnection {
 	MYSQL *connection;
 };
 
+struct MySQLConnectionInitOptions {
+	MySQLTypeConfig type_config;
+	string time_zone;
+};
+
 class MySQLConnection {
 public:
 	explicit MySQLConnection(shared_ptr<OwnedMySQLConnection> connection, MySQLTypeConfig type_config_p,
@@ -64,10 +69,12 @@ public:
 public:
 	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string,
 	                            const string &attach_path);
+	void Initialize(const MySQLConnectionInitOptions &options);
 	void Execute(const string &query);
 	void Execute(ClientContext &, const string &query);
 	void Execute(const string &query, const vector<Value> &params);
-	unique_ptr<MySQLResult> Query(const string &query, MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> Query(const string &query,
+	                              MySQLResultStreaming streaming = MySQLResultStreaming::FORCE_MATERIALIZATION);
 	unique_ptr<MySQLResult> Query(const string &query, const vector<Value> &params, MySQLResultStreaming streaming);
 	unique_ptr<MySQLResult> QueryStmt(MySQLStatement &stmt, const vector<Value> &params,
 	                                  MySQLResultStreaming streaming);

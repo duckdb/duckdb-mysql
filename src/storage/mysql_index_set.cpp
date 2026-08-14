@@ -26,7 +26,7 @@ void MySQLIndexSet::DropEntry(ClientContext &context, DropInfo &info) {
 	drop_query += " ON ";
 	drop_query += MySQLUtils::WriteIdentifier(mysql_index.table_name);
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	transaction.Query(drop_query);
+	transaction.GetConnection().Execute(drop_query);
 
 	EraseEntryInternal(info.GetQualifiedName().Name().GetIdentifierName());
 }
@@ -40,7 +40,7 @@ WHERE TABLE_SCHEMA = ${SCHEMA_NAME};
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name.GetIdentifierName()));
 
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	auto result = transaction.Query(query);
+	auto result = transaction.GetConnection().Query(query);
 	while (result->Next()) {
 		auto table_name = result->GetString(0);
 		auto index_name = result->GetString(1);

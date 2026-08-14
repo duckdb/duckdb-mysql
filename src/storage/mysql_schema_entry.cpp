@@ -95,7 +95,7 @@ string GetMySQLCreateIndex(CreateIndexInfo &info, TableCatalogEntry &tbl) {
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
                                                          TableCatalogEntry &table) {
 	auto &mysql_transaction = MySQLTransaction::Get(transaction.GetContext(), table.catalog);
-	mysql_transaction.Query(GetMySQLCreateIndex(info, table));
+	mysql_transaction.GetConnection().Execute(GetMySQLCreateIndex(info, table));
 	return nullptr;
 }
 
@@ -137,7 +137,7 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateView(CatalogTransaction trans
 		}
 	}
 	auto &mysql_transaction = GetMySQLTransaction(transaction);
-	mysql_transaction.Query(GetMySQLCreateView(info));
+	mysql_transaction.GetConnection().Execute(GetMySQLCreateView(info));
 	return tables.RefreshTable(transaction.GetContext(), info.GetViewName().GetIdentifierName());
 }
 

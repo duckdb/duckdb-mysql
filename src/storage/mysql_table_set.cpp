@@ -68,7 +68,7 @@ ORDER BY c.table_name, c.ordinal_position;
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name.GetIdentifierName()));
 
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	auto result = transaction.Query(query);
+	auto result = transaction.GetConnection().Query(query);
 
 	vector<unique_ptr<MySQLTableInfo>> tables;
 	unique_ptr<MySQLTableInfo> info;
@@ -114,7 +114,7 @@ unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(ClientContext &context, M
                                                        const string &table_name) {
 	auto &transaction = MySQLTransaction::Get(context, schema.ParentCatalog());
 	auto query = GetTableInfoQuery(schema.name.GetIdentifierName(), table_name);
-	auto result = transaction.Query(query);
+	auto result = transaction.GetConnection().Query(query);
 	auto table_info = make_uniq<MySQLTableInfo>(schema, table_name);
 	bool first = true;
 	while (result->Next()) {
@@ -250,7 +250,7 @@ string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
 optional_ptr<CatalogEntry> MySQLTableSet::CreateTable(ClientContext &context, BoundCreateTableInfo &info) {
 	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto create_sql = GetMySQLCreateTable(context, info.Base());
-	transaction.Query(create_sql);
+	transaction.GetConnection().Execute(create_sql);
 	auto tbl_entry = make_uniq<MySQLTableEntry>(catalog, schema, info.Base());
 	return CreateEntry(std::move(tbl_entry));
 }
@@ -261,7 +261,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameTableInfo &info) {
 	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " RENAME TO ";
 	sql += MySQLUtils::WriteIdentifier(info.new_table_name.GetIdentifierName());
-	transaction.Query(sql);
+	transaction.GetConnection().Execute(sql);
 }
 
 void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
@@ -273,7 +273,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
 	sql += " TO ";
 	sql += MySQLUtils::WriteIdentifier(info.new_name.GetIdentifierName());
 
-	transaction.Query(sql);
+	transaction.GetConnection().Execute(sql);
 }
 
 void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
@@ -287,7 +287,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
 	sql += MySQLUtils::WriteIdentifier(info.new_column.Name().GetIdentifierName());
 	sql += " ";
 	sql += info.new_column.Type().ToString();
-	transaction.Query(sql);
+	transaction.GetConnection().Execute(sql);
 }
 
 void MySQLTableSet::AlterTable(ClientContext &context, RemoveColumnInfo &info) {
@@ -299,7 +299,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RemoveColumnInfo &info) {
 		throw NotImplementedException("DROP COLUMN IF EXISTS not supported in MySQL");
 	}
 	sql += MySQLUtils::WriteIdentifier(info.removed_column.GetIdentifierName());
-	transaction.Query(sql);
+	transaction.GetConnection().Execute(sql);
 }
 
 void MySQLTableSet::AlterTable(ClientContext &context, AlterTableInfo &alter) {

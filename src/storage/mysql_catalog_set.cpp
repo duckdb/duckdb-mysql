@@ -42,7 +42,7 @@ void MySQLCatalogSet::DropEntry(ClientContext &context, DropInfo &info) {
 		}
 	}
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	transaction.Query(drop_query);
+	transaction.GetConnection().Execute(drop_query);
 
 	// erase the entry from the catalog set
 	EraseEntryInternal(info.GetQualifiedName().Name().GetIdentifierName());

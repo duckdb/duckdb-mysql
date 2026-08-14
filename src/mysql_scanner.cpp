@@ -265,7 +265,7 @@ static MySQLResultStreamingUser ExtractUserStreaming(TableFunctionBindInput &inp
 	return user_streaming;
 }
 
-uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
+static uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
 	uint64_t pinned_connection_id = 0;
 	auto conn_it = input.named_parameters.find("connection");
 	if (conn_it != input.named_parameters.end()) {
@@ -278,7 +278,7 @@ uint64_t ExtractPinnedConnId(TableFunctionBindInput &input) {
 	return pinned_connection_id;
 }
 
-bool ExtractFlag(TableFunctionBindInput &input, const string &name, bool default_val) {
+static bool ExtractFlag(TableFunctionBindInput &input, const string &name, bool default_val) {
 	auto it = input.named_parameters.find(Identifier(name));
 	if (it != input.named_parameters.end()) {
 		Value &bool_val = it->second;

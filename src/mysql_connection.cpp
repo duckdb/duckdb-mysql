@@ -185,6 +185,16 @@ unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
 	return make_uniq<MySQLStatement>(query, stmt.release(), std::move(fields));
 }
 
+void MySQLConnection::Initialize(const MySQLConnectionInitOptions &options) {
+	SetTypeConfig(options.type_config);
+
+	vector<Value> params;
+	params.emplace_back(Value(options.time_zone));
+	if (!options.time_zone.empty()) {
+		Execute("SET TIME_ZONE = ?", params);
+	}
+}
+
 void MySQLConnection::Execute(const string &query) {
 	Execute(query, vector<Value>());
 }
@@ -277,6 +287,7 @@ void MySQLConnection::Reset() {
 }
 
 string MySQLConnection::GetServerInfo() {
+	lock_guard<mutex> guard(query_lock);
 	auto conn = GetConn();
 	const char *server_info = mysql_get_server_info(conn);
 	return server_info != nullptr ? string(server_info) : string();

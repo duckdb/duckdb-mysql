@@ -1,45 +1,24 @@
 #include "storage/mysql_transaction.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/catalog/catalog.hpp"
 
-#include "duckdb/parser/parsed_data/create_view_info.hpp"
-#include "duckdb/catalog/catalog_entry/index_catalog_entry.hpp"
-#include "duckdb/catalog/catalog_entry/view_catalog_entry.hpp"
-
-#include "mysql_result.hpp"
-#include "mysql_types.hpp"
 #include "storage/mysql_catalog.hpp"
 
 namespace duckdb {
 
 MySQLTransaction::MySQLTransaction(MySQLCatalog &mysql_catalog, TransactionManager &manager, ClientContext &context)
-    : Transaction(manager, context), catalog(mysql_catalog),
-      transaction_state(MySQLTransactionState::TRANSACTION_NOT_YET_STARTED), access_mode(mysql_catalog.access_mode) {
-
-	Value mysql_enable_transactions;
-	if (context.TryGetCurrentSetting("mysql_enable_transactions", mysql_enable_transactions)) {
-		this->transactions_enabled = BooleanValue::Get(mysql_enable_transactions);
-	}
-
-	Value mysql_session_time_zone;
-	if (context.TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
-		time_zone = mysql_session_time_zone.ToString();
-	}
+    : Transaction(manager, context), catalog(mysql_catalog), transactions_enabled(GetTransactionsEnabled(context)),
+      access_mode(mysql_catalog.access_mode), conn_init_opts(GetConnectionInitOptions(context)) {
 }
 
-MySQLTransaction::~MySQLTransaction() = default;
-
 void MySQLTransaction::Start() {
-	lock_guard<mutex> guard(transaction_state_lock);
-	transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
+	// no-op
 }
 
 void MySQLTransaction::Commit() {
-	if (!transactions_enabled) {
+	if (!pooled_connection || !transactions_enabled) {
 		return;
 	}
 
-	lock_guard<mutex> guard(transaction_state_lock);
+	lock_guard<mutex> guard(transaction_lock);
 
 	if (transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
 		try {
@@ -53,11 +32,11 @@ void MySQLTransaction::Commit() {
 }
 
 void MySQLTransaction::Rollback() {
-	if (!transactions_enabled) {
+	if (!pooled_connection || !transactions_enabled) {
 		return;
 	}
 
-	lock_guard<mutex> guard(transaction_state_lock);
+	lock_guard<mutex> guard(transaction_lock);
 
 	if (transaction_state == MySQLTransactionState::TRANSACTION_STARTED) {
 		try {
@@ -70,33 +49,22 @@ void MySQLTransaction::Rollback() {
 	}
 }
 
-void MySQLTransaction::EnsureConnection() {
-	lock_guard<mutex> guard(pooled_connection_lock);
+MySQLConnection &MySQLTransaction::GetConnection() {
+	lock_guard<mutex> guard(transaction_lock);
 
-	if (pooled_connection) {
-		return;
+	if (!pooled_connection) {
+		if (pooled_connection.Id() > 0) {
+			throw IOException("Remote connection, ID: %llu, of this transaction was invalidated",
+			                  pooled_connection.Id());
+		}
+		this->pooled_connection = catalog.GetConnectionPool().Acquire();
+		try {
+			pooled_connection.GetConnection().Initialize(conn_init_opts);
+		} catch (...) {
+			pooled_connection.Invalidate();
+			throw;
+		}
 	}
-
-	auto pc = catalog.GetConnectionPool().Acquire();
-
-	auto ctx = context.lock();
-	if (ctx) {
-		pc.GetConnection().SetTypeConfig(MySQLTypeConfig(*ctx));
-	}
-
-	if (!time_zone.empty()) {
-		pc.GetConnection().Execute("SET TIME_ZONE = ?", {Value(time_zone)});
-	}
-
-	this->pooled_connection = std::move(pc);
-}
-
-void MySQLTransaction::StartTransactionInternal() {
-	if (!transactions_enabled) {
-		return;
-	}
-
-	lock_guard<mutex> guard(transaction_state_lock);
 
 	if (transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
 		string query = "START TRANSACTION";
@@ -111,12 +79,6 @@ void MySQLTransaction::StartTransactionInternal() {
 			throw;
 		}
 	}
-}
-
-MySQLConnection &MySQLTransaction::GetConnection() {
-	EnsureConnection();
-
-	StartTransactionInternal();
 
 	return pooled_connection.GetConnection();
 }
@@ -125,21 +87,26 @@ uint64_t MySQLTransaction::GetConnectionId() {
 	return pooled_connection.Id();
 }
 
-unique_ptr<MySQLResult> MySQLTransaction::Query(const string &query) {
-	EnsureConnection();
-
-	StartTransactionInternal();
-
-	try {
-		return pooled_connection.GetConnection().Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
-	} catch (...) {
-		pooled_connection.Invalidate();
-		throw;
-	}
-}
-
 MySQLTransaction &MySQLTransaction::Get(ClientContext &context, Catalog &catalog) {
 	return Transaction::Get(context, catalog).Cast<MySQLTransaction>();
+}
+
+bool MySQLTransaction::GetTransactionsEnabled(ClientContext &context) {
+	Value val;
+	if (context.TryGetCurrentSetting("mysql_enable_transactions", val)) {
+		return BooleanValue::Get(val);
+	}
+	return true;
+}
+
+MySQLConnectionInitOptions MySQLTransaction::GetConnectionInitOptions(ClientContext &context) {
+	MySQLConnectionInitOptions res;
+	res.type_config = MySQLTypeConfig(context);
+	Value val;
+	if (context.TryGetCurrentSetting("mysql_session_time_zone", val)) {
+		res.time_zone = StringValue::Get(val);
+	}
+	return res;
 }
 
 } // namespace duckdb

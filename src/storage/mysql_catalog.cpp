@@ -542,7 +542,7 @@ FROM information_schema.tables
 WHERE table_schema = ${SCHEMA_NAME};
 )",
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(default_schema));
-	auto result = postgres_transaction.Query(query);
+	auto result = postgres_transaction.GetConnection().Query(query);
 	DatabaseSize size;
 	size.free_blocks = 0;
 	size.total_blocks = 0;

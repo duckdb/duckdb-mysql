@@ -35,7 +35,7 @@ FROM information_schema.schemata
 	}
 
 	auto &transaction = MySQLTransaction::Get(context, catalog);
-	auto result = transaction.Query(query);
+	auto result = transaction.GetConnection().Query(query);
 	while (result->Next()) {
 		CreateSchemaInfo info;
 		info.SetQualifiedName(QualifiedName(info.GetQualifiedName().Catalog(), Identifier(result->GetString(0)),
@@ -51,7 +51,7 @@ optional_ptr<CatalogEntry> MySQLSchemaSet::CreateSchema(ClientContext &context, 
 
 	string create_sql =
 	    "CREATE SCHEMA " + MySQLUtils::WriteIdentifier(info.GetQualifiedName().Schema().GetIdentifierName());
-	transaction.Query(create_sql);
+	transaction.GetConnection().Execute(create_sql);
 	auto schema_entry = make_uniq<MySQLSchemaEntry>(catalog, info);
 	return CreateEntry(std::move(schema_entry));
 }
