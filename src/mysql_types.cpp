@@ -5,7 +5,7 @@ namespace duckdb {
 
 static bool GetBoolOption(ClientContext &context, const std::string &opt_name) {
 	Value val;
-	if (context.TryGetCurrentSetting(opt_name, val)) {
+	if (context.TryGetCurrentSetting(Identifier(opt_name), val)) {
 		return BooleanValue::Get(val);
 	}
 	return false;

@@ -237,8 +237,9 @@ string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
 	if (info.on_conflict == OnCreateConflict::IGNORE_ON_CONFLICT) {
 		ss << "IF NOT EXISTS ";
 	}
-	if (!info.GetQualifiedName().Schema().empty()) {
-		ss << MySQLUtils::WriteIdentifier(info.GetQualifiedName().Schema().GetIdentifierName());
+	Identifier schema = info.GetQualifiedName().Schema();
+	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
+		ss << MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
 		ss << ".";
 	}
 	ss << MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());

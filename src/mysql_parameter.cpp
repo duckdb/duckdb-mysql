@@ -257,7 +257,8 @@ MySQLBindParamsFunction::MySQLBindParamsFunction()
     : ScalarFunction("mysql_bind_params", {LogicalType::BIGINT, LogicalType::ANY}, LogicalType::BOOLEAN,
                      MySQLBindParams) {
 	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
-	SetStability(FunctionStability::VOLATILE);
+	SetFallible();
+	SetVolatile();
 }
 
 } // namespace duckdb

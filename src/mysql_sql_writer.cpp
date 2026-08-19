@@ -483,13 +483,12 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			if (target_type.id() == LogicalTypeId::UNBOUND) {
 				target_type = UnboundType::TryDefaultBind(target_type);
 			}
-			Value cast_result;
-			string error;
-			if (!value.DefaultTryCastAs(target_type, cast_result, &error)) {
+			auto cast_result = value.DefaultTryCastAs(target_type);
+			if (!cast_result) {
 				throw InternalException("MySQLSQLWriter: cast of literal failed - should have been blocked by "
 				                        "SupportsPushdown");
 			}
-			return WriteConstant(cast_result);
+			return WriteConstant(*cast_result);
 		}
 		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " + WriteCastType(cast_expr.TargetType()) + ")";
 	}
@@ -602,10 +601,9 @@ string MySQLSQLWriter::WriteOrderList(const vector<OrderByNode> &orders,
 			if (val.type().IsIntegral() && !val.IsNull() && select_list) {
 				// positional reference (e.g. ORDER BY 1) - resolve it against the select list
 				// SupportsPushdown verifies that this resolution is possible
-				Value bigint_value;
-				string error;
-				if (val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) && !bigint_value.IsNull()) {
-					auto index = BigIntValue::Get(bigint_value);
+				auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+				if (bigint_value && !bigint_value->IsNull()) {
+					auto index = BigIntValue::Get(*bigint_value);
 					if (index >= 1 && idx_t(index) <= select_list->size()) {
 						auto &target = *(*select_list)[idx_t(index) - 1];
 						// reference the output column by its alias where possible - expressions over

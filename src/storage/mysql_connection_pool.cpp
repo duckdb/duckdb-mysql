@@ -57,7 +57,7 @@ void MySQLConnectionPool::SetTypeConfig(MySQLTypeConfig config) {
 
 static idx_t ReadUBigIntOption(ClientContext &ctx, const std::string &name, idx_t default_val) {
 	Value val;
-	if (ctx.TryGetCurrentSetting(name, val)) {
+	if (ctx.TryGetCurrentSetting(Identifier(name), val)) {
 		return UBigIntValue::Get(val);
 	}
 	return default_val;
@@ -65,7 +65,7 @@ static idx_t ReadUBigIntOption(ClientContext &ctx, const std::string &name, idx_
 
 static bool ReadBooleanOption(ClientContext &ctx, const std::string &name, bool default_val) {
 	Value val;
-	if (ctx.TryGetCurrentSetting(name, val)) {
+	if (ctx.TryGetCurrentSetting(Identifier(name), val)) {
 		return BooleanValue::Get(val);
 	}
 	return default_val;
@@ -73,7 +73,7 @@ static bool ReadBooleanOption(ClientContext &ctx, const std::string &name, bool 
 
 static string ReadVarcharOption(ClientContext &ctx, const std::string &name, const string &default_val = string()) {
 	Value val;
-	if (ctx.TryGetCurrentSetting(name, val)) {
+	if (ctx.TryGetCurrentSetting(Identifier(name), val)) {
 		return StringValue::Get(val);
 	}
 	return default_val;

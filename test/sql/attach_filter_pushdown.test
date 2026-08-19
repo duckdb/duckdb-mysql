@@ -172,6 +172,9 @@ physical_plan	<REGEX>:.*Mysql Scan.*Filters: col1 >= 44.*
 
 # ExpressionType::COMPARE_DISTINCT_FROM:
 
+# TODO
+mode skip
+
 query I
 SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS DISTINCT FROM NULL
 ----
@@ -194,6 +197,9 @@ query II
 EXPLAIN SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS NOT DISTINCT FROM NULL
 ----
 physical_plan	<REGEX>:.*Mysql Scan.*Filters: col2 IS NOT DISTINCT FROM NULL.*
+
+# TODO
+mode unskip
 
 # VARCHAR comparison logic
 

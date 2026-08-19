@@ -1037,12 +1037,11 @@ static bool MySQLSupportsOrderEntries(const MySQLVersion &version, const vector<
 				if (!select_list || val.IsNull()) {
 					return false;
 				}
-				Value bigint_value;
-				string error;
-				if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+				auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+				if (!bigint_value || bigint_value->IsNull()) {
 					return false;
 				}
-				auto index = BigIntValue::Get(bigint_value);
+				auto index = BigIntValue::Get(*bigint_value);
 				if (index < 1 || idx_t(index) > select_list->size()) {
 					return false;
 				}
@@ -1071,12 +1070,11 @@ static bool MySQLIsIntegerLiteralAtLeast(const ParsedExpression &expr, int64_t m
 		return false;
 	}
 	auto &val = expr.Cast<ConstantExpression>().GetValue();
-	Value bigint_value;
-	string error;
-	if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
 	}
-	return BigIntValue::Get(bigint_value) >= minimum_value;
+	return BigIntValue::Get(*bigint_value) >= minimum_value;
 }
 
 static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t maximum_value) {
@@ -1084,12 +1082,11 @@ static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t ma
 		return false;
 	}
 	auto &val = expr.Cast<ConstantExpression>().GetValue();
-	Value bigint_value;
-	string error;
-	if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
 	}
-	return BigIntValue::Get(bigint_value) <= maximum_value;
+	return BigIntValue::Get(*bigint_value) <= maximum_value;
 }
 
 static bool MySQLSupportsResultModifiers(const MySQLVersion &version, const QueryNode &node,
@@ -1287,16 +1284,15 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			if (target_type.id() == LogicalTypeId::UNBOUND) {
 				target_type = UnboundType::TryDefaultBind(target_type);
 			}
-			Value cast_result;
-			string error;
-			if (!value.DefaultTryCastAs(target_type, cast_result, &error)) {
+			auto cast_result = value.DefaultTryCastAs(target_type);
+			if (!cast_result) {
 				return false;
 			}
 			// the cast result must also be representable in MySQL
-			if (!MySQLSupportsValue(cast_result)) {
+			if (!MySQLSupportsValue(*cast_result)) {
 				return false;
 			}
-			if (cast_result.type().id() == LogicalTypeId::VARCHAR && version.GetBinaryCollation().empty()) {
+			if (cast_result->type().id() == LogicalTypeId::VARCHAR && version.GetBinaryCollation().empty()) {
 				// the folded result is serialized as a string literal, which requires a binary collation
 				return false;
 			}
