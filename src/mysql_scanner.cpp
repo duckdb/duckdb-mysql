@@ -57,7 +57,7 @@ struct MySQLGlobalState : public GlobalTableFunctionState {
 };
 
 static unique_ptr<FunctionData> MySQLBind(ClientContext &context, TableFunctionBindInput &input,
-                                          vector<LogicalType> &return_types, vector<string> &names) {
+                                          vector<LogicalType> &return_types, vector<Identifier> &names) {
 	throw InternalException("MySQLBind");
 }
 
@@ -290,7 +290,7 @@ static bool ExtractFlag(TableFunctionBindInput &input, const string &name, bool 
 }
 
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
-                                               vector<LogicalType> &return_types, vector<string> &names) {
+                                               vector<LogicalType> &return_types, vector<Identifier> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("Parameters to mysql_query cannot be NULL");
 	}
@@ -345,7 +345,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
 		if (stmt->Fields().size() > 0) {
 			for (auto &field : stmt->Fields()) {
-				names.push_back(field.name);
+				names.push_back(Identifier(field.name));
 				return_types.push_back(field.duckdb_type);
 			}
 		} else if (tran_restrict_dml) {
@@ -533,7 +533,8 @@ static void MySQLPinConnection(DataChunk &args, ExpressionState &state, Vector &
 MySQLPinConnectionFunction::MySQLPinConnectionFunction()
     : ScalarFunction("mysql_pin_connection", {LogicalType::VARCHAR}, LogicalType::UBIGINT, MySQLPinConnection) {
 	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
-	SetStability(FunctionStability::VOLATILE);
+	SetFallible();
+	SetVolatile();
 }
 
 static void MySQLClosePinnedConnection(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -563,7 +564,8 @@ MySQLClosePinnedConnectionFunction::MySQLClosePinnedConnectionFunction()
     : ScalarFunction("mysql_close_pinned_connection", {LogicalType::VARCHAR, LogicalType::UBIGINT},
                      LogicalType::BOOLEAN, MySQLClosePinnedConnection) {
 	SetNullHandling(FunctionNullHandling::SPECIAL_HANDLING);
-	SetStability(FunctionStability::VOLATILE);
+	SetFallible();
+	SetVolatile();
 }
 
 MySQLQueryBindData::~MySQLQueryBindData() {

@@ -34,6 +34,7 @@
 #include "duckdb/parser/query_node/set_operation_node.hpp"
 #include "duckdb/parser/query_node/update_query_node.hpp"
 #include "duckdb/parser/result_modifier.hpp"
+#include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/parser/statement/insert_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
@@ -562,6 +563,11 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_
 	return RemoteExecute(context, MySQLSQLWriter::MySQLToString(context, version, *node));
 }
 
+unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement) {
+	// TODO: OR REPLACE logic
+	return RemoteExecute(context, MySQLSQLWriter::MySQLToString(context, version, *statement));
+}
+
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const string &sql) {
 	vector<unique_ptr<ParsedExpression>> args;
 	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
@@ -1037,12 +1043,11 @@ static bool MySQLSupportsOrderEntries(const MySQLVersion &version, const vector<
 				if (!select_list || val.IsNull()) {
 					return false;
 				}
-				Value bigint_value;
-				string error;
-				if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+				auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+				if (!bigint_value || bigint_value->IsNull()) {
 					return false;
 				}
-				auto index = BigIntValue::Get(bigint_value);
+				auto index = BigIntValue::Get(*bigint_value);
 				if (index < 1 || idx_t(index) > select_list->size()) {
 					return false;
 				}
@@ -1071,12 +1076,11 @@ static bool MySQLIsIntegerLiteralAtLeast(const ParsedExpression &expr, int64_t m
 		return false;
 	}
 	auto &val = expr.Cast<ConstantExpression>().GetValue();
-	Value bigint_value;
-	string error;
-	if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
 	}
-	return BigIntValue::Get(bigint_value) >= minimum_value;
+	return BigIntValue::Get(*bigint_value) >= minimum_value;
 }
 
 static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t maximum_value) {
@@ -1084,12 +1088,11 @@ static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t ma
 		return false;
 	}
 	auto &val = expr.Cast<ConstantExpression>().GetValue();
-	Value bigint_value;
-	string error;
-	if (!val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) || bigint_value.IsNull()) {
+	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
 	}
-	return BigIntValue::Get(bigint_value) <= maximum_value;
+	return BigIntValue::Get(*bigint_value) <= maximum_value;
 }
 
 static bool MySQLSupportsResultModifiers(const MySQLVersion &version, const QueryNode &node,
@@ -1287,16 +1290,15 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			if (target_type.id() == LogicalTypeId::UNBOUND) {
 				target_type = UnboundType::TryDefaultBind(target_type);
 			}
-			Value cast_result;
-			string error;
-			if (!value.DefaultTryCastAs(target_type, cast_result, &error)) {
+			auto cast_result = value.DefaultTryCastAs(target_type);
+			if (!cast_result) {
 				return false;
 			}
 			// the cast result must also be representable in MySQL
-			if (!MySQLSupportsValue(cast_result)) {
+			if (!MySQLSupportsValue(*cast_result)) {
 				return false;
 			}
-			if (cast_result.type().id() == LogicalTypeId::VARCHAR && version.GetBinaryCollation().empty()) {
+			if (cast_result->type().id() == LogicalTypeId::VARCHAR && version.GetBinaryCollation().empty()) {
 				// the folded result is serialized as a string literal, which requires a binary collation
 				return false;
 			}
@@ -1619,6 +1621,66 @@ bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
 		return false;
 	default:
 		// unknown query node type
+		return false;
+	}
+}
+
+bool MySQLCatalog::SupportsPushdown(const SQLStatement &statement) {
+	switch (statement.type) {
+	case StatementType::CREATE_STATEMENT: {
+		auto &stmt = statement.Cast<CreateStatement>();
+		CreateInfo &create_info = *stmt.info;
+
+		// entry type
+		switch (create_info.type) {
+		case CatalogType::TABLE_ENTRY: {
+			CreateTableInfo &info = create_info.Cast<CreateTableInfo>();
+
+			// IF EXISTS, OR REPLACE
+			switch (info.on_conflict) {
+			case OnCreateConflict::ERROR_ON_CONFLICT:
+			case OnCreateConflict::IGNORE_ON_CONFLICT:
+				break;
+			default:
+				return false;
+			}
+
+			// constraints
+			for (auto &constr : info.constraints) {
+				switch (constr->type) {
+				case ConstraintType::NOT_NULL:
+				case ConstraintType::UNIQUE:
+				case ConstraintType::FOREIGN_KEY:
+					break;
+				default:
+					return false;
+				}
+			}
+
+			// other options
+			if (info.temporary) {
+				return false;
+			}
+			if (info.internal) {
+				return false;
+			}
+			if (info.partition_keys.size() > 0) {
+				return false;
+			}
+			if (info.sort_keys.size() > 0) {
+				return false;
+			}
+			if (info.options.size() > 0) {
+				return false;
+			}
+
+			return true;
+		}
+		default:
+			return false;
+		}
+	}
+	default:
 		return false;
 	}
 }

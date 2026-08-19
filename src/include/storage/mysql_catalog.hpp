@@ -69,6 +69,7 @@ public:
 		switch (capability) {
 		case RemoteCapability::IS_REMOTE:
 		case RemoteCapability::EXECUTE_QUERY_NODE:
+		case RemoteCapability::EXECUTE_STATEMENT:
 		case RemoteCapability::CONNECT:
 			return true;
 		default:
@@ -76,10 +77,12 @@ public:
 		}
 	}
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement);
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
 	bool SupportsPushdown(const ParsedExpression &expression) override;
 	bool SupportsPushdown(const TableRef &ref) override;
 	bool SupportsPushdown(const QueryNode &node) override;
+	bool SupportsPushdown(const SQLStatement &statement);
 
 	void ClearCache();
 

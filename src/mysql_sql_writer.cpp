@@ -1,8 +1,13 @@
 #include "mysql_sql_writer.hpp"
 
+#include <unordered_map>
+
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
+#include "duckdb/parser/constraints/foreign_key_constraint.hpp"
+#include "duckdb/parser/constraints/not_null_constraint.hpp"
+#include "duckdb/parser/constraints/unique_constraint.hpp"
 #include "duckdb/parser/expression/between_expression.hpp"
 #include "duckdb/parser/expression/case_expression.hpp"
 #include "duckdb/parser/expression/cast_expression.hpp"
@@ -15,16 +20,20 @@
 #include "duckdb/parser/expression/star_expression.hpp"
 #include "duckdb/parser/expression/subquery_expression.hpp"
 #include "duckdb/parser/expression/window_expression.hpp"
+#include "duckdb/parser/parsed_data/create_info.hpp"
 #include "duckdb/parser/query_node/recursive_cte_node.hpp"
 #include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/query_node/set_operation_node.hpp"
+#include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tableref/expressionlistref.hpp"
 #include "duckdb/parser/tableref/joinref.hpp"
 #include "duckdb/parser/tableref/subqueryref.hpp"
+#include "duckdb/common/index_map.hpp"
 #include "duckdb/common/extra_type_info.hpp"
 
+#include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 
 namespace duckdb {
@@ -483,13 +492,12 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			if (target_type.id() == LogicalTypeId::UNBOUND) {
 				target_type = UnboundType::TryDefaultBind(target_type);
 			}
-			Value cast_result;
-			string error;
-			if (!value.DefaultTryCastAs(target_type, cast_result, &error)) {
+			auto cast_result = value.DefaultTryCastAs(target_type);
+			if (!cast_result) {
 				throw InternalException("MySQLSQLWriter: cast of literal failed - should have been blocked by "
 				                        "SupportsPushdown");
 			}
-			return WriteConstant(cast_result);
+			return WriteConstant(*cast_result);
 		}
 		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " + WriteCastType(cast_expr.TargetType()) + ")";
 	}
@@ -602,10 +610,9 @@ string MySQLSQLWriter::WriteOrderList(const vector<OrderByNode> &orders,
 			if (val.type().IsIntegral() && !val.IsNull() && select_list) {
 				// positional reference (e.g. ORDER BY 1) - resolve it against the select list
 				// SupportsPushdown verifies that this resolution is possible
-				Value bigint_value;
-				string error;
-				if (val.DefaultTryCastAs(LogicalType::BIGINT, bigint_value, &error) && !bigint_value.IsNull()) {
-					auto index = BigIntValue::Get(bigint_value);
+				auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
+				if (bigint_value && !bigint_value->IsNull()) {
+					auto index = BigIntValue::Get(*bigint_value);
 					if (index >= 1 && idx_t(index) <= select_list->size()) {
 						auto &target = *(*select_list)[idx_t(index) - 1];
 						// reference the output column by its alias where possible - expressions over
@@ -870,6 +877,163 @@ string MySQLSQLWriter::WriteQueryNode(const QueryNode &node) {
 		throw InternalException("MySQLSQLWriter: unsupported query node type - should have been blocked by "
 		                        "SupportsPushdown");
 	}
+}
+
+string MySQLSQLWriter::MySQLToString(ClientContext &context, const MySQLVersion &version,
+                                     const SQLStatement &statement) {
+	MySQLSQLWriter writer(context, version);
+	string result = writer.WriteStatement(statement);
+	result += " /* MySQLSQLWriter */";
+	return result;
+}
+
+string MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
+	switch (statement.type) {
+	case StatementType::CREATE_STATEMENT:
+		return WriteCreateStatement(*statement.Cast<CreateStatement>().info);
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported statement type - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+}
+
+string MySQLSQLWriter::WriteCreateStatement(const CreateInfo &info) {
+	switch (info.type) {
+	case CatalogType::TABLE_ENTRY:
+		return WriteCreateTableStatement(info.Cast<CreateTableInfo>());
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported CreateInfo type - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+}
+
+static string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_ptr<Constraint>> &constraints,
+                                const std::unordered_map<string, LogicalType> &column_types) {
+	string result;
+
+	result += "(";
+
+	// find all columns that have NOT NULL specified, but are NOT primary key
+	// columns
+	logical_index_set_t not_null_columns;
+	logical_index_set_t unique_columns;
+	logical_index_set_t pk_columns;
+	identifier_set_t multi_key_pks;
+	vector<string> extra_constraints;
+	for (auto &constraint : constraints) {
+		if (constraint->type == ConstraintType::NOT_NULL) {
+			auto &not_null = constraint->Cast<NotNullConstraint>();
+			not_null_columns.insert(not_null.index);
+		} else if (constraint->type == ConstraintType::UNIQUE) {
+			auto &pk = constraint->Cast<UniqueConstraint>();
+			auto constraint_columns = IdentifiersToStrings(pk.columns);
+			if (pk.index.index != DConstants::INVALID_INDEX) {
+				// no columns specified: single column constraint
+				if (pk.is_primary_key) {
+					pk_columns.insert(pk.index);
+				} else {
+					unique_columns.insert(pk.index);
+				}
+			} else {
+				// multi-column constraint, this constraint needs to go at the end after
+				// all columns
+				if (pk.is_primary_key) {
+					// multi key pk column: insert set of columns into multi_key_pks
+					for (auto &col : pk.columns) {
+						multi_key_pks.insert(col);
+					}
+				}
+				extra_constraints.push_back(constraint->ToString());
+			}
+		} else if (constraint->type == ConstraintType::FOREIGN_KEY) {
+			auto &fk = constraint->Cast<ForeignKeyConstraint>();
+			if (fk.info.type == ForeignKeyType::FK_TYPE_FOREIGN_KEY_TABLE ||
+			    fk.info.type == ForeignKeyType::FK_TYPE_SELF_REFERENCE_TABLE) {
+				extra_constraints.push_back(constraint->ToString());
+			}
+		} else {
+			throw InternalException("MySQLSQLWriter: unsupported constraint - should have been blocked by "
+			                        "SupportsPushdown");
+		}
+	}
+
+	for (auto &column : columns.Logical()) {
+		if (column.Oid() > 0) {
+			result += ", ";
+		}
+		string col_name = column.Name().GetIdentifierName();
+		result += MySQLUtils::WriteIdentifier(col_name);
+		result += " ";
+		auto it = column_types.find(col_name);
+		D_ASSERT(it != column_types.end());
+		result += MySQLTypes::TypeToString(it->second);
+		bool not_null = not_null_columns.find(column.Logical()) != not_null_columns.end();
+		bool is_single_key_pk = pk_columns.find(column.Logical()) != pk_columns.end();
+		bool is_multi_key_pk = multi_key_pks.find(Identifier(column.Name().GetIdentifierName())) != multi_key_pks.end();
+		bool is_unique = unique_columns.find(column.Logical()) != unique_columns.end();
+		if (not_null && !is_single_key_pk && !is_multi_key_pk) {
+			// NOT NULL but not a primary key column
+			result += " NOT NULL";
+		}
+		if (is_single_key_pk) {
+			// single column pk: insert constraint here
+			result += " PRIMARY KEY";
+		}
+		if (is_unique) {
+			// single column unique: insert constraint here
+			result += " UNIQUE";
+		}
+		if (column.Generated()) {
+			result += " GENERATED ALWAYS AS(";
+			result += column.GeneratedExpression().ToString();
+			result += ")";
+		} else if (column.HasDefaultValue()) {
+			result += " DEFAULT(";
+			result += column.DefaultValue().ToString();
+			result += ")";
+		}
+	}
+	// print any extra constraints that still need to be printed
+	for (auto &extra_constraint : extra_constraints) {
+		result += ", ";
+		result += extra_constraint;
+	}
+
+	result += ")";
+	return result;
+}
+
+string MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &info) {
+	MySQLTypeConfig type_config(context);
+	std::unordered_map<string, LogicalType> column_types;
+	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
+		auto &col = info.columns.GetColumn(LogicalIndex(i));
+		LogicalType duckdb_type = UnboundType::TryDefaultBind(col.GetType());
+		// TODO: fallback to UnboundType::GetTypeExpression(col.GetType())->ToString();
+		LogicalType mysql_type = MySQLTypes::ToMySQLType(type_config, duckdb_type);
+		column_types.emplace(col.Name().GetIdentifierName(), std::move(mysql_type));
+	}
+
+	string result;
+	result += "CREATE TABLE ";
+	switch (info.on_conflict) {
+	case OnCreateConflict::ERROR_ON_CONFLICT:
+		break;
+	case OnCreateConflict::IGNORE_ON_CONFLICT:
+		result += "IF NOT EXISTS ";
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported OnCreateConflict - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+	Identifier schema = info.GetQualifiedName().Schema();
+	// TODO: default schema
+	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
+		result += MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
+		result += ".";
+	}
+	result += MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());
+	result += MySQLColumnsToSQL(info.columns, info.constraints, column_types);
+	return result;
 }
 
 } // namespace duckdb

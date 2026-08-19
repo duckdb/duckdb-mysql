@@ -1,0 +1,45 @@
+# name: test/sql/remote_pushdown/remote_pushdown_create.test
+# description: Test remote pushdown of CREATE into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET mysql_debug_show_queries = TRUE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS pushdown_create_test1')
+
+statement ok
+CREATE TABLE s.pushdown_create_test1(col1 INT)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test1')
+----
+col1	int	YES	(empty)	NULL	(empty)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_test1')
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS pushdown_create_test2')
+
+statement ok
+CREATE TABLE s.pushdown_create_test2(col1 INT, col2 BIGINT, PRIMARY KEY(col1, col2))
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test2')
+----
+col1	int	NO	PRI	NULL	(empty)
+col2	bigint	NO	PRI	NULL	(empty)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_test2')
+
+statement ok
+DETACH s

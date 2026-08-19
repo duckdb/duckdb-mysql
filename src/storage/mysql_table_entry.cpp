@@ -92,7 +92,7 @@ void MySQLTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &, Logica
 
 static bool GetBoolSetting(ClientContext &context, const std::string &name) {
 	Value val;
-	if (context.TryGetCurrentSetting(name, val)) {
+	if (context.TryGetCurrentSetting(Identifier(name), val)) {
 		return BooleanValue::Get(val);
 	}
 	return false;
