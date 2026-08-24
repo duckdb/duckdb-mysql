@@ -276,7 +276,13 @@ static void SetSSLOptions(MYSQL *mysql, MySQLConnectionParameters &config) {
 }
 
 MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
-	MYSQL *mysql = mysql_init(NULL);
+	static mutex init_lock;
+
+	MYSQL *mysql = nullptr;
+	{
+		lock_guard<mutex> guard(init_lock);
+		mysql = mysql_init(NULL);
+	}
 	if (!mysql) {
 		throw IOException("Failure in mysql_init");
 	}
@@ -294,7 +300,10 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	const char *passwd = config.passwd.empty() ? nullptr : config.passwd.c_str();
 	const char *db = config.db.empty() ? nullptr : config.db.c_str();
 	const char *unix_socket = config.unix_socket.empty() ? nullptr : config.unix_socket.c_str();
-	result = mysql_real_connect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
+	{
+		lock_guard<mutex> guard(init_lock);
+		result = mysql_real_connect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
+	}
 	if (!result) {
 		string original_error = mysql_error(mysql);
 		string attempted_host = host ? host : "nullptr (default)";
@@ -304,8 +313,11 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 			// and need to be re-applied
 			SetSSLOptions(mysql, config);
 			// re-try to establish connection specifying IP address to avoid using unix sockets
-			result =
-			    mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config.client_flag);
+			{
+				lock_guard<mutex> guard(init_lock);
+				result = mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket,
+				                            config.client_flag);
+			}
 
 			if (!result) {
 				string second_attempt_error = mysql_error(mysql);
