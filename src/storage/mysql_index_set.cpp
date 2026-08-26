@@ -10,8 +10,8 @@ namespace duckdb {
 MySQLIndexSet::MySQLIndexSet(MySQLSchemaEntry &schema) : MySQLInSchemaSet(schema) {
 }
 
-void MySQLIndexSet::DropEntry(ClientContext &context, DropInfo &info) {
-	auto entry = GetEntry(context, info.name);
+void MySQLIndexSet::DropEntry(MySQLTransaction &transaction, DropInfo &info) {
+	auto entry = GetEntry(transaction, info.name);
 	if (!entry) {
 		if (info.if_not_found == OnEntryNotFound::RETURN_NULL) {
 			return;
@@ -23,13 +23,12 @@ void MySQLIndexSet::DropEntry(ClientContext &context, DropInfo &info) {
 	drop_query += MySQLUtils::WriteIdentifier(info.name);
 	drop_query += " ON ";
 	drop_query += MySQLUtils::WriteIdentifier(mysql_index.table_name);
-	auto &transaction = MySQLTransaction::Get(context, catalog);
 	transaction.Query(drop_query);
 
 	EraseEntryInternal(info.name);
 }
 
-void MySQLIndexSet::LoadEntries(ClientContext &context) {
+void MySQLIndexSet::LoadEntries(MySQLTransaction &transaction) {
 	auto query = StringUtil::Replace(R"(
 SELECT DISTINCT TABLE_NAME, INDEX_NAME
 FROM INFORMATION_SCHEMA.STATISTICS
@@ -37,7 +36,6 @@ WHERE TABLE_SCHEMA = ${SCHEMA_NAME};
 )",
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name));
 
-	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto result = transaction.Query(query);
 	while (result->Next()) {
 		auto table_name = result->GetString(0);
@@ -46,8 +44,8 @@ WHERE TABLE_SCHEMA = ${SCHEMA_NAME};
 		info.schema = schema.name;
 		info.table = table_name;
 		info.index_name = index_name;
-		auto index_entry = make_uniq<MySQLIndexEntry>(catalog, schema, info, table_name);
-		CreateEntry(std::move(index_entry));
+		auto index_entry = make_shared_ptr<MySQLIndexEntry>(catalog, schema, info, table_name);
+		CreateEntry(transaction, std::move(index_entry));
 	}
 }
 

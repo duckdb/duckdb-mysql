@@ -26,8 +26,7 @@ void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
 		auto &table_scan = get.function;
 		if (MySQLCatalog::IsMySQLScan(table_scan.name)) {
 			auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-			auto &catalog = bind_data.table.ParentCatalog().Cast<MySQLCatalog>();
-			result.scans[catalog].push_back(get);
+			result.scans[bind_data.catalog].push_back(get);
 		}
 		if (MySQLCatalog::IsMySQLQuery(table_scan.name)) {
 			auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();

@@ -41,7 +41,8 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateTable(CatalogTransaction tran
 		// CREATE OR REPLACE - drop any existing entries first (if any)
 		TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name);
 	}
-	return tables.CreateTable(transaction.GetContext(), info);
+	auto &mysql_transaction = GetMySQLTransaction(transaction);
+	return tables.CreateTable(mysql_transaction, info);
 }
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateFunction(CatalogTransaction transaction, CreateFunctionInfo &info) {
@@ -133,7 +134,7 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateView(CatalogTransaction trans
 	}
 	auto &mysql_transaction = GetMySQLTransaction(transaction);
 	mysql_transaction.Query(GetMySQLCreateView(info));
-	return tables.RefreshTable(transaction.GetContext(), info.view_name);
+	return tables.RefreshTable(mysql_transaction, info.view_name);
 }
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::CreateType(CatalogTransaction transaction, CreateTypeInfo &info) {
@@ -169,7 +170,8 @@ void MySQLSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		throw BinderException("Only altering tables is supported for now");
 	}
 	auto &alter = info.Cast<AlterTableInfo>();
-	tables.AlterTable(transaction.GetContext(), alter);
+	auto &mysql_transaction = GetMySQLTransaction(transaction);
+	tables.AlterTable(mysql_transaction, alter);
 }
 
 bool CatalogTypeIsSupported(CatalogType type) {
@@ -188,14 +190,16 @@ void MySQLSchemaEntry::Scan(ClientContext &context, CatalogType type,
 	if (!CatalogTypeIsSupported(type)) {
 		return;
 	}
-	GetCatalogSet(type).Scan(context, callback);
+	auto &transaction = MySQLTransaction::Get(context, catalog);
+	GetCatalogSet(type).Scan(transaction, callback);
 }
 void MySQLSchemaEntry::Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
 	throw NotImplementedException("Scan without context not supported");
 }
 
 void MySQLSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
-	GetCatalogSet(info.type).DropEntry(context, info);
+	auto &transaction = MySQLTransaction::Get(context, catalog);
+	GetCatalogSet(info.type).DropEntry(transaction, info);
 }
 
 optional_ptr<CatalogEntry> MySQLSchemaEntry::LookupEntry(CatalogTransaction transaction,
@@ -204,7 +208,8 @@ optional_ptr<CatalogEntry> MySQLSchemaEntry::LookupEntry(CatalogTransaction tran
 	if (!CatalogTypeIsSupported(lookup_type)) {
 		return nullptr;
 	}
-	return GetCatalogSet(lookup_type).GetEntry(transaction.GetContext(), lookup_info.GetEntryName());
+	auto &mysql_transaction = GetMySQLTransaction(transaction);
+	return GetCatalogSet(lookup_type).GetEntry(mysql_transaction, lookup_info.GetEntryName());
 }
 
 MySQLCatalogSet &MySQLSchemaEntry::GetCatalogSet(CatalogType type) {

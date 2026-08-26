@@ -34,6 +34,9 @@ public:
 		return access_mode;
 	}
 
+	ClientContext &GetContext();
+	optional_ptr<CatalogEntry> ReferenceEntry(shared_ptr<CatalogEntry> &entry);
+
 private:
 	void EnsureConnection();
 	void StartTransactionInternal();
@@ -47,6 +50,8 @@ private:
 	AccessMode access_mode;
 	string time_zone;
 	dbconnector::pool::AcquireMode acquire_mode = dbconnector::pool::AcquireMode::FORCE;
+
+	reference_map_t<CatalogEntry, shared_ptr<CatalogEntry>> referenced_entries;
 };
 
 } // namespace duckdb
