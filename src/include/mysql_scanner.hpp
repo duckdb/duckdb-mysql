@@ -20,14 +20,21 @@
 #include "storage/mysql_catalog.hpp"
 
 namespace duckdb {
-class MySQLTableEntry;
-class MySQLTransaction;
 
 struct MySQLBindData : public FunctionData {
-	explicit MySQLBindData(MySQLTableEntry &table) : table(table) {
+	explicit MySQLBindData(MySQLTableEntry &table) : table(table), catalog(table.ParentCatalog().Cast<MySQLCatalog>()) {
+		this->schema_name = table.schema.name;
+		this->table_name = table.name;
+		this->table_columns = table.GetColumns().Copy();
 	}
 
+	// TODO: fixme, only valid in current transaction
 	MySQLTableEntry &table;
+	MySQLCatalog &catalog;
+	Identifier schema_name;
+	Identifier table_name;
+	ColumnList table_columns;
+
 	vector<MySQLType> mysql_types;
 	vector<string> names;
 	vector<LogicalType> types;

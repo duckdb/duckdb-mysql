@@ -10,26 +10,26 @@ namespace duckdb {
 MySQLCatalogSet::MySQLCatalogSet(Catalog &catalog) : catalog(catalog), is_loaded(false) {
 }
 
-optional_ptr<CatalogEntry> MySQLCatalogSet::GetEntry(ClientContext &context, const string &name) {
-	TryLoadEntries(context);
+optional_ptr<CatalogEntry> MySQLCatalogSet::GetEntry(MySQLTransaction &transaction, const string &name) {
+	TryLoadEntries(transaction);
 	lock_guard<mutex> l(entry_lock);
 	auto entry = entries.find(name);
 	if (entry == entries.end()) {
 		return nullptr;
 	}
-	return entry->second.get();
+	return transaction.ReferenceEntry(entry->second);
 }
 
-void MySQLCatalogSet::TryLoadEntries(ClientContext &context) {
+void MySQLCatalogSet::TryLoadEntries(MySQLTransaction &transaction) {
 	lock_guard<mutex> l(load_lock);
 	if (is_loaded) {
 		return;
 	}
 	is_loaded = true;
-	LoadEntries(context);
+	LoadEntries(transaction);
 }
 
-void MySQLCatalogSet::DropEntry(ClientContext &context, DropInfo &info) {
+void MySQLCatalogSet::DropEntry(MySQLTransaction &transaction, DropInfo &info) {
 	string drop_query = "DROP ";
 	drop_query += CatalogTypeToString(info.type) + " ";
 	if (info.if_not_found == OnEntryNotFound::RETURN_NULL) {
@@ -41,7 +41,6 @@ void MySQLCatalogSet::DropEntry(ClientContext &context, DropInfo &info) {
 			drop_query += " CASCADE";
 		}
 	}
-	auto &transaction = MySQLTransaction::Get(context, catalog);
 	transaction.GetConnection().Execute(drop_query);
 
 	// erase the entry from the catalog set
@@ -53,17 +52,17 @@ void MySQLCatalogSet::EraseEntryInternal(const string &name) {
 	entries.erase(name);
 }
 
-void MySQLCatalogSet::Scan(ClientContext &context, const std::function<void(CatalogEntry &)> &callback) {
-	TryLoadEntries(context);
+void MySQLCatalogSet::Scan(MySQLTransaction &transaction, const std::function<void(CatalogEntry &)> &callback) {
+	TryLoadEntries(transaction);
 	lock_guard<mutex> l(entry_lock);
 	for (auto &entry : entries) {
 		callback(*entry.second);
 	}
 }
 
-optional_ptr<CatalogEntry> MySQLCatalogSet::CreateEntry(unique_ptr<CatalogEntry> entry) {
+optional_ptr<CatalogEntry> MySQLCatalogSet::CreateEntry(MySQLTransaction &transaction, shared_ptr<CatalogEntry> entry) {
 	lock_guard<mutex> l(entry_lock);
-	auto result = entry.get();
+	auto result = transaction.ReferenceEntry(entry);
 	if (result->name.empty()) {
 		throw InternalException("MySQLCatalogSet::CreateEntry called with empty name");
 	}
@@ -80,11 +79,12 @@ void MySQLCatalogSet::ClearEntries() {
 MySQLInSchemaSet::MySQLInSchemaSet(MySQLSchemaEntry &schema) : MySQLCatalogSet(schema.ParentCatalog()), schema(schema) {
 }
 
-optional_ptr<CatalogEntry> MySQLInSchemaSet::CreateEntry(unique_ptr<CatalogEntry> entry) {
+optional_ptr<CatalogEntry> MySQLInSchemaSet::CreateEntry(MySQLTransaction &transaction,
+                                                         shared_ptr<CatalogEntry> entry) {
 	if (!entry->internal) {
 		entry->internal = schema.internal;
 	}
-	return MySQLCatalogSet::CreateEntry(std::move(entry));
+	return MySQLCatalogSet::CreateEntry(transaction, std::move(entry));
 }
 
 } // namespace duckdb

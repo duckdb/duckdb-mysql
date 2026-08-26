@@ -36,6 +36,9 @@ public:
 		return access_mode;
 	}
 
+	ClientContext &GetContext();
+	optional_ptr<CatalogEntry> ReferenceEntry(shared_ptr<CatalogEntry> &entry);
+
 private:
 	static bool GetTransactionsEnabled(ClientContext &context);
 	static MySQLConnectionInitOptions GetConnectionInitOptions(ClientContext &context);
@@ -48,6 +51,8 @@ private:
 	mutex transaction_lock;
 	MySQLTransactionState transaction_state = MySQLTransactionState::TRANSACTION_NOT_YET_STARTED;
 	MySQLPooledConnection pooled_connection;
+
+	reference_map_t<CatalogEntry, shared_ptr<CatalogEntry>> referenced_entries;
 };
 
 } // namespace duckdb

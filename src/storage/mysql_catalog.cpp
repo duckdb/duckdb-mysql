@@ -460,23 +460,26 @@ void MySQLCatalog::Initialize(bool load_builtin) {
 }
 
 optional_ptr<CatalogEntry> MySQLCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
+	auto &mysql_transaction = MySQLTransaction::Get(transaction.GetContext(), *this);
 	if (info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
 		DropInfo try_drop;
 		try_drop.type = CatalogType::SCHEMA_ENTRY;
 		try_drop.SetName(info.GetQualifiedName().Schema());
 		try_drop.if_not_found = OnEntryNotFound::RETURN_NULL;
 		try_drop.cascade = false;
-		schemas.DropEntry(transaction.GetContext(), try_drop);
+		schemas.DropEntry(mysql_transaction, try_drop);
 	}
-	return schemas.CreateSchema(transaction.GetContext(), info);
+	return schemas.CreateSchema(mysql_transaction, info);
 }
 
 void MySQLCatalog::DropSchema(ClientContext &context, DropInfo &info) {
-	return schemas.DropEntry(context, info);
+	auto &mysql_transaction = MySQLTransaction::Get(context, *this);
+	return schemas.DropEntry(mysql_transaction, info);
 }
 
 void MySQLCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
-	schemas.Scan(context, [&](CatalogEntry &schema) { callback(schema.Cast<MySQLSchemaEntry>()); });
+	auto &mysql_transaction = MySQLTransaction::Get(context, *this);
+	schemas.Scan(mysql_transaction, [&](CatalogEntry &schema) { callback(schema.Cast<MySQLSchemaEntry>()); });
 }
 
 optional_ptr<SchemaCatalogEntry> MySQLCatalog::LookupSchema(CatalogTransaction transaction,
@@ -490,7 +493,8 @@ optional_ptr<SchemaCatalogEntry> MySQLCatalog::LookupSchema(CatalogTransaction t
 		}
 		schema_name = default_schema;
 	}
-	auto entry = schemas.GetEntry(transaction.GetContext(), schema_name);
+	auto &mysql_transaction = MySQLTransaction::Get(transaction.GetContext(), *this);
+	auto entry = schemas.GetEntry(mysql_transaction, schema_name);
 	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {
 		throw BinderException("Schema with name \"%s\" not found", schema_name);
 	}

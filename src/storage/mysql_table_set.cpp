@@ -22,7 +22,7 @@ namespace duckdb {
 MySQLTableSet::MySQLTableSet(MySQLSchemaEntry &schema) : MySQLInSchemaSet(schema) {
 }
 
-void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQLTableInfo &table_info,
+void MySQLTableSet::AddColumn(MySQLTransaction &transaction, MySQLResult &result, MySQLTableInfo &table_info,
                               idx_t column_offset) {
 	MySQLTypeData type_info;
 	idx_t column_index = column_offset;
@@ -34,7 +34,7 @@ void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQL
 	type_info.precision = result.IsNull(column_index + 5) ? -1 : result.GetInt64(column_index + 5);
 	type_info.scale = result.IsNull(column_index + 6) ? -1 : result.GetInt64(column_index + 6);
 
-	auto column_type = MySQLTypes::TypeToLogicalType({context}, type_info);
+	auto column_type = MySQLTypes::TypeToLogicalType({transaction.GetContext()}, type_info);
 	ColumnDefinition column(Identifier(std::move(column_name)), std::move(column_type));
 	if (!default_value.empty()) {
 		auto expressions = Parser::ParseExpressionList(default_value);
@@ -54,7 +54,7 @@ void MySQLTableSet::AddColumn(ClientContext &context, MySQLResult &result, MySQL
 	create_info.columns.AddColumn(std::move(column));
 }
 
-void MySQLTableSet::LoadEntries(ClientContext &context) {
+void MySQLTableSet::LoadEntries(MySQLTransaction &transaction) {
 	auto query = StringUtil::Replace(R"(
 SELECT c.table_name, c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment
 FROM information_schema.columns c
@@ -67,7 +67,6 @@ ORDER BY c.table_name, c.ordinal_position;
 )",
 	                                 "${SCHEMA_NAME}", MySQLUtils::WriteLiteral(schema.name.GetIdentifierName()));
 
-	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto result = transaction.GetConnection().Query(query);
 
 	vector<unique_ptr<MySQLTableInfo>> tables;
@@ -84,14 +83,14 @@ ORDER BY c.table_name, c.ordinal_position;
 				info->create_info->comment = result->GetString(8);
 			}
 		}
-		AddColumn(context, *result, *info, 1);
+		AddColumn(transaction, *result, *info, 1);
 	}
 	if (info) {
 		tables.push_back(std::move(info));
 	}
 	for (auto &tbl_info : tables) {
-		auto table_entry = make_uniq<MySQLTableEntry>(catalog, schema, *tbl_info);
-		CreateEntry(std::move(table_entry));
+		auto table_entry = make_shared_ptr<MySQLTableEntry>(catalog, schema, *tbl_info);
+		CreateEntry(transaction, std::move(table_entry));
 	}
 }
 
@@ -110,9 +109,8 @@ ORDER BY c.table_name, c.ordinal_position;
 	                           "${TABLE_NAME}", MySQLUtils::WriteLiteral(table_name));
 }
 
-unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(ClientContext &context, MySQLSchemaEntry &schema,
+unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(MySQLTransaction &transaction, MySQLSchemaEntry &schema,
                                                        const string &table_name) {
-	auto &transaction = MySQLTransaction::Get(context, schema.ParentCatalog());
 	auto query = GetTableInfoQuery(schema.name.GetIdentifierName(), table_name);
 	auto result = transaction.GetConnection().Query(query);
 	auto table_info = make_uniq<MySQLTableInfo>(schema, table_name);
@@ -124,16 +122,16 @@ unique_ptr<MySQLTableInfo> MySQLTableSet::GetTableInfo(ClientContext &context, M
 			}
 			first = false;
 		}
-		AddColumn(context, *result, *table_info, 0);
+		AddColumn(transaction, *result, *table_info, 0);
 	}
 	return table_info;
 }
 
-optional_ptr<CatalogEntry> MySQLTableSet::RefreshTable(ClientContext &context, const string &table_name) {
-	auto table_info = GetTableInfo(context, schema, table_name);
-	auto table_entry = make_uniq<MySQLTableEntry>(catalog, schema, *table_info);
+optional_ptr<CatalogEntry> MySQLTableSet::RefreshTable(MySQLTransaction &transaction, const string &table_name) {
+	auto table_info = GetTableInfo(transaction, schema, table_name);
+	auto table_entry = make_shared_ptr<MySQLTableEntry>(catalog, schema, *table_info);
 	auto table_ptr = table_entry.get();
-	CreateEntry(std::move(table_entry));
+	CreateEntry(transaction, std::move(table_entry));
 	return table_ptr;
 }
 
@@ -225,8 +223,8 @@ string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_ptr<Cons
 	return ss.str();
 }
 
-string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
-	MySQLTypeConfig type_config(context);
+string GetMySQLCreateTable(MySQLTransaction &transaction, CreateTableInfo &info) {
+	MySQLTypeConfig type_config(transaction.GetContext());
 	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
 		auto &col = info.columns.GetColumnMutable(LogicalIndex(i));
 		col.SetType(MySQLTypes::ToMySQLType(type_config, col.GetType()));
@@ -248,16 +246,14 @@ string GetMySQLCreateTable(ClientContext &context, CreateTableInfo &info) {
 	return ss.str();
 }
 
-optional_ptr<CatalogEntry> MySQLTableSet::CreateTable(ClientContext &context, BoundCreateTableInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
-	auto create_sql = GetMySQLCreateTable(context, info.Base());
+optional_ptr<CatalogEntry> MySQLTableSet::CreateTable(MySQLTransaction &transaction, BoundCreateTableInfo &info) {
+	auto create_sql = GetMySQLCreateTable(transaction, info.Base());
 	transaction.GetConnection().Execute(create_sql);
-	auto tbl_entry = make_uniq<MySQLTableEntry>(catalog, schema, info.Base());
-	return CreateEntry(std::move(tbl_entry));
+	auto tbl_entry = make_shared_ptr<MySQLTableEntry>(catalog, schema, info.Base());
+	return CreateEntry(transaction, std::move(tbl_entry));
 }
 
-void MySQLTableSet::AlterTable(ClientContext &context, RenameTableInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
+void MySQLTableSet::AlterTable(MySQLTransaction &transaction, RenameTableInfo &info) {
 	string sql = "ALTER TABLE ";
 	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " RENAME TO ";
@@ -265,8 +261,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameTableInfo &info) {
 	transaction.GetConnection().Execute(sql);
 }
 
-void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
+void MySQLTableSet::AlterTable(MySQLTransaction &transaction, RenameColumnInfo &info) {
 	string sql = "ALTER TABLE ";
 	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " RENAME COLUMN  ";
@@ -277,8 +272,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, RenameColumnInfo &info) {
 	transaction.GetConnection().Execute(sql);
 }
 
-void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
+void MySQLTableSet::AlterTable(MySQLTransaction &transaction, AddColumnInfo &info) {
 	string sql = "ALTER TABLE ";
 	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " ADD COLUMN  ";
@@ -291,8 +285,7 @@ void MySQLTableSet::AlterTable(ClientContext &context, AddColumnInfo &info) {
 	transaction.GetConnection().Execute(sql);
 }
 
-void MySQLTableSet::AlterTable(ClientContext &context, RemoveColumnInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
+void MySQLTableSet::AlterTable(MySQLTransaction &transaction, RemoveColumnInfo &info) {
 	string sql = "ALTER TABLE ";
 	sql += MySQLUtils::WriteIdentifier(info.GetQualifiedName().Name().GetIdentifierName());
 	sql += " DROP COLUMN  ";
@@ -303,19 +296,19 @@ void MySQLTableSet::AlterTable(ClientContext &context, RemoveColumnInfo &info) {
 	transaction.GetConnection().Execute(sql);
 }
 
-void MySQLTableSet::AlterTable(ClientContext &context, AlterTableInfo &alter) {
+void MySQLTableSet::AlterTable(MySQLTransaction &transaction, AlterTableInfo &alter) {
 	switch (alter.alter_table_type) {
 	case AlterTableType::RENAME_TABLE:
-		AlterTable(context, alter.Cast<RenameTableInfo>());
+		AlterTable(transaction, alter.Cast<RenameTableInfo>());
 		break;
 	case AlterTableType::RENAME_COLUMN:
-		AlterTable(context, alter.Cast<RenameColumnInfo>());
+		AlterTable(transaction, alter.Cast<RenameColumnInfo>());
 		break;
 	case AlterTableType::ADD_COLUMN:
-		AlterTable(context, alter.Cast<AddColumnInfo>());
+		AlterTable(transaction, alter.Cast<AddColumnInfo>());
 		break;
 	case AlterTableType::REMOVE_COLUMN:
-		AlterTable(context, alter.Cast<RemoveColumnInfo>());
+		AlterTable(transaction, alter.Cast<RemoveColumnInfo>());
 		break;
 	default:
 		throw BinderException("Unsupported ALTER TABLE type - MySQL tables only "

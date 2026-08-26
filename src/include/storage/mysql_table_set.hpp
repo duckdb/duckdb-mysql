@@ -24,23 +24,23 @@ public:
 	explicit MySQLTableSet(MySQLSchemaEntry &schema);
 
 public:
-	optional_ptr<CatalogEntry> CreateTable(ClientContext &context, BoundCreateTableInfo &info);
+	optional_ptr<CatalogEntry> CreateTable(MySQLTransaction &transaction, BoundCreateTableInfo &info);
 
-	static unique_ptr<MySQLTableInfo> GetTableInfo(ClientContext &context, MySQLSchemaEntry &schema,
+	static unique_ptr<MySQLTableInfo> GetTableInfo(MySQLTransaction &transaction, MySQLSchemaEntry &schema,
 	                                               const string &table_name);
-	optional_ptr<CatalogEntry> RefreshTable(ClientContext &context, const string &table_name);
+	optional_ptr<CatalogEntry> RefreshTable(MySQLTransaction &transaction, const string &table_name);
 
-	void AlterTable(ClientContext &context, AlterTableInfo &info);
+	void AlterTable(MySQLTransaction &transaction, AlterTableInfo &info);
 
 protected:
-	void LoadEntries(ClientContext &context) override;
+	void LoadEntries(MySQLTransaction &transaction) override;
 
-	void AlterTable(ClientContext &context, RenameTableInfo &info);
-	void AlterTable(ClientContext &context, RenameColumnInfo &info);
-	void AlterTable(ClientContext &context, AddColumnInfo &info);
-	void AlterTable(ClientContext &context, RemoveColumnInfo &info);
+	void AlterTable(MySQLTransaction &transaction, RenameTableInfo &info);
+	void AlterTable(MySQLTransaction &transaction, RenameColumnInfo &info);
+	void AlterTable(MySQLTransaction &transaction, AddColumnInfo &info);
+	void AlterTable(MySQLTransaction &transaction, RemoveColumnInfo &info);
 
-	static void AddColumn(ClientContext &context, MySQLResult &result, MySQLTableInfo &table_info,
+	static void AddColumn(MySQLTransaction &transaction, MySQLResult &result, MySQLTableInfo &table_info,
 	                      idx_t column_offset = 0);
 };
 

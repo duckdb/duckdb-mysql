@@ -23,16 +23,16 @@ class MySQLCatalogSet {
 public:
 	MySQLCatalogSet(Catalog &catalog);
 
-	optional_ptr<CatalogEntry> GetEntry(ClientContext &context, const string &name);
-	virtual void DropEntry(ClientContext &context, DropInfo &info);
-	void Scan(ClientContext &context, const std::function<void(CatalogEntry &)> &callback);
-	virtual optional_ptr<CatalogEntry> CreateEntry(unique_ptr<CatalogEntry> entry);
+	optional_ptr<CatalogEntry> GetEntry(MySQLTransaction &transaction, const string &name);
+	virtual void DropEntry(MySQLTransaction &transaction, DropInfo &info);
+	void Scan(MySQLTransaction &transaction, const std::function<void(CatalogEntry &)> &callback);
+	virtual optional_ptr<CatalogEntry> CreateEntry(MySQLTransaction &transaction, shared_ptr<CatalogEntry> entry);
 	void ClearEntries();
 
 protected:
-	virtual void LoadEntries(ClientContext &context) = 0;
+	virtual void LoadEntries(MySQLTransaction &transaction) = 0;
 
-	void TryLoadEntries(ClientContext &context);
+	void TryLoadEntries(MySQLTransaction &transaction);
 
 	void EraseEntryInternal(const string &name);
 
@@ -42,7 +42,7 @@ protected:
 private:
 	mutex entry_lock;
 	mutex load_lock;
-	case_insensitive_map_t<unique_ptr<CatalogEntry>> entries;
+	case_insensitive_map_t<shared_ptr<CatalogEntry>> entries;
 	atomic<bool> is_loaded;
 };
 
@@ -50,7 +50,7 @@ class MySQLInSchemaSet : public MySQLCatalogSet {
 public:
 	MySQLInSchemaSet(MySQLSchemaEntry &schema);
 
-	optional_ptr<CatalogEntry> CreateEntry(unique_ptr<CatalogEntry> entry) override;
+	optional_ptr<CatalogEntry> CreateEntry(MySQLTransaction &transaction, shared_ptr<CatalogEntry> entry) override;
 
 protected:
 	MySQLSchemaEntry &schema;
