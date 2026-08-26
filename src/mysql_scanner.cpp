@@ -421,15 +421,15 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		if (input.column_ids[c] == COLUMN_IDENTIFIER_ROW_ID) {
 			select += "NULL";
 		} else {
-			auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
+			auto &col = bind_data.table_columns.GetColumn(LogicalIndex(input.column_ids[c]));
 			auto col_name = col.GetName();
 			select += MySQLUtils::WriteIdentifier(col_name);
 		}
 	}
 	select += " FROM ";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	select += MySQLUtils::WriteIdentifier(bind_data.schema_name);
 	select += ".";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	select += MySQLUtils::WriteIdentifier(bind_data.table_name);
 
 	string filter_string;
 
@@ -605,7 +605,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
 	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	result["Table"] = bind_data.table.name;
+	result["Table"] = bind_data.table_name;
 	return result;
 }
 

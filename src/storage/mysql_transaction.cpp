@@ -134,4 +134,14 @@ MySQLTransaction &MySQLTransaction::Get(ClientContext &context, Catalog &catalog
 	return Transaction::Get(context, catalog).Cast<MySQLTransaction>();
 }
 
+ClientContext &MySQLTransaction::GetContext() {
+	return *context.lock();
+}
+
+optional_ptr<CatalogEntry> MySQLTransaction::ReferenceEntry(shared_ptr<CatalogEntry> &entry) {
+	auto &ref = *entry;
+	referenced_entries.emplace(ref, entry);
+	return ref;
+}
+
 } // namespace duckdb

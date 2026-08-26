@@ -20,6 +20,8 @@ SELECT '2021-01-01' insert_date, unnest(range(1<<14)) amount
 statement ok
 SET threads = 4
 
+loop i 0 16
+
 concurrentloop i 0 16
 
 query II
@@ -28,5 +30,7 @@ FROM s.aggr_union_test_a t
 GROUP BY 1
 ----
 2020-01-01	134209536
+
+endloop
 
 endloop

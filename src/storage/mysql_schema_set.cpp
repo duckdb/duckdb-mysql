@@ -15,7 +15,7 @@ MySQLSchemaSet::MySQLSchemaSet(Catalog &catalog, vector<string> schemas_to_load_
     : MySQLCatalogSet(catalog), schemas_to_load(std::move(schemas_to_load_p)) {
 }
 
-void MySQLSchemaSet::LoadEntries(ClientContext &context) {
+void MySQLSchemaSet::LoadEntries(MySQLTransaction &transaction) {
 	string query = R"(
 SELECT schema_name
 FROM information_schema.schemata
@@ -32,24 +32,21 @@ FROM information_schema.schemata
 		query += ")";
 	}
 
-	auto &transaction = MySQLTransaction::Get(context, catalog);
 	auto result = transaction.Query(query);
 	while (result->Next()) {
 		CreateSchemaInfo info;
 		info.schema = result->GetString(0);
 		info.internal = MySQLSchemaIsInternal(info.schema);
-		auto schema = make_uniq<MySQLSchemaEntry>(catalog, info);
-		CreateEntry(std::move(schema));
+		auto schema = make_shared_ptr<MySQLSchemaEntry>(catalog, info);
+		CreateEntry(transaction, std::move(schema));
 	}
 }
 
-optional_ptr<CatalogEntry> MySQLSchemaSet::CreateSchema(ClientContext &context, CreateSchemaInfo &info) {
-	auto &transaction = MySQLTransaction::Get(context, catalog);
-
+optional_ptr<CatalogEntry> MySQLSchemaSet::CreateSchema(MySQLTransaction &transaction, CreateSchemaInfo &info) {
 	string create_sql = "CREATE SCHEMA " + MySQLUtils::WriteIdentifier(info.schema);
 	transaction.Query(create_sql);
-	auto schema_entry = make_uniq<MySQLSchemaEntry>(catalog, info);
-	return CreateEntry(std::move(schema_entry));
+	auto schema_entry = make_shared_ptr<MySQLSchemaEntry>(catalog, info);
+	return CreateEntry(transaction, std::move(schema_entry));
 }
 
 } // namespace duckdb
