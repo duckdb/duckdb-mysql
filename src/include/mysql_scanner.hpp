@@ -28,7 +28,7 @@ struct MySQLBindData : public FunctionData {
 		this->table_columns = table.GetColumns().Copy();
 	}
 
-	// TODO: fixme, only valid in current transaction
+	// the table is only valid in current transaction
 	MySQLTableEntry &table;
 	MySQLCatalog &catalog;
 	Identifier schema_name;

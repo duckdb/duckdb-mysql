@@ -11,8 +11,9 @@ MySQLCatalogSet::MySQLCatalogSet(Catalog &catalog) : catalog(catalog), is_loaded
 }
 
 optional_ptr<CatalogEntry> MySQLCatalogSet::GetEntry(MySQLTransaction &transaction, const string &name) {
+	lock_guard<mutex> l1(clear_lock);
 	TryLoadEntries(transaction);
-	lock_guard<mutex> l(entry_lock);
+	lock_guard<mutex> l2(entry_lock);
 	auto entry = entries.find(name);
 	if (entry == entries.end()) {
 		return nullptr;
@@ -53,8 +54,9 @@ void MySQLCatalogSet::EraseEntryInternal(const string &name) {
 }
 
 void MySQLCatalogSet::Scan(MySQLTransaction &transaction, const std::function<void(CatalogEntry &)> &callback) {
+	lock_guard<mutex> l1(clear_lock);
 	TryLoadEntries(transaction);
-	lock_guard<mutex> l(entry_lock);
+	lock_guard<mutex> l2(entry_lock);
 	for (auto &entry : entries) {
 		callback(*entry.second);
 	}
@@ -71,7 +73,9 @@ optional_ptr<CatalogEntry> MySQLCatalogSet::CreateEntry(MySQLTransaction &transa
 }
 
 void MySQLCatalogSet::ClearEntries() {
-	lock_guard<mutex> l(entry_lock);
+	lock_guard<mutex> l1(clear_lock);
+	lock_guard<mutex> l2(load_lock);
+	lock_guard<mutex> l3(entry_lock);
 	entries.clear();
 	is_loaded = false;
 }

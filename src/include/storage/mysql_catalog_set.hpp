@@ -40,10 +40,12 @@ protected:
 	Catalog &catalog;
 
 private:
+	// lock order -> clear, load, entry
 	mutex entry_lock;
 	mutex load_lock;
+	mutex clear_lock;
 	case_insensitive_map_t<shared_ptr<CatalogEntry>> entries;
-	atomic<bool> is_loaded;
+	bool is_loaded = false;
 };
 
 class MySQLInSchemaSet : public MySQLCatalogSet {
