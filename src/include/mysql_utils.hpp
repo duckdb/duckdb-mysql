@@ -129,6 +129,15 @@ public:
 	static string EscapeQuotes(const string &text, char quote);
 	static string WriteQuoted(const string &text, char quote);
 	static string TransformConstant(const Value &val);
+
+private:
+	static mutex libmariadb_races_lock;
+	static bool real_connect_succeeded_at_least_once;
+
+	static MYSQL *CallMySQLInit();
+	static MYSQL *CallMySQLRealConnect(MYSQL *mysql, const char *host, const char *user, const char *passwd,
+	                                   const char *db, unsigned int port, const char *unix_socket,
+	                                   unsigned long clientflag);
 };
 
 } // namespace duckdb

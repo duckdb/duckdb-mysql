@@ -1,0 +1,25 @@
+# name: test/sql/concurrent/concurrent_attach.test
+# description: Test ATTACH called concurrently from multiple threads
+# group: [concurrent]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET threads = 4
+
+concurrentloop i 0 16
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s{i} (TYPE MYSQL)
+
+query I
+SELECT count(*) FROM s{i}.booleans
+----
+3
+
+statement ok
+DETACH s{i}
+
+endloop
