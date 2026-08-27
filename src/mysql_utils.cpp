@@ -9,6 +9,9 @@
 
 namespace duckdb {
 
+mutex MySQLUtils::libmariadb_races_lock;
+bool MySQLUtils::real_connect_succeeded_at_least_once = false;
+
 static bool ParseValue(const string &dsn, idx_t &pos, string &result) {
 	// skip leading spaces
 	while (pos < dsn.size() && StringUtil::CharacterIsSpace(dsn[pos])) {
@@ -276,13 +279,7 @@ static void SetSSLOptions(MYSQL *mysql, MySQLConnectionParameters &config) {
 }
 
 MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
-	static mutex init_lock;
-
-	MYSQL *mysql = nullptr;
-	{
-		lock_guard<mutex> guard(init_lock);
-		mysql = mysql_init(NULL);
-	}
+	MYSQL *mysql = CallMySQLInit();
 	if (!mysql) {
 		throw IOException("Failure in mysql_init");
 	}
@@ -300,10 +297,7 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	const char *passwd = config.passwd.empty() ? nullptr : config.passwd.c_str();
 	const char *db = config.db.empty() ? nullptr : config.db.c_str();
 	const char *unix_socket = config.unix_socket.empty() ? nullptr : config.unix_socket.c_str();
-	{
-		lock_guard<mutex> guard(init_lock);
-		result = mysql_real_connect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
-	}
+	result = CallMySQLRealConnect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
 	if (!result) {
 		string original_error = mysql_error(mysql);
 		string attempted_host = host ? host : "nullptr (default)";
@@ -313,11 +307,8 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 			// and need to be re-applied
 			SetSSLOptions(mysql, config);
 			// re-try to establish connection specifying IP address to avoid using unix sockets
-			{
-				lock_guard<mutex> guard(init_lock);
-				result = mysql_real_connect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket,
-				                            config.client_flag);
-			}
+			result = CallMySQLRealConnect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket,
+			                              config.client_flag);
 
 			if (!result) {
 				string second_attempt_error = mysql_error(mysql);
@@ -395,6 +386,34 @@ string MySQLUtils::TransformConstant(const Value &val) {
 		return val.DefaultCastAs(LogicalType::TIMESTAMP).DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
 	}
 	return val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
+}
+
+MYSQL *MySQLUtils::CallMySQLInit() {
+	lock_guard<mutex> guard(libmariadb_races_lock);
+	return mysql_init(nullptr);
+}
+
+MYSQL *MySQLUtils::CallMySQLRealConnect(MYSQL *mysql, const char *host, const char *user, const char *passwd,
+                                        const char *db, unsigned int port, const char *unix_socket,
+                                        unsigned long clientflag) {
+	bool lock_needed = true;
+	{
+		lock_guard<mutex> guard(libmariadb_races_lock);
+		if (real_connect_succeeded_at_least_once) {
+			lock_needed = false;
+		}
+	}
+
+	if (lock_needed) {
+		lock_guard<mutex> guard(libmariadb_races_lock);
+		MYSQL *res = mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, clientflag);
+		if (res) {
+			real_connect_succeeded_at_least_once = true;
+		}
+		return res;
+	}
+
+	return mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, clientflag);
 }
 
 } // namespace duckdb
