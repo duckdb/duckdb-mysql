@@ -1,6 +1,6 @@
 {
   "name": "libmariadb",
-  "version-semver": "3.4.7",
+  "version-semver": "3.4.8",
   "description": "MariaDB Connector/C is used to connect C/C++ applications to MariaDB and MySQL databases",
   "homepage": "https://github.com/mariadb-corporation/mariadb-connector-c",
   "license": "LGPL-2.1-or-later",
@@ -8,11 +8,17 @@
   "dependencies": [
     {
       "name": "libmariadb",
-      "default-features": false,
       "features": [
         "iconv"
       ],
       "platform": "windows"
+    },
+    {
+      "name": "libmariadb",
+      "features": [
+        "openssl"
+      ],
+      "platform": "!windows"
     },
     {
       "name": "vcpkg-cmake",
@@ -23,9 +29,6 @@
       "host": true
     },
     "zlib"
-  ],
-  "default-features": [
-    "openssl"
   ],
   "features": {
     "iconv": {
@@ -38,7 +41,7 @@
       ]
     },
     "openssl": {
-      "description": "SSL support (OpenSSL)",
+      "description": "Use OpenSSL",
       "dependencies": [
         "openssl"
       ]
