@@ -80,7 +80,7 @@ bool ReadOptionFromEnv(const char *env, string &result) {
 
 uint32_t ParsePort(const string &value) {
 	constexpr const static int PORT_MIN = 0;
-	constexpr const static int PORT_MAX = 65353;
+	constexpr const static int PORT_MAX = 65535;
 	int port_val = std::stoi(value);
 	if (port_val < PORT_MIN || port_val > PORT_MAX) {
 		throw InvalidInputException("Invalid port %d - port must be between %d and %d", port_val, PORT_MIN, PORT_MAX);
