@@ -13,27 +13,24 @@
 #include "duckdb/catalog/catalog.hpp"
 
 #include "mysql_connection.hpp"
-#include "storage/mysql_connection_pool.hpp"
 #include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
+#include "scan/mysql_planned_table.hpp"
 #include "storage/mysql_catalog.hpp"
+#include "storage/mysql_connection_pool.hpp"
 
 namespace duckdb {
 
 struct MySQLBindData : public FunctionData {
-	explicit MySQLBindData(MySQLTableEntry &table) : table(table), catalog(table.ParentCatalog().Cast<MySQLCatalog>()) {
-		this->schema_name = table.schema.name;
-		this->table_name = table.name;
-		this->table_columns = table.GetColumns().Copy();
+	explicit MySQLBindData(MySQLTableEntry &table_p, weak_ptr<ClientContext> ctx)
+	    : table(table_p), context_ptr(std::move(ctx)) {
 	}
 
-	// the table is only valid in current transaction
-	MySQLTableEntry &table;
-	MySQLCatalog &catalog;
-	Identifier schema_name;
-	Identifier table_name;
-	ColumnList table_columns;
+	MySQLPlannedTable table;
+
+	// required for get_bind_info and only used there
+	weak_ptr<ClientContext> context_ptr;
 
 	vector<MySQLType> mysql_types;
 	vector<string> names;

@@ -11,13 +11,15 @@ struct MySQLOperators {
 	reference_map_t<MySQLCatalog, vector<reference<LogicalGet>>> scans;
 };
 
-void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
+void GatherMySQLScans(ClientContext &ctx, LogicalOperator &op, MySQLOperators &result) {
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
 		auto &table_scan = get.function;
 		if (MySQLCatalog::IsMySQLScan(table_scan.name.GetIdentifierName())) {
 			auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-			result.scans[bind_data.catalog].push_back(get);
+			auto &table_entry = bind_data.table.LookupTable(ctx);
+			auto &catalog = table_entry.ParentCatalog().Cast<MySQLCatalog>();
+			result.scans[catalog].push_back(get);
 		}
 		if (MySQLCatalog::IsMySQLQuery(table_scan.name.GetIdentifierName())) {
 			auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
@@ -25,13 +27,13 @@ void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
 		}
 	}
 	for (auto &child : op.children) {
-		GatherMySQLScans(*child, result);
+		GatherMySQLScans(ctx, *child, result);
 	}
 }
 
 void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
 	MySQLOperators operators;
-	GatherMySQLScans(*plan, operators);
+	GatherMySQLScans(input.context, *plan, operators);
 	for (auto &entry : operators.scans) {
 		MySQLResultStreaming result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 		if (entry.second.size() == 1) {

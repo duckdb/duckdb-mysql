@@ -109,6 +109,7 @@ MySQLConnectionInitOptions MySQLTransaction::GetConnectionInitOptions(ClientCont
 	return res;
 }
 
+// todo: shared_ptr
 ClientContext &MySQLTransaction::GetContext() {
 	return *context.lock();
 }

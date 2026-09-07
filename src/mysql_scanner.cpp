@@ -74,15 +74,15 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		if (input.column_ids[c] == COLUMN_IDENTIFIER_ROW_ID) {
 			select += "NULL";
 		} else {
-			auto &col = bind_data.table_columns.GetColumn(LogicalIndex(input.column_ids[c]));
+			auto &col = bind_data.table.columns.GetColumn(LogicalIndex(input.column_ids[c]));
 			auto col_name = col.GetName();
 			select += MySQLUtils::WriteIdentifier(col_name.GetIdentifierName());
 		}
 	}
 	select += " FROM ";
-	select += MySQLUtils::WriteIdentifier(bind_data.schema_name.GetIdentifierName());
+	select += MySQLUtils::WriteIdentifier(bind_data.table.schema_name.GetIdentifierName());
 	select += ".";
-	select += MySQLUtils::WriteIdentifier(bind_data.table_name.GetIdentifierName());
+	select += MySQLUtils::WriteIdentifier(bind_data.table.name.GetIdentifierName());
 
 	string filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
 
@@ -103,7 +103,8 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 
 	if (gstate.exec_state == MySQLQueryExecState::UNINITIALIZED) {
 		auto &bdata = data.bind_data->CastNoConst<MySQLBindData>();
-		auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
+		MySQLTableEntry &table_entry = bdata.table.LookupTable(context);
+		auto &transaction = MySQLTransaction::Get(context, table_entry.ParentCatalog());
 		auto &con = transaction.GetConnection();
 		gstate.result = con.Query(gstate.scan_query, bdata.optimizer_streaming);
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;
@@ -163,7 +164,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
 	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	result["Table"] = bind_data.table_name.GetIdentifierName();
+	result["Table"] = bind_data.table.name.GetIdentifierName();
 	return result;
 }
 
@@ -177,9 +178,13 @@ static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer,
 }
 
 static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
-	auto &bind_data = bind_data_p->Cast<MySQLBindData>();
+	auto &bind_data = bind_data_p->CastNoConst<MySQLBindData>();
 	BindInfo info(ScanType::EXTERNAL);
-	info.table = bind_data.table;
+	shared_ptr<ClientContext> ctx = bind_data.context_ptr.lock();
+	if (ctx) { // cannot fail in known scenarios
+		auto &table_entry = bind_data.table.LookupTable(*ctx);
+		info.table = table_entry;
+	}
 	return info;
 }
 

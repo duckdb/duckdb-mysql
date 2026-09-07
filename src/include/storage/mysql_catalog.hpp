@@ -29,6 +29,7 @@ public:
 	                      vector<string> schemas_to_load, shared_ptr<MySQLConnectionPool> pool_p);
 	~MySQLCatalog();
 
+	Identifier catalog_name;
 	string connection_string;
 	string attach_path;
 	AccessMode access_mode;

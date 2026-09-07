@@ -1,0 +1,59 @@
+# name: test/sql/detach_prepared.test
+# description: Test the behaviour of DETACH with PREPARE/EXECUTE
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET threads = 1
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CREATE OR REPLACE TABLE s.detach_prepare_test AS FROM range(41, 43) r
+
+statement ok
+PREPARE p1 AS SELECT divide(r, 1) FROM s.detach_prepare_test
+
+query I
+EXECUTE p1
+----
+41
+42
+
+query I
+EXECUTE p1
+----
+41
+42
+
+statement ok
+DETACH s
+
+statement error
+EXECUTE p1
+----
+Catalog Error: Table with name "s.detach_prepare_test" does not exist because schema "s" does not exist.
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query I
+EXECUTE p1
+----
+41
+42
+
+statement ok
+DROP TABLE s.detach_prepare_test
+
+statement error
+EXECUTE p1
+----
+Catalog Error: Table with name detach_prepare_test does not exist!
+
+statement ok
+DETACh s

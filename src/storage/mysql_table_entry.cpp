@@ -99,7 +99,9 @@ static bool GetBoolSetting(ClientContext &context, const std::string &name) {
 }
 
 TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
-	auto result = make_uniq<MySQLBindData>(*this);
+	MySQLCatalog &catalog = ParentCatalog().Cast<MySQLCatalog>();
+	MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
+	auto result = make_uniq<MySQLBindData>(*this, transaction.context);
 	for (auto &col : columns.Logical()) {
 		result->types.push_back(col.GetType());
 		result->names.emplace_back(col.GetName().GetIdentifierName());
