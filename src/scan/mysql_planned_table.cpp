@@ -13,24 +13,10 @@ MySQLPlannedTable::MySQLPlannedTable(MySQLTableEntry &table) {
 
 MySQLTableEntry &MySQLPlannedTable::LookupTable(ClientContext &ctx) {
 	vector<shared_ptr<AttachedDatabase>> databases = DatabaseManager::Get(ctx).GetDatabases(ctx);
-	MySQLCatalog &catalog = LookupCatalog(databases);
+	MySQLCatalog &catalog = MySQLCatalog::Lookup(databases, catalog_name);
 	CatalogTransaction catalog_transaction(catalog, ctx);
 	MySQLSchemaEntry &schema = LookupSchema(catalog_transaction, catalog);
 	return LookupTableInternal(catalog_transaction, schema);
-}
-
-MySQLCatalog &MySQLPlannedTable::LookupCatalog(vector<shared_ptr<AttachedDatabase>> &databases) {
-	MySQLCatalog *catalog_ptr = nullptr;
-	for (shared_ptr<AttachedDatabase> &db_ptr : databases) {
-		AttachedDatabase &db = *db_ptr;
-		Catalog &catalog = db.GetCatalog();
-		if (catalog.GetName() != catalog_name || catalog.GetCatalogType() != "mysql") {
-			continue;
-		}
-		return catalog.Cast<MySQLCatalog>();
-	}
-	throw InvalidInputException("Attached MySQL database not found in the specified client session, name: \"%s\"",
-	                            catalog_name);
 }
 
 MySQLSchemaEntry &MySQLPlannedTable::LookupSchema(CatalogTransaction &catalog_transaction, MySQLCatalog &catalog) {
@@ -40,8 +26,8 @@ MySQLSchemaEntry &MySQLPlannedTable::LookupSchema(CatalogTransaction &catalog_tr
 	    catalog.LookupSchema(catalog_transaction, lookup, OnEntryNotFound::RETURN_NULL);
 	if (!schema) {
 		throw InvalidInputException(
-		    "MySQL schema not found in the specified client session, name: \"%s\", attached database name: \"%s\"",
-		    schema_name, catalog_name);
+		    "MySQL schema not found in the specified client session, name: %s, attached database name: %s", schema_name,
+		    catalog_name);
 	}
 	return schema->Cast<MySQLSchemaEntry>();
 }
@@ -52,8 +38,8 @@ MySQLTableEntry &MySQLPlannedTable::LookupTableInternal(CatalogTransaction &cata
 	EntryLookupInfo lookup(CatalogType::TABLE_ENTRY, std::move(qualified_name));
 	optional_ptr<CatalogEntry> table = schema.LookupEntry(catalog_transaction, lookup);
 	if (!table) {
-		throw InvalidInputException("MySQL table not found in the specified client session, name: \"%s\", schema name: "
-		                            "\"%s\", attached database name: \"%s\"",
+		throw InvalidInputException("MySQL table not found in the specified client session, name: %s, schema name: "
+		                            "%s, attached database name: %s",
 		                            name, schema_name, catalog_name);
 	}
 	return table->Cast<MySQLTableEntry>();

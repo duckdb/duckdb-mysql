@@ -21,8 +21,6 @@ public:
 	MySQLTableEntry &LookupTable(ClientContext &ctx);
 
 private:
-	MySQLCatalog &LookupCatalog(vector<shared_ptr<AttachedDatabase>> &databases);
-
 	MySQLSchemaEntry &LookupSchema(CatalogTransaction &catalog_transaction, MySQLCatalog &catalog);
 
 	MySQLTableEntry &LookupTableInternal(CatalogTransaction &catalog_transaction, MySQLSchemaEntry &schema);

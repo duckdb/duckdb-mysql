@@ -88,6 +88,8 @@ public:
 	static bool IsMySQLScan(const string &name);
 	static bool IsMySQLQuery(const string &name);
 
+	static MySQLCatalog &Lookup(vector<shared_ptr<AttachedDatabase>> &databases, const Identifier &name);
+
 	MySQLConnectionPool &GetConnectionPool();
 	shared_ptr<MySQLConnectionPool> GetConnectionPoolPtr();
 	//! The server version, fetched when the database was attached

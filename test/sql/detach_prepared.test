@@ -56,4 +56,74 @@ EXECUTE p1
 Catalog Error: Table with name detach_prepare_test does not exist!
 
 statement ok
+DEALLOCATE p1
+
+statement error
+EXECUTE p1
+----
+Binder Error: Prepared statement "p1" does not exist
+
+statement ok
+DETACh s
+
+# prepared mysql_query, no cached tables
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CALL mysql_query('s', 'CREATE TABLE detach_prepare_test(r INT)')
+
+statement ok
+CALL mysql_query('s', 'INSERT INTO detach_prepare_test VALUES (41),(42)')
+
+statement ok
+PREPARE p2 AS FROM mysql_query('s', 'SELECT * FROM detach_prepare_test')
+
+query I
+EXECUTE p2
+----
+41
+42
+
+query I
+EXECUTE p2
+----
+41
+42
+
+statement ok
+DETACH s
+
+statement error
+EXECUTE p2
+----
+Invalid Input Error: Attached MySQL database not found in the specified client session, name: "s"
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query I
+EXECUTE p2
+----
+41
+42
+
+statement ok
+CALL mysql_query('s', 'DROP TABLE detach_prepare_test')
+
+statement error
+EXECUTE p2
+----
+IO Error: Failed to prepare MySQL query "SELECT * FROM detach_prepare_test": Table 'mysqlscanner.detach_prepare_test' doesn't exist
+
+statement ok
+DEALLOCATE p2
+
+statement error
+EXECUTE p2
+----
+Binder Error: Prepared statement "p2" does not exist
+
+statement ok
 DETACh s

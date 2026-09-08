@@ -379,12 +379,14 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	}
 }
 
-static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
+static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &ctx,
                                                                       TableFunctionInitInput &input) {
 	auto &bdata = input.bind_data->CastNoConst<MySQLQueryBindData>();
 	MySQLPooledConnection pinned_connection;
 	if (bdata.pinned_connection_id > 0) {
-		pinned_connection = bdata.catalog.GetConnectionPool().UnpinConnection(bdata.pinned_connection_id);
+		vector<shared_ptr<AttachedDatabase>> databases = DatabaseManager::Get(ctx).GetDatabases(ctx);
+		MySQLCatalog &catalog = MySQLCatalog::Lookup(databases, bdata.catalog_name);
+		pinned_connection = catalog.GetConnectionPool().UnpinConnection(bdata.pinned_connection_id);
 	}
 	return make_uniq<MySQLGlobalState>(std::move(pinned_connection));
 }
@@ -454,7 +456,9 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 			conn_ptr = &conn;
 			current_connection_id = gstate.pinned_connection.Id();
 		} else {
-			auto &transaction = MySQLTransaction::Get(context, bdata.catalog);
+			vector<shared_ptr<AttachedDatabase>> databases = DatabaseManager::Get(context).GetDatabases(context);
+			MySQLCatalog &catalog = MySQLCatalog::Lookup(databases, bdata.catalog_name);
+			auto &transaction = MySQLTransaction::Get(context, catalog);
 			MySQLConnection &conn = transaction.GetConnection();
 			conn_ptr = &conn;
 			current_connection_id = transaction.GetConnectionId();
