@@ -74,15 +74,15 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		if (input.column_ids[c] == COLUMN_IDENTIFIER_ROW_ID) {
 			select += "NULL";
 		} else {
-			auto &col = bind_data.table.columns.GetColumn(LogicalIndex(input.column_ids[c]));
+			auto &col = bind_data.columns.GetColumn(LogicalIndex(input.column_ids[c]));
 			auto col_name = col.GetName();
 			select += MySQLUtils::WriteIdentifier(col_name.GetIdentifierName());
 		}
 	}
 	select += " FROM ";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.schema_name.GetIdentifierName());
+	select += MySQLUtils::WriteIdentifier(bind_data.table_name.Schema().GetIdentifierName());
 	select += ".";
-	select += MySQLUtils::WriteIdentifier(bind_data.table.name.GetIdentifierName());
+	select += MySQLUtils::WriteIdentifier(bind_data.table_name.Name().GetIdentifierName());
 
 	string filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
 
@@ -102,8 +102,9 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 
 	if (gstate.exec_state == MySQLQueryExecState::UNINITIALIZED) {
-		auto &bdata = data.bind_data->CastNoConst<MySQLBindData>();
-		MySQLTableEntry &table_entry = bdata.table.LookupTable(context);
+		auto &bdata = data.bind_data->Cast<MySQLBindData>();
+		auto attached_table = MySQLTableEntry::Lookup(context, bdata.table_name);
+		MySQLTableEntry &table_entry = attached_table.Get<MySQLTableEntry>();
 		auto &transaction = MySQLTransaction::Get(context, table_entry.ParentCatalog());
 		auto &con = transaction.GetConnection();
 		gstate.result = con.Query(gstate.scan_query, bdata.optimizer_streaming);
@@ -164,7 +165,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
 	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	result["Table"] = bind_data.table.name.GetIdentifierName();
+	result["Table"] = bind_data.table_name.Name().GetIdentifierName();
 	return result;
 }
 
@@ -178,12 +179,12 @@ static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer,
 }
 
 static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
-	auto &bind_data = bind_data_p->CastNoConst<MySQLBindData>();
+	auto &bdata = bind_data_p->CastNoConst<MySQLBindData>();
 	BindInfo info(ScanType::EXTERNAL);
-	shared_ptr<ClientContext> ctx = bind_data.context_ptr.lock();
+	shared_ptr<ClientContext> ctx = bdata.context_ptr.lock();
 	if (ctx) { // cannot fail in known scenarios
-		auto &table_entry = bind_data.table.LookupTable(*ctx);
-		info.table = table_entry;
+		auto attached_table = MySQLTableEntry::Lookup(*ctx, bdata.table_name);
+		info.table = attached_table.Get<MySQLTableEntry>();
 	}
 	return info;
 }
@@ -384,8 +385,8 @@ static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientCont
 	auto &bdata = input.bind_data->CastNoConst<MySQLQueryBindData>();
 	MySQLPooledConnection pinned_connection;
 	if (bdata.pinned_connection_id > 0) {
-		vector<shared_ptr<AttachedDatabase>> databases = DatabaseManager::Get(ctx).GetDatabases(ctx);
-		MySQLCatalog &catalog = MySQLCatalog::Lookup(databases, bdata.catalog_name);
+		auto attached_catalog = MySQLCatalog::Lookup(ctx, bdata.catalog_name);
+		MySQLCatalog &catalog = attached_catalog.Get<MySQLCatalog>();
 		pinned_connection = catalog.GetConnectionPool().UnpinConnection(bdata.pinned_connection_id);
 	}
 	return make_uniq<MySQLGlobalState>(std::move(pinned_connection));
@@ -456,8 +457,8 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 			conn_ptr = &conn;
 			current_connection_id = gstate.pinned_connection.Id();
 		} else {
-			vector<shared_ptr<AttachedDatabase>> databases = DatabaseManager::Get(context).GetDatabases(context);
-			MySQLCatalog &catalog = MySQLCatalog::Lookup(databases, bdata.catalog_name);
+			auto attached_catalog = MySQLCatalog::Lookup(context, bdata.catalog_name);
+			MySQLCatalog &catalog = attached_catalog.Get<MySQLCatalog>();
 			auto &transaction = MySQLTransaction::Get(context, catalog);
 			MySQLConnection &conn = transaction.GetConnection();
 			conn_ptr = &conn;

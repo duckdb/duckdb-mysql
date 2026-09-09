@@ -129,4 +129,15 @@ TableStorageInfo MySQLTableEntry::GetStorageInfo(ClientContext &context) {
 	return result;
 }
 
+dbconnector::attached::AttachedTable MySQLTableEntry::Lookup(ClientContext &ctx, QualifiedName name) {
+	using namespace dbconnector::attached;
+
+	AttachedTable table = AttachedTable::Lookup(ctx, "mysql", name);
+	if (!table) {
+		throw InvalidInputException("Attached MySQL table, name: %s is not found in the specified client session",
+		                            name.ToString());
+	}
+	return table;
+}
+
 } // namespace duckdb

@@ -16,18 +16,19 @@
 #include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
-#include "scan/mysql_planned_table.hpp"
 #include "storage/mysql_catalog.hpp"
 #include "storage/mysql_connection_pool.hpp"
 
 namespace duckdb {
 
 struct MySQLBindData : public FunctionData {
-	explicit MySQLBindData(MySQLTableEntry &table_p, weak_ptr<ClientContext> ctx)
-	    : table(table_p), context_ptr(std::move(ctx)) {
+	explicit MySQLBindData(MySQLTableEntry &table, weak_ptr<ClientContext> ctx)
+	    : table_name(table.ParentCatalog().GetName(), table.ParentSchema().name, table.name),
+	      columns(table.GetColumns().Copy()), context_ptr(std::move(ctx)) {
 	}
 
-	MySQLPlannedTable table;
+	QualifiedName table_name;
+	ColumnList columns;
 
 	// required for get_bind_info and only used there
 	weak_ptr<ClientContext> context_ptr;

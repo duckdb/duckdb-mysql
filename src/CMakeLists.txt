@@ -1,7 +1,6 @@
 include_directories(include)
 
 add_subdirectory(dbconnector)
-add_subdirectory(scan)
 add_subdirectory(storage)
 
 add_library(

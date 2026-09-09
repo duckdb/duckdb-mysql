@@ -1700,17 +1700,15 @@ shared_ptr<MySQLConnectionPool> MySQLCatalog::GetConnectionPoolPtr() {
 	return connection_pool;
 }
 
-MySQLCatalog &MySQLCatalog::Lookup(vector<shared_ptr<AttachedDatabase>> &databases, const Identifier &name) {
-	MySQLCatalog *catalog_ptr = nullptr;
-	for (shared_ptr<AttachedDatabase> &db_ptr : databases) {
-		AttachedDatabase &db = *db_ptr;
-		Catalog &catalog = db.GetCatalog();
-		if (catalog.GetName() != name || catalog.GetCatalogType() != "mysql") {
-			continue;
-		}
-		return catalog.Cast<MySQLCatalog>();
+dbconnector::attached::AttachedCatalog MySQLCatalog::Lookup(ClientContext &ctx, const Identifier &name) {
+	using namespace dbconnector::attached;
+
+	AttachedCatalog attached_catalog = AttachedCatalog::Lookup(ctx, "mysql", name);
+	if (!attached_catalog) {
+		throw InvalidInputException("Attached MySQL database not found in the specified client session, name: %s",
+		                            name);
 	}
-	throw InvalidInputException("Attached MySQL database not found in the specified client session, name: %s", name);
+	return attached_catalog;
 }
 
 } // namespace duckdb

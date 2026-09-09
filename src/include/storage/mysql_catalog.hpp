@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "dbconnector/attached.hpp"
+
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/client_context.hpp"
@@ -88,7 +90,7 @@ public:
 	static bool IsMySQLScan(const string &name);
 	static bool IsMySQLQuery(const string &name);
 
-	static MySQLCatalog &Lookup(vector<shared_ptr<AttachedDatabase>> &databases, const Identifier &name);
+	static dbconnector::attached::AttachedCatalog Lookup(ClientContext &ctx, const Identifier &name);
 
 	MySQLConnectionPool &GetConnectionPool();
 	shared_ptr<MySQLConnectionPool> GetConnectionPoolPtr();
