@@ -1,4 +1,13 @@
 #include "storage/mysql_optimizer.hpp"
+
+#include <map>
+
+#include "dbconnector/attached.hpp"
+
+#include "duckdb/main/attached_database.hpp"
+#include "duckdb/main/database_manager.hpp"
+#include "duckdb/planner/operator/logical_get.hpp"
+
 #include "storage/mysql_catalog.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
@@ -17,25 +26,24 @@
 namespace duckdb {
 
 struct MySQLOperators {
-	reference_map_t<MySQLCatalog, vector<reference<LogicalGet>>> scans;
+	std::map<string, vector<reference<LogicalGet>>> scans;
 };
 
-void GatherMySQLScans(LogicalOperator &op, MySQLOperators &result) {
+void GatherMySQLScans(ClientContext &ctx, LogicalOperator &op, MySQLOperators &result) {
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
 		auto &table_scan = get.function;
 		if (MySQLCatalog::IsMySQLScan(table_scan.name)) {
-			auto &bind_data = get.bind_data->Cast<MySQLBindData>();
-			result.scans[bind_data.catalog].push_back(get);
+			auto &bdata = get.bind_data->Cast<MySQLBindData>();
+			result.scans[bdata.table_name.catalog].push_back(get);
 		}
 		if (MySQLCatalog::IsMySQLQuery(table_scan.name)) {
-			auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
-			auto &catalog = bind_data.catalog.Cast<MySQLCatalog>();
-			result.scans[catalog].push_back(get);
+			auto &bdata = get.bind_data->Cast<MySQLQueryBindData>();
+			result.scans[bdata.catalog_name].push_back(get);
 		}
 	}
 	for (auto &child : op.children) {
-		GatherMySQLScans(*child, result);
+		GatherMySQLScans(ctx, *child, result);
 	}
 }
 
@@ -433,10 +441,12 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 			LogicalGet *get = nullptr;
 			MySQLBindData *bind_data = nullptr;
 			if (!aggr.children.empty() && FindMySQLGet(*aggr.children[0], get, bind_data)) {
-				auto &catalog = bind_data->table.ParentCatalog().Cast<MySQLCatalog>();
+				auto attached_table = MySQLTableEntry::Lookup(context, bind_data->table_name);
+				MySQLTableEntry &table_entry = attached_table.Get<MySQLTableEntry>();
+				auto &catalog = table_entry.ParentCatalog().Cast<MySQLCatalog>();
 				MySQLTableStats table_stats;
-				bool have_stats = catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name,
-				                                                        bind_data->table.name, table_stats);
+				bool have_stats = catalog.GetStatsCache().GetTableStats(bind_data->table_name.schema,
+				                                                        bind_data->table_name.name, table_stats);
 
 				if (have_stats) {
 					CachedCostConstants cached_costs;
@@ -465,8 +475,8 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					double filter_selectivity = 1.0;
 					if (!get->table_filters.filters.empty()) {
 						MySQLTableStats cached_filter_stats;
-						if (catalog.GetStatsCache().GetTableStats(bind_data->table.schema.name, bind_data->table.name,
-						                                          cached_filter_stats)) {
+						if (catalog.GetStatsCache().GetTableStats(bind_data->table_name.schema,
+						                                          bind_data->table_name.name, cached_filter_stats)) {
 							for (const auto &entry : get->table_filters.filters) {
 								column_t col_idx = entry.first;
 								if (col_idx >= bind_data->names.size()) {
@@ -779,7 +789,7 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 	}
 
 	MySQLOperators operators;
-	GatherMySQLScans(*plan, operators);
+	GatherMySQLScans(input.context, *plan, operators);
 	for (auto &entry : operators.scans) {
 		MySQLResultStreaming result_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
 		if (entry.second.size() == 1 && allow_streaming) {
@@ -789,6 +799,12 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 			auto &get = logical_get.get();
 			if (MySQLCatalog::IsMySQLScan(get.function.name)) {
 				auto &bind_data = get.bind_data->Cast<MySQLBindData>();
+				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
+				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
+					bind_data.streaming = result_streaming;
+				}
+			} else if (MySQLCatalog::IsMySQLQuery(get.function.name)) {
+				auto &bind_data = get.bind_data->Cast<MySQLQueryBindData>();
 				if (bind_data.streaming == MySQLResultStreaming::UNINITIALIZED ||
 				    result_streaming == MySQLResultStreaming::FORCE_MATERIALIZATION) {
 					bind_data.streaming = result_streaming;

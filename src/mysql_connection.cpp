@@ -151,8 +151,8 @@ unique_ptr<MySQLResult> MySQLConnection::Query(const string &query, const vector
 	return QueryInternal(query, params, streaming, MySQLConnectorInterface::PREPARED_STATEMENT);
 }
 
-unique_ptr<MySQLResult> MySQLConnection::Query(MySQLStatement &stmt, const vector<Value> &params,
-                                               MySQLResultStreaming streaming) {
+unique_ptr<MySQLResult> MySQLConnection::QueryStmt(MySQLStatement &stmt, const vector<Value> &params,
+                                                   MySQLResultStreaming streaming) {
 
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	bool prepared = true;

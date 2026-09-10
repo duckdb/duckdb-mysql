@@ -42,6 +42,8 @@ struct FederationState {
 };
 
 struct MySQLGlobalState : public GlobalTableFunctionState {
+	MySQLGlobalState() {
+	}
 	explicit MySQLGlobalState(unique_ptr<MySQLResult> result_p) : result(std::move(result_p)) {
 	}
 
@@ -103,7 +105,7 @@ static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, c
 		fed.adaptive_cache_generation = cached.plan_generation;
 		fed.adaptive_estimated_rows = cached.plan.estimated_rows_from_mysql;
 	} else {
-		auto table_stats = stats_collector.GetTableStats(bind_data.table.schema.name, bind_data.table.name);
+		auto table_stats = stats_collector.GetTableStats(bind_data.table_name.schema, bind_data.table_name.name);
 		auto mysql_costs = stats_collector.FetchMySQLCostConstants();
 		CostModelParameters cost_params;
 		if (mysql_costs.loaded) {
@@ -140,7 +142,7 @@ static void ResolveExecutionPlan(ClientContext &context, FederationState &fed, c
 static void ResolvePartitionPruning(FederationState &fed, const MySQLBindData &bind_data,
                                     MySQLStatisticsCollector &stats_collector, const vector<column_t> &column_ids,
                                     optional_ptr<TableFilterSet> filters) {
-	auto part_stats = stats_collector.GetTableStats(bind_data.table.schema.name, bind_data.table.name);
+	auto part_stats = stats_collector.GetTableStats(bind_data.table_name.schema, bind_data.table_name.name);
 	const auto &part_info = part_stats.partition_info;
 	if (!part_info.IsRangeOrList() || part_info.partitions.empty()) {
 		return;
@@ -236,7 +238,7 @@ static void BuildLocalFilterExpression(FederationState &fed, const MySQLBindData
 			continue;
 		}
 		auto actual_table_col = column_ids[output_col_idx];
-		auto &col = bind_data.table.GetColumn(LogicalIndex(actual_table_col));
+		auto &col = bind_data.columns.GetColumn(LogicalIndex(actual_table_col));
 
 		auto col_ref = make_uniq<BoundReferenceExpression>(col.GetType(), output_col_idx);
 		auto expr = it->second->ToExpression(*col_ref);
@@ -272,9 +274,10 @@ static void InjectQueryHints(ClientContext &context, string &select, const Feder
 		if (uses_index) {
 			bool valid = explain_stats.ValidateWithExplain(select, fed.filter_analysis.recommended_index, true);
 			if (!valid) {
-				auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
-				mysql_catalog.GetPlanCache().InvalidateTable(bind_data.table.schema.name, bind_data.table.name);
-				mysql_catalog.GetStatsCache().Invalidate(bind_data.table.schema.name, bind_data.table.name);
+				auto attached_catalog = MySQLCatalog::Lookup(context, bind_data.table_name.catalog);
+				MySQLCatalog &mysql_catalog = attached_catalog.Get<MySQLCatalog>();
+				mysql_catalog.GetPlanCache().InvalidateTable(bind_data.table_name.schema, bind_data.table_name.name);
+				mysql_catalog.GetStatsCache().Invalidate(bind_data.table_name.schema, bind_data.table_name.name);
 			}
 		}
 	}
@@ -353,7 +356,8 @@ static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &
 	gstate.cache_key = fed.adaptive_cache_key;
 	gstate.cache_generation = fed.adaptive_cache_generation;
 	gstate.estimated_rows = fed.adaptive_estimated_rows;
-	gstate.catalog = &bind_data.table.catalog.Cast<MySQLCatalog>();
+	auto attached_catalog = MySQLCatalog::Lookup(context, bind_data.table_name.catalog);
+	gstate.catalog = attached_catalog.Get<MySQLCatalog>();
 
 	Value adaptive_enabled_val;
 	if (context.TryGetCurrentSetting("mysql_adaptive_replan_enabled", adaptive_enabled_val)) {
@@ -364,9 +368,9 @@ static void ConfigureAdaptiveFeedback(ClientContext &context, MySQLGlobalState &
 static string BuildAggregateQuery(const MySQLBindData &bind_data) {
 	string sql = "SELECT " + bind_data.aggregate_select_list;
 	sql += " FROM ";
-	sql += MySQLUtils::WriteIdentifier(bind_data.table.schema.name);
+	sql += MySQLUtils::WriteIdentifier(bind_data.table_name.schema);
 	sql += ".";
-	sql += MySQLUtils::WriteIdentifier(bind_data.table.name);
+	sql += MySQLUtils::WriteIdentifier(bind_data.table_name.name);
 	if (!bind_data.aggregate_where_clause.empty()) {
 		sql += " WHERE " + bind_data.aggregate_where_clause;
 	}
@@ -393,11 +397,12 @@ static bool HintInjectionEnabled(ClientContext &context) {
 static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &context,
                                                                  TableFunctionInitInput &input) {
 	const auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	auto &transaction = MySQLTransaction::Get(context, bind_data.table.catalog);
+	auto attached_catalog = MySQLCatalog::Lookup(context, bind_data.table_name.catalog);
+	MySQLCatalog &mysql_catalog = attached_catalog.Get<MySQLCatalog>();
+	auto &transaction = MySQLTransaction::Get(context, mysql_catalog);
 	auto &con = transaction.GetConnection();
 
 	FederationState fed;
-	auto &mysql_catalog = bind_data.table.catalog.Cast<MySQLCatalog>();
 
 	if (bind_data.has_aggregate_pushdown) {
 		string select = BuildAggregateQuery(bind_data);
@@ -421,22 +426,22 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 		if (input.column_ids[c] == COLUMN_IDENTIFIER_ROW_ID) {
 			select += "NULL";
 		} else {
-			auto &col = bind_data.table_columns.GetColumn(LogicalIndex(input.column_ids[c]));
+			auto &col = bind_data.columns.GetColumn(LogicalIndex(input.column_ids[c]));
 			auto col_name = col.GetName();
 			select += MySQLUtils::WriteIdentifier(col_name);
 		}
 	}
 	select += " FROM ";
-	select += MySQLUtils::WriteIdentifier(bind_data.schema_name);
+	select += MySQLUtils::WriteIdentifier(bind_data.table_name.schema);
 	select += ".";
-	select += MySQLUtils::WriteIdentifier(bind_data.table_name);
+	select += MySQLUtils::WriteIdentifier(bind_data.table_name.name);
 
 	string filter_string;
 
 	if (bind_data.use_predicate_analyzer && input.filters && !input.filters->filters.empty()) {
 		try {
 			MySQLStatisticsCollector stats_collector(con, mysql_catalog.GetStatsCache());
-			PredicateAnalyzer analyzer(stats_collector, bind_data.table.schema.name, bind_data.table.name);
+			PredicateAnalyzer analyzer(stats_collector, bind_data.table_name.schema, bind_data.table_name.name);
 			ConfigurePredicateAnalyzer(context, analyzer);
 
 			fed.filter_analysis = analyzer.AnalyzeFilters(input.column_ids, input.filters, bind_data.names);
@@ -444,7 +449,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 			vector<string> column_names;
 			for (idx_t c = 0; c < input.column_ids.size(); c++) {
 				if (input.column_ids[c] != COLUMN_IDENTIFIER_ROW_ID) {
-					auto &col = bind_data.table.GetColumn(LogicalIndex(input.column_ids[c]));
+					auto &col = bind_data.columns.GetColumn(LogicalIndex(input.column_ids[c]));
 					column_names.push_back(col.GetName());
 				}
 			}
@@ -456,7 +461,7 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 					filter_cols.push_back(analysis.column_name);
 					sels.push_back(analysis.estimated_selectivity);
 				}
-				ExecutionPlanCacheKey cache_key(bind_data.table.schema.name, bind_data.table.name, column_names,
+				ExecutionPlanCacheKey cache_key(bind_data.table_name.schema, bind_data.table_name.name, column_names,
 				                                filter_cols, sels);
 
 				ResolveExecutionPlan(context, fed, bind_data, stats_collector, mysql_catalog, con, column_names,
@@ -605,7 +610,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStringInput &input) {
 	InsertionOrderPreservingMap<string> result;
 	auto &bind_data = input.bind_data->Cast<MySQLBindData>();
-	result["Table"] = bind_data.table_name;
+	result["Table"] = bind_data.table_name.name;
 	return result;
 }
 
@@ -619,9 +624,13 @@ static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer,
 }
 
 static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
-	auto &bind_data = bind_data_p->Cast<MySQLBindData>();
+	auto &bdata = bind_data_p->CastNoConst<MySQLBindData>();
 	BindInfo info(ScanType::EXTERNAL);
-	info.table = bind_data.table;
+	shared_ptr<ClientContext> ctx = bdata.context_ptr.lock();
+	if (ctx) { // cannot fail in known scenarios
+		auto attached_table = MySQLTableEntry::Lookup(*ctx, bdata.table_name);
+		info.table = attached_table.Get<MySQLTableEntry>();
+	}
 	return info;
 }
 
@@ -638,6 +647,43 @@ MySQLScanFunction::MySQLScanFunction()
 //===--------------------------------------------------------------------===//
 // MySQL Query
 //===--------------------------------------------------------------------===//
+static vector<Value> ExtractParams(TableFunctionBindInput &input) {
+	vector<Value> params;
+	auto params_it = input.named_parameters.find("params");
+	if (params_it != input.named_parameters.end()) {
+		auto params_handle_it = input.named_parameters.find("params_handle");
+		if (params_handle_it != input.named_parameters.end()) {
+			throw BinderException("Either \"params\" or \"params_handle\" option can be specified, not both");
+		}
+		Value &struct_val = params_it->second;
+		if (struct_val.IsNull()) {
+			throw BinderException("Parameters to mysql_query cannot be NULL");
+		}
+		if (struct_val.type().id() != LogicalTypeId::STRUCT) {
+			throw BinderException("Query parameters must be specified in a STRUCT");
+		}
+		params = StructValue::GetChildren(struct_val);
+	}
+
+	return params;
+}
+
+static MySQLResultStreaming ExtractUserStreaming(TableFunctionBindInput &input) {
+	auto user_streaming = MySQLResultStreaming::ALLOW_STREAMING;
+	auto streaming_it = input.named_parameters.find("stream_results");
+	if (streaming_it != input.named_parameters.end()) {
+		Value &bool_val = streaming_it->second;
+		if (!bool_val.IsNull()) {
+			if (BooleanValue::Get(bool_val)) {
+				user_streaming = MySQLResultStreaming::ALLOW_STREAMING;
+			} else {
+				user_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
+			}
+		}
+	}
+	return user_streaming;
+}
+
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -655,79 +701,38 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		throw BinderException("Attached database \"%s\" does not refer to a MySQL database", db_name);
 	}
 	auto sql = input.inputs[1].GetValue<string>();
+	vector<Value> params = ExtractParams(input);
+	MySQLResultStreaming streaming = ExtractUserStreaming(input);
 
-	vector<Value> params;
-	auto params_it = input.named_parameters.find("params");
-	if (params_it != input.named_parameters.end()) {
-		Value &struct_val = params_it->second;
-		if (struct_val.IsNull()) {
-			throw BinderException("Parameters to mysql_query cannot be NULL");
-		}
-		if (struct_val.type().id() != LogicalTypeId::STRUCT) {
-			throw BinderException("Query parameters must be specified in a STRUCT");
-		}
-		params = StructValue::GetChildren(struct_val);
-	}
-
-	bool streaming_enabled = true;
-	auto streaming_it = input.named_parameters.find("stream_results");
-	if (streaming_it != input.named_parameters.end()) {
-		Value &bool_val = streaming_it->second;
-		if (!bool_val.IsNull()) {
-			streaming_enabled = BooleanValue::Get(bool_val);
-		}
-	}
-
-	if (!streaming_enabled) {
-		auto &transaction = MySQLTransaction::Get(context, catalog);
-		MySQLConnection &conn = transaction.GetConnection();
-		auto result = conn.Query(sql, params, MySQLResultStreaming::FORCE_MATERIALIZATION);
-		for (auto &field : result->Fields()) {
-			names.push_back(field.name);
-			return_types.push_back(field.duckdb_type);
-		}
-		return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(result));
-	}
-
-	auto &mysql_catalog = catalog.Cast<MySQLCatalog>();
-
-	auto acquire_mode = MySQLConnectionPool::GetAcquireMode(context);
-	std::string time_zone;
-	Value mysql_session_time_zone;
-	if (context.TryGetCurrentSetting("mysql_session_time_zone", mysql_session_time_zone)) {
-		time_zone = mysql_session_time_zone.ToString();
-	}
-	auto conn = mysql_catalog.GetConnectionPool().Acquire(acquire_mode, time_zone);
-	auto type_config = MySQLTypeConfig(context);
-	conn->SetTypeConfig(type_config);
-
-	auto stmt = conn->Prepare(sql);
+	auto &transaction = MySQLTransaction::Get(context, catalog);
+	MySQLConnection &conn = transaction.GetConnection();
+	auto stmt = conn.Prepare(sql);
 	for (auto &field : stmt->Fields()) {
 		names.push_back(field.name);
 		return_types.push_back(field.duckdb_type);
 	}
-	return make_uniq<MySQLQueryBindData>(std::move(sql), catalog, std::move(conn), std::move(stmt), std::move(params));
+	return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), streaming, std::move(stmt),
+	                                     transaction.GetConnectionId());
 }
 
 static unique_ptr<GlobalTableFunctionState> MySQLQueryInitGlobalState(ClientContext &context,
                                                                       TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->CastNoConst<MySQLQueryBindData>();
-	unique_ptr<MySQLResult> mysql_result;
-	if (bind_data.result) {
-		mysql_result = std::move(bind_data.result);
-	}
-	return make_uniq<MySQLGlobalState>(std::move(mysql_result));
+	return make_uniq<MySQLGlobalState>();
 }
 
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
 	if (!gstate.result) {
-		auto &bind_data = data.bind_data->CastNoConst<MySQLQueryBindData>();
-		D_ASSERT(bind_data.pooled_connection);
-		D_ASSERT(bind_data.stmt);
-		auto result = bind_data.pooled_connection->Query(*bind_data.stmt, bind_data.params,
-		                                                 MySQLResultStreaming::ALLOW_STREAMING);
-		gstate.result = std::move(result);
+		auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
+		auto attached_catalog = MySQLCatalog::Lookup(context, bdata.catalog_name);
+		MySQLCatalog &catalog = attached_catalog.Get<MySQLCatalog>();
+		auto &transaction = MySQLTransaction::Get(context, catalog);
+		MySQLConnection &conn = transaction.GetConnection();
+		if (transaction.GetConnectionId() == bdata.prepare_connection_id) {
+			gstate.result = conn.QueryStmt(*bdata.prepared_stmt, bdata.params, bdata.streaming);
+		} else {
+			gstate.result = conn.Query(bdata.query, bdata.params, bdata.streaming);
+		}
 	}
 	MySQLScan(context, data, output);
 }

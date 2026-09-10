@@ -94,7 +94,9 @@ static bool GetBoolSetting(ClientContext &context, const std::string &name) {
 }
 
 TableFunction MySQLTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
-	auto result = make_uniq<MySQLBindData>(*this);
+	MySQLCatalog &catalog = ParentCatalog().Cast<MySQLCatalog>();
+	MySQLTransaction &transaction = MySQLTransaction::Get(context, catalog);
+	auto result = make_uniq<MySQLBindData>(*this, transaction.context);
 	for (auto &col : columns.Logical()) {
 		result->types.push_back(col.GetType());
 		result->names.push_back(col.GetName());
@@ -115,6 +117,17 @@ TableStorageInfo MySQLTableEntry::GetStorageInfo(ClientContext &context) {
 	result.cardinality = 0;
 	result.index_info = db.GetIndexInfo(name);
 	return result;
+}
+
+dbconnector::attached::AttachedTable MySQLTableEntry::Lookup(ClientContext &ctx, const QualifiedName &name) {
+	using namespace dbconnector::attached;
+
+	AttachedTable table = AttachedTable::Lookup(ctx, "mysql", name);
+	if (!table) {
+		throw InvalidInputException("Attached MySQL table, name: %s is not found in the specified client session",
+		                            name.ToString());
+	}
+	return table;
 }
 
 } // namespace duckdb

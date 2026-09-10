@@ -543,4 +543,15 @@ MySQLStatsCache &MySQLCatalog::GetStatsCache() {
 	return stats_cache_;
 }
 
+dbconnector::attached::AttachedCatalog MySQLCatalog::Lookup(ClientContext &ctx, const string &name) {
+	using namespace dbconnector::attached;
+
+	AttachedCatalog attached_catalog = AttachedCatalog::Lookup(ctx, "mysql", name);
+	if (!attached_catalog) {
+		throw InvalidInputException("Attached MySQL database not found in the specified client session, name: %s",
+		                            name);
+	}
+	return attached_catalog;
+}
+
 } // namespace duckdb

@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "dbconnector/attached.hpp"
+
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
 #include "mysql_connection.hpp"
@@ -67,6 +69,8 @@ public:
 	static void MaterializeMySQLScans(PhysicalOperator &op);
 	static bool IsMySQLScan(const string &name);
 	static bool IsMySQLQuery(const string &name);
+
+	static dbconnector::attached::AttachedCatalog Lookup(ClientContext &ctx, const string &name);
 
 	MySQLConnectionPool &GetConnectionPool();
 	PlanCache &GetPlanCache();
