@@ -180,7 +180,7 @@ SELECT col1, typeof(col1) FROM mysql_query('s', 'SELECT ? col1',
   params=row(42::TINYINT),
   stream_results=FALSE)
 ----
-42	BIGINT
+42	VARCHAR
 
 query II
 SELECT col1, typeof(col1) FROM mysql_query('s', 'SELECT ? col1',

@@ -130,6 +130,10 @@ unique_ptr<MySQLResult> MySQLTransaction::Query(const string &query) {
 	}
 }
 
+uint64_t MySQLTransaction::GetConnectionId() {
+	return pooled_connection.Id();
+}
+
 MySQLTransaction &MySQLTransaction::Get(ClientContext &context, Catalog &catalog) {
 	return Transaction::Get(context, catalog).Cast<MySQLTransaction>();
 }

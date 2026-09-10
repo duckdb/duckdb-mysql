@@ -28,6 +28,7 @@ public:
 	void Rollback();
 
 	MySQLConnection &GetConnection();
+	uint64_t GetConnectionId();
 	unique_ptr<MySQLResult> Query(const string &query);
 	static MySQLTransaction &Get(ClientContext &context, Catalog &catalog);
 	AccessMode GetAccessMode() const {
