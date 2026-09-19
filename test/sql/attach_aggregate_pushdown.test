@@ -110,7 +110,21 @@ A	95
 B	55
 C	30
 
+# query over the DuckDB view
+statement ok
+CREATE VIEW agg_test_duckdb_view AS FROM s1.agg_test
+
+query II
+SELECT category, SUM(val) FROM agg_test_duckdb_view GROUP BY category ORDER BY category;
+----
+A	95
+B	55
+C	30
+
 # Cleanup
+
+statement ok
+DROP VIEW agg_test_duckdb_view
 
 statement ok
 DROP TABLE IF EXISTS s1.agg_test;

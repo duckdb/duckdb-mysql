@@ -198,7 +198,7 @@ SELECT * FROM mysql_db.tmp;
 | mysql_query_timeout_min_ms         | Minimum query timeout in milliseconds                          | 5000    |
 | mysql_query_timeout_max_ms         | Maximum query timeout in milliseconds                          | 300000  |
 | mysql_sql_buffer_result            | Add SQL_BUFFER_RESULT for large result sets to release row locks faster | true |
-| mysql_aggregate_pushdown_enabled   | Push aggregate functions (COUNT, SUM, etc.) to MySQL           | true   |
+| mysql_aggregate_pushdown_enabled   | Push aggregate functions (COUNT, SUM, etc.) to MySQL           | false  |
 | mysql_order_pushdown_enabled       | Push ORDER BY and LIMIT clauses to MySQL                       | true   |
 | mysql_allow_results_streaming      | Whether to allow streaming results of MySQL scans when only a single scan used in a query | true   |
 

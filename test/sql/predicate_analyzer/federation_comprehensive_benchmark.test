@@ -23,6 +23,9 @@ statement ok
 SET GLOBAL mysql_adaptive_replan_enabled = TRUE
 
 statement ok
+SET GLOBAL mysql_aggregate_pushdown_enabled = TRUE
+
+statement ok
 DROP TABLE IF EXISTS s1.bench_main;
 
 statement ok
@@ -902,6 +905,9 @@ RESET GLOBAL mysql_hint_injection_enabled
 
 statement ok
 RESET GLOBAL mysql_adaptive_replan_enabled
+
+statement ok
+RESET GLOBAL mysql_aggregate_pushdown_enabled
 
 statement ok
 DETACH s1

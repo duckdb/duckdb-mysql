@@ -541,7 +541,17 @@ static void OptimizeAggregates(ClientContext &context, unique_ptr<LogicalOperato
 					info.scan_table_index = get->table_index;
 					info.num_groups = aggr.groups.size();
 					rewrites.push_back(info);
-					op->children[i] = std::move(aggr.children[0]);
+					// The scan now produces the aggregated result instead of the base columns, so any
+					// operator between the aggregate and the scan (the projections a view, subquery or CTE
+					// introduces) has become meaningless. Those operators must be removed together with the
+					// aggregate: they still reference the base columns of the scan, which no longer exist,
+					// and they would hide the scan's bindings from the operators above the aggregate.
+					auto replacement = std::move(aggr.children[0]);
+					while (replacement->type == LogicalOperatorType::LOGICAL_PROJECTION &&
+					       !replacement->children.empty()) {
+						replacement = std::move(replacement->children[0]);
+					}
+					op->children[i] = std::move(replacement);
 					continue;
 				}
 			}
