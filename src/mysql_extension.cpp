@@ -244,8 +244,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "Add SQL_BUFFER_RESULT for large result sets to release row locks faster (default: true)",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	config.AddExtensionOption("mysql_aggregate_pushdown_enabled",
-	                          "Push aggregate functions (COUNT, SUM, etc.) to MySQL (default: true)",
-	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	                          "Push aggregate functions (COUNT, SUM, etc.) to MySQL (default: false)",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
 	config.AddExtensionOption("mysql_order_pushdown_enabled",
 	                          "Push ORDER BY and LIMIT clauses to MySQL (default: true)", LogicalType::BOOLEAN,
 	                          Value::BOOLEAN(true));
