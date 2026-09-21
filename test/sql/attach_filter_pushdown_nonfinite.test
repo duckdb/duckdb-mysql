@@ -1,0 +1,58 @@
+# name: test/sql/attach_filter_pushdown_nonfinite.test
+# description: Test filter pushdown with non-finite input for expressions when remote execute is not supported
+# group: [sql]
+
+require mysql_scanner
+
+mode skip
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port="0" database="mysqlscanner"' AS s (TYPE MYSQL)
+
+statement ok
+CREATE OR REPLACE TABLE s.filter_pushdown_test_infinite(col1 FLOAT, col2 DOUBLE, col3 DATE, col4 TIMESTAMP)
+
+statement ok
+INSERT INTO s.filter_pushdown_test_infinite values (41.0, 42.0, '2020-12-31', '2020-12-31 23:59:59')
+
+# ExpressionType::COMPARE_IN:
+
+# FLOAT
+
+query I
+SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col1 IN ('inf'::FLOAT, 'nan'::FLOAT, 41.0::FLOAT)
+----
+1
+
+query II
+EXPLAIN SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col1 IN ('inf'::FLOAT, 'nan'::FLOAT, 41.0::FLOAT)
+----
+physical_plan	<REGEX>:.*Mysql Scan.*Filters:.*\(col1 IN \('inf'::FLOAT, 'nan'::FLOAT, 41.0\)\).*
+
+query I
+SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col1 IN ('inf'::FLOAT, 'nan'::FLOAT)
+----
+0
+
+query II
+EXPLAIN SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col1 IN ('inf'::FLOAT, 'nan'::FLOAT)
+----
+physical_plan	<REGEX>:.*Mysql Scan.*Filters:.*\(col1 IN \('inf'::FLOAT, 'nan'::FLOAT\)\).*
+
+# DOUBLE
+
+statement ok
+SET mysql_debug_show_queries = TRUE
+
+query I
+SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col2 IN ('inf'::DOUBLE, 'nan'::DOUBLE, 42.0::DOUBLE)
+----
+1
+
+query II
+EXPLAIN SELECT divide(COUNT(*), 1) FROM s.filter_pushdown_test_infinite WHERE col2 IN ('inf'::DOUBLE, 'nan'::DOUBLE, 42.0::DOUBLE)
+----
+physical_plan	<REGEX>:.*Mysql Scan.*Filters:.*\(col2 IN \('inf'::DOUBLE, 'nan'::DOUBLE, 42.0\)\).*
+
