@@ -442,7 +442,7 @@ string MySQLSQLWriter::WriteSubquery(const SubqueryExpression &subquery) {
 string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 	switch (expr.GetExpressionClass()) {
 	case ExpressionClass::CONSTANT:
-		return WriteConstant(expr.Cast<ConstantExpression>().GetValue());
+		return WriteConstant(expr.Cast<ConstantExpression>().GetLiteral().ToValue());
 	case ExpressionClass::COLUMN_REF:
 		return WriteColumnRef(expr.Cast<ColumnRefExpression>());
 	case ExpressionClass::STAR: {
@@ -478,11 +478,9 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			// MySQL's CAST diverges from DuckDB's for malformed input (NULL / partial values
 			// instead of errors), numeric strings ('1e2', '5.7') and time zone offsets
 			// (SupportsPushdown verifies that the cast succeeds)
-			auto &value = cast_expr.Child().Cast<ConstantExpression>().GetValue();
-			auto target_type = cast_expr.TargetType();
-			if (target_type.id() == LogicalTypeId::UNBOUND) {
-				target_type = UnboundType::TryDefaultBind(target_type);
-			}
+			auto value = cast_expr.Child().Cast<ConstantExpression>().GetLiteral().ToValue();
+			// the cast target is an unbound type expression - resolve it against the built-in types
+			auto target_type = UnboundType::TryDefaultBind(cast_expr.TargetType());
 			auto cast_result = value.DefaultTryCastAs(target_type);
 			if (!cast_result) {
 				throw InternalException("MySQLSQLWriter: cast of literal failed - should have been blocked by "
@@ -490,7 +488,8 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			}
 			return WriteConstant(*cast_result);
 		}
-		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " + WriteCastType(cast_expr.TargetType()) + ")";
+		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " +
+		       WriteCastType(UnboundType::TryDefaultBind(cast_expr.TargetType())) + ")";
 	}
 	case ExpressionClass::BETWEEN: {
 		auto &between = expr.Cast<BetweenExpression>();
@@ -597,7 +596,7 @@ string MySQLSQLWriter::WriteOrderList(const vector<OrderByNode> &orders,
 		string null_key;
 		auto &expr = *order.expression;
 		if (expr.GetExpressionClass() == ExpressionClass::CONSTANT) {
-			auto &val = expr.Cast<ConstantExpression>().GetValue();
+			auto val = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 			if (val.type().IsIntegral() && !val.IsNull() && select_list) {
 				// positional reference (e.g. ORDER BY 1) - resolve it against the select list
 				// SupportsPushdown verifies that this resolution is possible
