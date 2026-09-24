@@ -569,11 +569,11 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const string &sql) {
 	vector<unique_ptr<ParsedExpression>> args;
-	args.push_back(make_uniq<ConstantExpression>(Value(GetName())));
-	args.push_back(make_uniq<ConstantExpression>(Value(sql)));
+	args.push_back(ConstantExpression::String(GetName().GetIdentifierName()));
+	args.push_back(ConstantExpression::String(sql));
 	args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
 	                                               make_uniq<ColumnRefExpression>("suppress_dml_output"),
-	                                               make_uniq<ConstantExpression>(Value::BOOLEAN(true))));
+	                                               ConstantExpression::Boolean(true)));
 	auto func_ref = make_uniq<TableFunctionRef>();
 	func_ref->function = make_uniq<FunctionExpression>("mysql_query", std::move(args));
 	return func_ref;
@@ -1030,7 +1030,7 @@ static bool MySQLSupportsOrderEntries(const MySQLVersion &version, const vector<
 			}
 		}
 		if (expr.GetExpressionClass() == ExpressionClass::CONSTANT) {
-			auto &val = expr.Cast<ConstantExpression>().GetValue();
+			auto val = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 			if (!val.type().IsIntegral()) {
 				// ORDER BY with a non-integer literal is a binder error in DuckDB (unless
 				// order_by_non_integer_literal is set), while MySQL silently ignores it
@@ -1066,7 +1066,7 @@ static bool MySQLIsIntegerLiteral(const ParsedExpression &expr) {
 	if (expr.GetExpressionClass() != ExpressionClass::CONSTANT) {
 		return false;
 	}
-	auto &val = expr.Cast<ConstantExpression>().GetValue();
+	auto val = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 	return val.type().IsIntegral() && !val.IsNull();
 }
 
@@ -1074,7 +1074,7 @@ static bool MySQLIsIntegerLiteralAtLeast(const ParsedExpression &expr, int64_t m
 	if (!MySQLIsIntegerLiteral(expr)) {
 		return false;
 	}
-	auto &val = expr.Cast<ConstantExpression>().GetValue();
+	auto val = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
 	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
@@ -1086,7 +1086,7 @@ static bool MySQLIsIntegerLiteralAtMost(const ParsedExpression &expr, int64_t ma
 	if (!MySQLIsIntegerLiteral(expr)) {
 		return false;
 	}
-	auto &val = expr.Cast<ConstantExpression>().GetValue();
+	auto val = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 	auto bigint_value = val.DefaultTryCastAs(LogicalType::BIGINT);
 	if (!bigint_value || bigint_value->IsNull()) {
 		return false;
@@ -1272,7 +1272,9 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 			// MySQL has no TRY_CAST
 			return false;
 		}
-		if (!MySQLSupportsType(cast_expr.TargetType(), true)) {
+		// the cast target is an unbound type expression - resolve it against the built-in types
+		auto target_type = UnboundType::TryDefaultBind(cast_expr.TargetType());
+		if (!MySQLSupportsType(target_type, true)) {
 			return false;
 		}
 		// MySQL's CAST semantics differ from DuckDB's in several ways: malformed input returns
@@ -1284,11 +1286,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 		// MySQLSQLWriter::WriteExpression) - verify here that this is possible. Casts of
 		// non-literal expressions over malformed data remain a documented limitation.
 		if (cast_expr.Child().GetExpressionClass() == ExpressionClass::CONSTANT) {
-			auto &value = cast_expr.Child().Cast<ConstantExpression>().GetValue();
-			auto target_type = cast_expr.TargetType();
-			if (target_type.id() == LogicalTypeId::UNBOUND) {
-				target_type = UnboundType::TryDefaultBind(target_type);
-			}
+			auto value = cast_expr.Child().Cast<ConstantExpression>().GetLiteral().ToValue();
 			auto cast_result = value.DefaultTryCastAs(target_type);
 			if (!cast_result) {
 				return false;
@@ -1305,8 +1303,7 @@ bool MySQLCatalog::SupportsPushdown(const ParsedExpression &expr) {
 		return true;
 	}
 	case ExpressionClass::CONSTANT: {
-		auto &constant = expr.Cast<ConstantExpression>();
-		auto &value = constant.GetValue();
+		auto value = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
 		if (!MySQLSupportsType(value.type(), false)) {
 			return false;
 		}

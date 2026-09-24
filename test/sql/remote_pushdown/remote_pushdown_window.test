@@ -127,7 +127,7 @@ explain SELECT COUNT(*) FROM (
     SELECT mode(g) OVER (PARTITION BY g) AS m FROM s.win_tbl
 ) t
 ----
-physical_plan	<REGEX>:.*Window.*
+physical_plan	<REGEX>:.*Aggregates: count_star().*
 
 # IGNORE NULLS on LEAD/LAG -- MySQL cannot parse this syntax
 # if pushed the query would fail with a syntax error
