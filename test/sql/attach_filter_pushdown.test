@@ -172,34 +172,28 @@ physical_plan	<REGEX>:.*Mysql Scan.*Filters: col1 >= 44.*
 
 # ExpressionType::COMPARE_DISTINCT_FROM:
 
-# TODO
-mode skip
-
 query I
-SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS DISTINCT FROM NULL
+SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS DISTINCT FROM 'foo'
 ----
-41
 42
+44
 
 query II
-EXPLAIN SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS DISTINCT FROM NULL
+EXPLAIN SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS DISTINCT FROM 'foo'
 ----
-physical_plan	<REGEX>:.*Mysql Scan.*Filters: col2 IS DISTINCT FROM NULL.*
+physical_plan	<REGEX>:.*Mysql Scan.*Filters: col2 IS DISTINCT FROM 'foo'.*
 
 # ExpressionType::COMPARE_NOT_DISTINCT_FROM:
 
 query I
-SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS NOT DISTINCT FROM NULL
+SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS NOT DISTINCT FROM 'foo'
 ----
-44
+41
 
 query II
-EXPLAIN SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS NOT DISTINCT FROM NULL
+EXPLAIN SELECT divide(col1, 1) FROM s.filter_pushdown_test WHERE col2 IS NOT DISTINCT FROM 'foo'
 ----
-physical_plan	<REGEX>:.*Mysql Scan.*Filters: col2 IS NOT DISTINCT FROM NULL.*
-
-# TODO
-mode unskip
+physical_plan	<REGEX>:.*Mysql Scan.*Filters: col2 IS NOT DISTINCT FROM 'foo'.*
 
 # VARCHAR comparison logic
 
