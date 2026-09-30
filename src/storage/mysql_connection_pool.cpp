@@ -123,9 +123,11 @@ MySQLConfigurePoolFunction::MySQLConfigurePoolFunction()
     : TableFunction("mysql_configure_pool", std::vector<LogicalType>(),
                     ConfigurePool::Function<MySQLConnection, GetConnnectionPoolFromCatalog>, ConfigurePool::Bind,
                     ConfigurePool::InitGlobalState, ConfigurePool::InitLocalState) {
-	for (auto &en : ConfigurePool::NamedParameters()) {
-		named_parameters[en.first] = en.second;
-	}
+	GetSignature().WithTypedKwargs("options", [](TypedKwargs &options) {
+		for (auto &en : ConfigurePool::NamedParameters()) {
+			options.Add(en.first, en.second);
+		}
+	});
 }
 
 } // namespace duckdb

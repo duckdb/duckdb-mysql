@@ -513,7 +513,7 @@ string MySQLCatalog::GetDBPath() {
 void MySQLCatalog::MaterializeMySQLScans(PhysicalOperator &op) {
 	if (op.type == PhysicalOperatorType::TABLE_SCAN) {
 		auto &table_scan = op.Cast<PhysicalTableScan>();
-		auto &function_name = table_scan.function.name.GetIdentifierName();
+		auto &function_name = table_scan.function.GetName().GetIdentifierName();
 		if (MySQLCatalog::IsMySQLScan(function_name)) {
 			auto &bind_data = table_scan.bind_data->Cast<MySQLBindData>();
 			bind_data.optimizer_streaming = MySQLResultStreaming::FORCE_MATERIALIZATION;
