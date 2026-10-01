@@ -10,6 +10,7 @@
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/common/types.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"
 #include "duckdb/parser/query_node/delete_query_node.hpp"
@@ -54,6 +55,8 @@ public:
 
 	//! Convert a query node to a MySQL-compatible SQL string
 	static string MySQLToString(ClientContext &context, const MySQLVersion &version, const QueryNode &node);
+	//! Convert a statement to a MySQL-compatible SQL string
+	static string MySQLToString(ClientContext &context, const MySQLVersion &version, const SQLStatement &statement);
 
 private:
 	string WriteQueryNode(const QueryNode &node);
@@ -83,6 +86,10 @@ private:
 	string WriteConstant(const Value &value);
 	string WriteCastType(const LogicalType &type);
 	string WriteIdentifier(const string &identifier);
+
+	string WriteStatement(const SQLStatement &statement);
+	string WriteCreateStatement(const CreateInfo &info);
+	string WriteCreateTableStatement(const CreateTableInfo &info);
 
 private:
 	ClientContext &context;

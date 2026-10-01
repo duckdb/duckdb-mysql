@@ -15,7 +15,8 @@ add_library(
   mysql_sql_writer.cpp
   mysql_storage.cpp
   mysql_types.cpp
-  mysql_utils.cpp)
+  mysql_utils.cpp
+  mysql_version.cpp)
 
 set(ALL_OBJECT_FILES
     ${ALL_OBJECT_FILES} $<TARGET_OBJECTS:mysql_ext_library>

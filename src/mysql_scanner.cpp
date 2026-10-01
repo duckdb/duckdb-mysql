@@ -84,7 +84,9 @@ static unique_ptr<GlobalTableFunctionState> MySQLInitGlobalState(ClientContext &
 	select += ".";
 	select += MySQLUtils::WriteIdentifier(bind_data.table_name.Name().GetIdentifierName());
 
-	string filter_string = MySQLFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.names);
+	auto attached_catalog = MySQLCatalog::Lookup(context, bind_data.table_name.Catalog());
+	MySQLFilterPushdown pushdown(std::move(attached_catalog));
+	string filter_string = pushdown.TransformFilters(input.column_ids, input.filters, bind_data.names);
 
 	if (!filter_string.empty()) {
 		select += " WHERE " + filter_string;

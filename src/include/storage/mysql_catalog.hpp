@@ -18,6 +18,8 @@
 #include "duckdb/execution/physical_plan_generator.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
+
+#include "storage/mysql_capabilities.hpp"
 #include "mysql_connection.hpp"
 #include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
@@ -28,7 +30,8 @@ class MySQLSchemaEntry;
 class MySQLCatalog : public Catalog {
 public:
 	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode,
-	                      vector<string> schemas_to_load, shared_ptr<MySQLConnectionPool> pool_p);
+	                      vector<string> schemas_to_load, shared_ptr<MySQLConnectionPool> pool_p,
+	                      bool ddl_pushdown_enabled);
 	~MySQLCatalog();
 
 	Identifier catalog_name;
@@ -68,21 +71,26 @@ public:
 	//! Whether or not this is an in-memory MySQL database
 	bool InMemory() override;
 	string GetDBPath() override;
+
 	bool Supports(RemoteCapability capability) const override {
-		switch (capability) {
-		case RemoteCapability::IS_REMOTE:
-		case RemoteCapability::EXECUTE_QUERY_NODE:
-		case RemoteCapability::CONNECT:
-			return true;
-		default:
-			return false;
-		}
+		return capabilities.Supports(capability);
 	}
+	bool SupportsPushdown(const ParsedExpression &expression) override {
+		return capabilities.SupportsPushdown(expression);
+	}
+	bool SupportsPushdown(const TableRef &ref) override {
+		return capabilities.SupportsPushdown(ref);
+	}
+	bool SupportsPushdown(const QueryNode &node) override {
+		return capabilities.SupportsPushdown(node);
+	}
+	bool SupportsPushdown(const SQLStatement &statement) override {
+		return ddl_pushdown_enabled && capabilities.SupportsPushdown(statement);
+	}
+
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement);
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
-	bool SupportsPushdown(const ParsedExpression &expression) override;
-	bool SupportsPushdown(const TableRef &ref) override;
-	bool SupportsPushdown(const QueryNode &node) override;
 
 	void ClearCache();
 
@@ -96,7 +104,7 @@ public:
 	shared_ptr<MySQLConnectionPool> GetConnectionPoolPtr();
 	//! The server version, fetched when the database was attached
 	const MySQLVersion &GetVersion() const {
-		return version;
+		return capabilities.GetVersion();
 	}
 
 private:
@@ -105,8 +113,9 @@ private:
 private:
 	MySQLSchemaSet schemas;
 	string default_schema;
-	MySQLVersion version;
+	MySQLCapabilities capabilities;
 	shared_ptr<MySQLConnectionPool> connection_pool;
+	bool ddl_pushdown_enabled;
 };
 
 } // namespace duckdb
