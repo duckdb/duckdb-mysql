@@ -170,11 +170,11 @@ static InsertionOrderPreservingMap<string> MySQLScanToString(TableFunctionToStri
 }
 
 static void MySQLScanSerialize(Serializer &serializer, const optional_ptr<FunctionData> bind_data_p,
-                               const TableFunction &function) {
+                               const BoundTableFunction &function) {
 	throw NotImplementedException("MySQLScanSerialize");
 }
 
-static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer, TableFunction &function) {
+static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer, BoundTableFunction &function) {
 	throw NotImplementedException("MySQLScanDeserialize");
 }
 
@@ -190,8 +190,12 @@ static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
 }
 
 MySQLScanFunction::MySQLScanFunction()
-    : TableFunction("mysql_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLScan,
-                    MySQLBind, MySQLInitGlobalState, MySQLInitLocalState) {
+    : TableFunction("mysql_scan",
+                    FunctionSignature()
+                        .AddPositionalOnly("database", LogicalType::VARCHAR)
+                        .AddPositionalOnly("schema_name", LogicalType::VARCHAR)
+                        .AddPositionalOnly("table_name", LogicalType::VARCHAR),
+                    MySQLScan, MySQLBind, MySQLInitGlobalState, MySQLInitLocalState) {
 	to_string = MySQLScanToString;
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
@@ -496,28 +500,35 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 	MySQLScan(context, data, output);
 }
 
+static FunctionSignature MySQLQuerySignature(bool stream_results, bool suppress_dml_output) {
+	FunctionSignature signature;
+	signature.AddParameter("database", LogicalType::VARCHAR)
+	    .AddParameter("sql", LogicalType::VARCHAR)
+	    .WithTypedKwargs("options", [&](TypedKwargs &options) {
+		    options.Add("params", LogicalType::ANY).Add("params_handle", LogicalType::BIGINT);
+		    if (stream_results) {
+			    options.Add("stream_results", LogicalType::BOOLEAN);
+		    }
+		    options.Add("connection", LogicalType::UBIGINT).Add("prepare", LogicalType::BOOLEAN);
+		    if (suppress_dml_output) {
+			    options.Add("suppress_dml_output", LogicalType::BOOLEAN);
+		    }
+	    });
+	return signature;
+}
+
 MySQLQueryFunction::MySQLQueryFunction()
-    : TableFunction("mysql_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLQueryScan, MySQLQueryBind,
+    : TableFunction("mysql_query", MySQLQuerySignature(true, true), MySQLQueryScan, MySQLQueryBind,
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
-	named_parameters["params"] = LogicalType::ANY;
-	named_parameters["params_handle"] = LogicalType::BIGINT;
-	named_parameters["stream_results"] = LogicalType::BOOLEAN;
-	named_parameters["connection"] = LogicalType::UBIGINT;
-	named_parameters["prepare"] = LogicalType::BOOLEAN;
-	named_parameters["suppress_dml_output"] = LogicalType::BOOLEAN;
 }
 
 MySQLExecuteFunction::MySQLExecuteFunction()
-    : TableFunction("mysql_execute", {LogicalType::VARCHAR, LogicalType::VARCHAR}, MySQLQueryScan, MySQLQueryBind,
+    : TableFunction("mysql_execute", MySQLQuerySignature(false, false), MySQLQueryScan, MySQLQueryBind,
                     MySQLQueryInitGlobalState, MySQLInitLocalState) {
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
-	named_parameters["params"] = LogicalType::ANY;
-	named_parameters["params_handle"] = LogicalType::BIGINT;
-	named_parameters["connection"] = LogicalType::UBIGINT;
-	named_parameters["prepare"] = LogicalType::BOOLEAN;
 }
 
 static void MySQLPinConnection(DataChunk &args, ExpressionState &state, Vector &result) {

@@ -19,11 +19,11 @@ void GatherMySQLScans(ClientContext &ctx, LogicalOperator &op, MySQLOperators &r
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
 		auto &table_scan = get.function;
-		if (MySQLCatalog::IsMySQLScan(table_scan.name.GetIdentifierName())) {
+		if (MySQLCatalog::IsMySQLScan(table_scan.GetName().GetIdentifierName())) {
 			auto &bdata = get.bind_data->Cast<MySQLBindData>();
 			result.scans[bdata.table_name.Catalog().GetIdentifierName()].push_back(get);
 		}
-		if (MySQLCatalog::IsMySQLQuery(table_scan.name.GetIdentifierName())) {
+		if (MySQLCatalog::IsMySQLQuery(table_scan.GetName().GetIdentifierName())) {
 			auto &bdata = get.bind_data->Cast<MySQLQueryBindData>();
 			result.scans[bdata.catalog_name.GetIdentifierName()].push_back(get);
 		}
@@ -43,7 +43,7 @@ void MySQLOptimizer::Optimize(OptimizerExtensionInput &input, unique_ptr<Logical
 		}
 		for (auto &logical_get : entry.second) {
 			auto &get = logical_get.get();
-			auto &function_name = get.function.name.GetIdentifierName();
+			auto &function_name = get.function.GetName().GetIdentifierName();
 			if (MySQLCatalog::IsMySQLScan(function_name)) {
 				auto &bind_data = get.bind_data->Cast<MySQLBindData>();
 				if (bind_data.optimizer_streaming == MySQLResultStreaming::UNINITIALIZED ||
