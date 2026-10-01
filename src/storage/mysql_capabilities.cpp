@@ -67,13 +67,6 @@ bool MySQLCapabilities::SupportsType(const LogicalType &type, bool for_cast) {
 	case LogicalTypeId::DOUBLE: // CAST(x AS DOUBLE) - MySQL 8.0.17+
 	case LogicalTypeId::DECIMAL:
 		return true;
-	case LogicalTypeId::UNBOUND: {
-		auto try_bind = UnboundType::TryDefaultBind(type);
-		if (try_bind.id() == LogicalTypeId::UNBOUND) {
-			return false;
-		}
-		return SupportsType(try_bind, for_cast);
-	}
 	default:
 		return false;
 	}
@@ -750,7 +743,8 @@ bool MySQLCapabilities::SupportsPushdown(const ParsedExpression &expr) {
 			return false;
 		}
 		// the cast target is an unbound type expression - resolve it against the built-in types
-		auto target_type = UnboundType::TryDefaultBind(cast_expr.TargetType());
+		const TypeExpression &target_type_expr = cast_expr.TargetType();
+		LogicalType target_type = MySQLTypes::ToLogicalType(target_type_expr);
 		if (!SupportsType(target_type, true)) {
 			return false;
 		}

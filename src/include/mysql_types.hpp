@@ -8,9 +8,12 @@
 
 #pragma once
 
+#include "mysql.h"
+
 #include "duckdb.hpp"
 #include "duckdb/main/client_context.hpp"
-#include "mysql.h"
+#include "duckdb/parser/parsed_expression.hpp"
+#include "duckdb/parser/expression/type_expression.hpp"
 
 namespace duckdb {
 
@@ -45,6 +48,8 @@ public:
 	static LogicalType TypeToLogicalType(const MySQLTypeConfig &type_config, const MySQLTypeData &input);
 	static LogicalType FieldToLogicalType(const MySQLTypeConfig &type_config, MYSQL_FIELD *field);
 	static string TypeToString(const LogicalType &input);
+	static LogicalType ToLogicalType(optional_ptr<ParsedExpression> type_expr_ptr);
+	static LogicalType ToLogicalType(const TypeExpression &type_expr);
 };
 
 } // namespace duckdb

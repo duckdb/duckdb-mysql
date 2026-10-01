@@ -18,10 +18,10 @@ statement ok
 DETACH s
 
 statement ok
-ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+SET mysql_enable_remote_pushdown_ddl = TRUE
 
 statement ok
-SET mysql_enable_remote_pushdown_ddl = TRUE
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
 
 statement ok
 CALL mysql_execute('s', 'DROP TABLE IF EXISTS pushdown_create_test1')
