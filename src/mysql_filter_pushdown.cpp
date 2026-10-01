@@ -13,7 +13,9 @@
 #include "dbconnector/table_scan/filter_pushdown.hpp"
 #include "dbconnector/table_scan/filter_util.hpp"
 
+#include "mysql_scanner.hpp"
 #include "mysql_utils.hpp"
+#include "storage/mysql_catalog.hpp"
 
 namespace duckdb {
 
@@ -74,44 +76,64 @@ static dbconnector::table_scan::FilterConstantRange GetConstantRange(const Value
 	}
 }
 
-static dbconnector::table_scan::FilterPushdown::Config CreateMySQLConfig() {
-	using namespace dbconnector;
-
-	return table_scan::FilterPushdown::CreateConfig('`', '\'', query::QuoteEscapeStyle::BACKSLASH, "x'", "'",
-	                                                "utf8mb4_bin", WriteDistinctFrom, GetConstantRange);
+static Identifier GetCatalogName(const LogicalGet &get) {
+	auto &table_scan = get.function;
+	if (MySQLCatalog::IsMySQLScan(table_scan.GetName().GetIdentifierName())) {
+		auto &bdata = get.bind_data->Cast<MySQLBindData>();
+		return bdata.table_name.Catalog();
+	}
+	if (MySQLCatalog::IsMySQLQuery(table_scan.GetName().GetIdentifierName())) {
+		auto &bdata = get.bind_data->Cast<MySQLQueryBindData>();
+		return bdata.catalog_name;
+	}
+	throw InvalidInputException("Specified LogicalGet is not for MySQL");
 }
 
-bool MySQLFilterPushdown::CanPushExpressionDown(ClientContext &, const LogicalGet &, Expression &expr) {
-	using dbconnector::table_scan::FilterPushdown;
+bool MySQLFilterPushdown::CanPushExpressionDown(ClientContext &ctx, const LogicalGet &get, Expression &expr) {
+	using namespace dbconnector;
 
-	auto config = CreateMySQLConfig();
-	string filter = FilterPushdown::TransformFilterExpression(config, "dummy", expr);
+	auto catalog_name = GetCatalogName(get);
+	auto attached_catalog = MySQLCatalog::Lookup(ctx, catalog_name);
+	MySQLFilterPushdown pushdown(std::move(attached_catalog));
+	auto pushdown_config = pushdown.CreatePushdownConfig();
+	string filter = table_scan::FilterPushdown::TransformFilterExpression(pushdown_config, "dummy", expr);
 	return !filter.empty();
+}
+
+dbconnector::table_scan::FilterPushdown::Config MySQLFilterPushdown::CreatePushdownConfig() {
+	using namespace dbconnector;
+
+	MySQLCatalog &catalog = attached_catalog.Get<MySQLCatalog>();
+	const MySQLVersion &version = catalog.GetVersion();
+	return table_scan::FilterPushdown::CreateConfig('`', '\'', query::QuoteEscapeStyle::BACKSLASH, "x'", "'",
+	                                                version.GetBinaryCollation(), WriteDistinctFrom, GetConstantRange);
 }
 
 string MySQLFilterPushdown::TransformFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
                                              const vector<string> &names) {
-	using namespace dbconnector;
+	using namespace dbconnector::table_scan;
 
 	if (!filters || !filters->HasFilters()) {
 		// no filters
 		return string();
 	}
+
+	auto pushdown_config = CreatePushdownConfig();
+
 	string result;
 	for (auto &entry : *filters) {
 		column_t col_id = column_ids[entry.GetIndex()];
 		auto column_name = names[col_id];
 		auto &filter = entry.Filter();
-		auto config = CreateMySQLConfig();
-		auto new_filter = table_scan::FilterPushdown::TransformFilter(config, column_name, filter, col_id);
+		auto new_filter = FilterPushdown::TransformFilter(pushdown_config, column_name, filter, col_id);
 		if (new_filter.empty()) {
-			if (table_scan::FilterUtil::IsInternalFilter(filter)) {
+			if (FilterUtil::IsInternalFilter(filter)) {
 				continue;
 			}
 			throw NotImplementedException(
 			    "Unsupported filter pushdown, use 'mysql_enable_filter_pushdown=FALSE' to disable pushdowns."
 			    " Problematic filter: \"%s\"",
-			    table_scan::FilterUtil::ToString(filter));
+			    FilterUtil::ToString(filter));
 		}
 		if (!result.empty()) {
 			result += " AND ";

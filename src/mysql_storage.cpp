@@ -76,8 +76,14 @@ static unique_ptr<Catalog> MySQLAttach(optional_ptr<StorageExtensionInfo> storag
 
 	auto pool = make_shared_ptr<MySQLConnectionPool>(context, connection_string, attach_path);
 
+	Value ddl_pushdown_val;
+	bool ddl_pushdown = false;
+	if (context.TryGetCurrentSetting("mysql_enable_remote_pushdown_ddl", ddl_pushdown_val)) {
+		ddl_pushdown = BooleanValue::Get(ddl_pushdown_val);
+	}
+
 	return make_uniq<MySQLCatalog>(db, std::move(connection_string), std::move(attach_path), attach_options.access_mode,
-	                               std::move(schemas_to_load), std::move(pool));
+	                               std::move(schemas_to_load), std::move(pool), ddl_pushdown);
 }
 
 static unique_ptr<TransactionManager> MySQLCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

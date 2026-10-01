@@ -1,5 +1,6 @@
 add_library(
   mysql_ext_storage OBJECT
+  mysql_capabilities.cpp
   mysql_catalog.cpp
   mysql_catalog_set.cpp
   mysql_clear_cache.cpp
