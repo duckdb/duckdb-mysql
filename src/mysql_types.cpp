@@ -1,4 +1,6 @@
 #include "mysql_types.hpp"
+
+#include "duckdb/catalog/default/default_types.hpp"
 #include "duckdb/main/client_context.hpp"
 
 namespace duckdb {
@@ -261,6 +263,27 @@ string MySQLTypes::TypeToString(const LogicalType &input) {
 	default:
 		return input.ToString();
 	}
+}
+
+LogicalType MySQLTypes::ToLogicalType(optional_ptr<ParsedExpression> type_expr_ptr) {
+	if (!type_expr_ptr) {
+		throw InvalidInputException("MySQLTypes::ToLogicalType: null type expression specified");
+	}
+	if (type_expr_ptr->GetExpressionType() != ExpressionType::TYPE) {
+		throw InvalidInputException("MySQLTypes::ToLogicalType: unable to extract type name from expression: \"%s\"",
+		                            type_expr_ptr->ToString());
+	}
+	const TypeExpression &type_expr = type_expr_ptr->Cast<TypeExpression>();
+	return ToLogicalType(type_expr);
+}
+
+LogicalType MySQLTypes::ToLogicalType(const TypeExpression &type_expr) {
+	const Identifier &type_name = type_expr.GetQualifiedName().Name();
+	LogicalTypeId type_id = DefaultTypeGenerator::GetDefaultType(type_name);
+	if (type_id == LogicalTypeId::INVALID) {
+		throw InvalidInputException("MySQLTypes::ToLogicalType: invalid type expression: \"%s\"", type_expr.ToString());
+	}
+	return LogicalType(type_id);
 }
 
 } // namespace duckdb

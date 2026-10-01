@@ -129,14 +129,6 @@ string MySQLSQLWriter::WriteCastType(const LogicalType &type) {
 		return "DOUBLE";
 	case LogicalTypeId::DECIMAL:
 		return StringUtil::Format("DECIMAL(%d,%d)", DecimalType::GetWidth(type), DecimalType::GetScale(type));
-	case LogicalTypeId::UNBOUND: {
-		auto try_bind = UnboundType::TryDefaultBind(type);
-		if (try_bind.id() == LogicalTypeId::UNBOUND) {
-			throw InternalException("MySQLSQLWriter: unsupported unbound cast type - should have been blocked by "
-			                        "SupportsPushdown");
-		}
-		return WriteCastType(try_bind);
-	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported cast type %s - should have been blocked by "
 		                        "SupportsPushdown",
@@ -483,14 +475,15 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 		return WriteCase(expr.Cast<CaseExpression>());
 	case ExpressionClass::CAST: {
 		auto &cast_expr = expr.Cast<CastExpression>();
+		// the cast target is an unbound type expression - resolve it against the built-in types
+		const TypeExpression &target_type_expr = cast_expr.TargetType();
+		LogicalType target_type = MySQLTypes::ToLogicalType(target_type_expr);
 		if (cast_expr.Child().GetExpressionClass() == ExpressionClass::CONSTANT) {
 			// casts of literals are evaluated locally and serialized as the resulting value -
 			// MySQL's CAST diverges from DuckDB's for malformed input (NULL / partial values
 			// instead of errors), numeric strings ('1e2', '5.7') and time zone offsets
 			// (SupportsPushdown verifies that the cast succeeds)
 			auto value = cast_expr.Child().Cast<ConstantExpression>().GetLiteral().ToValue();
-			// the cast target is an unbound type expression - resolve it against the built-in types
-			auto target_type = UnboundType::TryDefaultBind(cast_expr.TargetType());
 			auto cast_result = value.DefaultTryCastAs(target_type);
 			if (!cast_result) {
 				throw InternalException("MySQLSQLWriter: cast of literal failed - should have been blocked by "
@@ -498,8 +491,7 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			}
 			return WriteConstant(*cast_result);
 		}
-		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " +
-		       WriteCastType(UnboundType::TryDefaultBind(cast_expr.TargetType())) + ")";
+		return "CAST(" + WriteExpression(cast_expr.Child()) + " AS " + WriteCastType(target_type) + ")";
 	}
 	case ExpressionClass::BETWEEN: {
 		auto &between = expr.Cast<BetweenExpression>();
@@ -1007,9 +999,9 @@ string MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &info) {
 	MySQLTypeConfig type_config(context);
 	std::unordered_map<string, LogicalType> column_types;
 	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
-		auto &col = info.columns.GetColumn(LogicalIndex(i));
-		LogicalType duckdb_type = UnboundType::TryDefaultBind(col.GetType());
-		// TODO: fallback to UnboundType::GetTypeExpression(col.GetType())->ToString();
+		const ColumnDefinition &col = info.columns.GetColumn(LogicalIndex(i));
+		const unique_ptr<ParsedExpression> &expr = UnboundType::GetTypeExpression(col.GetType());
+		LogicalType duckdb_type = MySQLTypes::ToLogicalType(expr.get());
 		LogicalType mysql_type = MySQLTypes::ToMySQLType(type_config, duckdb_type);
 		column_types.emplace(col.Name().GetIdentifierName(), std::move(mysql_type));
 	}
