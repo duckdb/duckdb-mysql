@@ -54,9 +54,10 @@ public:
 	MySQLSQLWriter(ClientContext &context, const MySQLVersion &version);
 
 	//! Convert a query node to a MySQL-compatible SQL string
-	static string MySQLToString(ClientContext &context, const MySQLVersion &version, const QueryNode &node);
+	static vector<string> ToStatements(ClientContext &context, const MySQLVersion &version, const QueryNode &node);
 	//! Convert a statement to a MySQL-compatible SQL string
-	static string MySQLToString(ClientContext &context, const MySQLVersion &version, const SQLStatement &statement);
+	static vector<string> ToStatements(ClientContext &context, const MySQLVersion &version,
+	                                   const SQLStatement &statement);
 
 private:
 	string WriteQueryNode(const QueryNode &node);
@@ -87,9 +88,9 @@ private:
 	string WriteCastType(const LogicalType &type);
 	string WriteIdentifier(const string &identifier);
 
-	string WriteStatement(const SQLStatement &statement);
-	string WriteCreateStatement(const CreateInfo &info);
-	string WriteCreateTableStatement(const CreateTableInfo &info);
+	vector<string> WriteStatement(const SQLStatement &statement);
+	vector<string> WriteCreateStatement(const CreateInfo &info);
+	vector<string> WriteCreateTableStatement(const CreateTableInfo &info);
 
 private:
 	ClientContext &context;

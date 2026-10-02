@@ -24,24 +24,20 @@ statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
 
 statement ok
-CALL mysql_execute('s', 'DROP TABLE IF EXISTS pushdown_create_test1')
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
 
-statement ok
-CREATE TABLE s.pushdown_create_test1(col1 INT)
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
 
 query IIIIII
-FROM mysql_query('s', 'DESCRIBE pushdown_create_test1')
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
 ----
 col1	int	YES	(empty)	NULL	(empty)
 
 statement ok
-CALL mysql_execute('s', 'DROP TABLE pushdown_create_test1')
-
-statement ok
-CALL mysql_execute('s', 'DROP TABLE IF EXISTS pushdown_create_test2')
-
-statement ok
-CREATE TABLE s.pushdown_create_test2(col1 INT, col2 BIGINT, PRIMARY KEY(col1, col2))
+CREATE OR REPLACE TABLE s.pushdown_create_test2(col1 INT, col2 BIGINT, PRIMARY KEY(col1, col2))
 
 query IIIIII
 FROM mysql_query('s', 'DESCRIBE pushdown_create_test2')
@@ -50,7 +46,7 @@ col1	int	NO	PRI	NULL	(empty)
 col2	bigint	NO	PRI	NULL	(empty)
 
 statement ok
-CALL mysql_execute('s', 'DROP TABLE pushdown_create_test2')
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_test')
 
 statement ok
 DETACH s

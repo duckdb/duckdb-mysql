@@ -1167,10 +1167,11 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 		case CatalogType::TABLE_ENTRY: {
 			CreateTableInfo &info = create_info.Cast<CreateTableInfo>();
 
-			// IF EXISTS, OR REPLACE
+			// IF NOT EXISTS, OR REPLACE
 			switch (info.on_conflict) {
 			case OnCreateConflict::ERROR_ON_CONFLICT:
 			case OnCreateConflict::IGNORE_ON_CONFLICT:
+			case OnCreateConflict::REPLACE_ON_CONFLICT:
 				break;
 			default:
 				return false;
