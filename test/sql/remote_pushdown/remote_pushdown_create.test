@@ -23,18 +23,159 @@ SET mysql_enable_remote_pushdown_ddl = TRUE
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
 
-statement ok
-CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
+# basic
 
 query II
 EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
 ----
 physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
 
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
+
 query IIIIII
 FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
 ----
 col1	int	YES	(empty)	NULL	(empty)
+
+# unsupported column types
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 VARCHAR[])
+----
+physical_plan	<!REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 VARCHAR[])
+----
+unsupported type
+
+# boolean
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 INT)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 BOOLEAN)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	tinyint(1)	YES	(empty)	NULL	(empty)
+
+# signed integrals
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 TINYINT, col2 SMALLINT, col3 INTEGER, col4 BIGINT)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 TINYINT, col2 SMALLINT, col3 INTEGER, col4 BIGINT)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	tinyint	YES	(empty)	NULL	(empty)
+col2	smallint	YES	(empty)	NULL	(empty)
+col3	int	YES	(empty)	NULL	(empty)
+col4	bigint	YES	(empty)	NULL	(empty)
+
+# unsigned integrals
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 UTINYINT, col2 USMALLINT, col3 UINTEGER, col4 UBIGINT)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 UTINYINT, col2 USMALLINT, col3 UINTEGER, col4 UBIGINT)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	tinyint unsigned	YES	(empty)	NULL	(empty)
+col2	smallint unsigned	YES	(empty)	NULL	(empty)
+col3	int unsigned	YES	(empty)	NULL	(empty)
+col4	bigint unsigned	YES	(empty)	NULL	(empty)
+
+# floating
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 FLOAT, col2 DOUBLE)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 FLOAT, col2 DOUBLE)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	float	YES	(empty)	NULL	(empty)
+col2	double	YES	(empty)	NULL	(empty)
+
+# decimals
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 DECIMAL, col2 DECIMAL(18), col3 DECIMAL(4,3), col4 DECIMAL(9,3), col5 DECIMAL(18,3), col6 DECIMAL(38,3))
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 DECIMAL, col2 DECIMAL(15), col3 DECIMAL(4,4), col4 DECIMAL(9,4), col5 DECIMAL(18,4), col6 DECIMAL(38,4))
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	decimal(18,3)	YES	(empty)	NULL	(empty)
+col2	decimal(15,3)	YES	(empty)	NULL	(empty)
+col3	decimal(4,4)	YES	(empty)	NULL	(empty)
+col4	decimal(9,4)	YES	(empty)	NULL	(empty)
+col5	decimal(18,4)	YES	(empty)	NULL	(empty)
+col6	decimal(38,4)	YES	(empty)	NULL	(empty)
+
+# temporal
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 DATE, col2 TIME, col3 TIME_NS, col4 TIMESTAMP, col5 TIMESTAMP_S, col6 TIMESTAMP_MS, col7 TIMESTAMP_NS)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 DATE, col2 TIME, col3 TIME_NS, col4 TIMESTAMP, col5 TIMESTAMP_S, col6 TIMESTAMP_MS, col7 TIMESTAMP_NS)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	date	YES	(empty)	NULL	(empty)
+col2	text	YES	(empty)	NULL	(empty)
+col3	text	YES	(empty)	NULL	(empty)
+col4	datetime	YES	(empty)	NULL	(empty)
+col5	datetime	YES	(empty)	NULL	(empty)
+col6	datetime	YES	(empty)	NULL	(empty)
+col7	datetime	YES	(empty)	NULL	(empty)
+
+# strings
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test(col1 VARCHAR, col2 VARCHAR(42), col3 BLOB)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_test(col1 VARCHAR, col2 VARCHAR(42), col3 BLOB)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
+----
+col1	text	YES	(empty)	NULL	(empty)
+col2	text	YES	(empty)	NULL	(empty)
+col3	blob	YES	(empty)	NULL	(empty)
+
+# PRIMARY KEY
 
 statement ok
 CREATE OR REPLACE TABLE s.pushdown_create_test2(col1 INT, col2 BIGINT, PRIMARY KEY(col1, col2))

@@ -226,7 +226,9 @@ LogicalType MySQLTypes::ToMySQLType(const MySQLTypeConfig &type_config, const Lo
 	case LogicalTypeId::VARCHAR:
 		return input;
 	case LogicalTypeId::TIME:
-		return type_config.time_as_time ? LogicalType::TIME : LogicalType::VARCHAR;
+	case LogicalTypeId::TIME_NS:
+		return type_config.time_as_time ? input : LogicalType::VARCHAR;
+	case LogicalTypeId::ARRAY:
 	case LogicalTypeId::LIST:
 		throw NotImplementedException("MySQL does not support arrays - unsupported type \"%s\"", input.ToString());
 	case LogicalTypeId::STRUCT:
