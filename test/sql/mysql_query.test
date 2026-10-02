@@ -357,5 +357,12 @@ CALL mysql_query('simple', 'UPDATE dml_output_test SET col1 = 43', suppress_dml_
 statement ok
 CALL mysql_query('simple', 'DROP TABLE dml_output_test')
 
+# preliminary queries
+statement ok
+CALL mysql_query('simple', 'DROP TABLE preliminary_queries_test', preliminary_queries=[
+  'DROP TABLE IF EXISTS preliminary_queries_test',
+  'CREATE TABLE preliminary_queries_test(col1 INT)'
+])
+
 statement ok
 DETACH simple;
