@@ -222,6 +222,31 @@ static MySQLCatalog &GetCatalogByName(ClientContext &context, const std::string 
 	return catalog.Cast<MySQLCatalog>();
 }
 
+static vector<string> ExtractPreliminaryQueries(TableFunctionBindInput &input) {
+	vector<string> queries;
+	auto it = input.named_parameters.find("preliminary_queries");
+	if (it != input.named_parameters.end()) {
+		Value &list_val = it->second;
+		if (list_val.IsNull()) {
+			throw BinderException("Specified preliminary queries LIST must be not NULL");
+		}
+		if (list_val.type().id() != LogicalTypeId::LIST) {
+			throw BinderException("Preliminary queries must be specified in a LIST");
+		}
+		for (const Value &val : ListValue::GetChildren(list_val)) {
+			if (val.IsNull()) {
+				throw BinderException("All preliminary queries must be not NULL");
+			}
+			if (val.type().id() != LogicalTypeId::VARCHAR) {
+				throw BinderException("All preliminary queries must be of type VARCHAR");
+			}
+			const string &query = StringValue::Get(val);
+			queries.push_back(query);
+		}
+	}
+	return queries;
+}
+
 static vector<Value> ExtractParams(TableFunctionBindInput &input) {
 	vector<Value> params;
 	auto params_it = input.named_parameters.find("params");
@@ -309,6 +334,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 	string db_name = input.inputs[0].GetValue<string>();
 	MySQLCatalog &catalog = GetCatalogByName(context, db_name);
+	vector<string> preliminary_queries = ExtractPreliminaryQueries(input);
 	auto sql = input.inputs[1].GetValue<string>();
 	vector<Value> params = ExtractParams(input);
 	int64_t params_handle = ExtractParamsHandle(input);
@@ -351,7 +377,8 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			}
 			return_types.emplace_back(LogicalType::BIGINT);
 			names.emplace_back("rowcount");
-			return make_uniq<MySQLQueryBindData>(catalog, sql, user_streaming, pinned_connection_id);
+			return make_uniq<MySQLQueryBindData>(catalog, std::move(preliminary_queries), sql, user_streaming,
+			                                     pinned_connection_id);
 		}
 
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
@@ -377,9 +404,9 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		// rename them as table functions require unique column names
 		QueryResult::DeduplicateColumns(names);
 
-		return make_uniq<MySQLQueryBindData>(catalog, sql, std::move(params), params_handle,
-		                                     std::move(stmt->FieldsCopy()), user_streaming, std::move(stmt),
-		                                     prepare_connection_id, pinned_connection_id);
+		return make_uniq<MySQLQueryBindData>(catalog, std::move(preliminary_queries), sql, std::move(params),
+		                                     params_handle, std::move(stmt->FieldsCopy()), user_streaming,
+		                                     std::move(stmt), prepare_connection_id, pinned_connection_id);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -472,6 +499,11 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		}
 
 		MySQLConnection &conn = *conn_ptr;
+
+		for (const string &query : bdata.preliminary_queries) {
+			conn.Execute(query);
+		}
+
 		const vector<Value> &params = ResolveParams(bdata, gstate);
 
 		if (!bdata.prepared_stmt) {
@@ -507,14 +539,17 @@ static FunctionSignature MySQLQuerySignature(bool stream_results, bool suppress_
 	signature.AddParameter("database", LogicalType::VARCHAR)
 	    .AddParameter("sql", LogicalType::VARCHAR)
 	    .WithTypedKwargs("options", [&](TypedKwargs &options) {
-		    options.Add("params", LogicalType::ANY).Add("params_handle", LogicalType::BIGINT);
+		    options.Add("params", LogicalType::ANY);
+		    options.Add("params_handle", LogicalType::BIGINT);
 		    if (stream_results) {
 			    options.Add("stream_results", LogicalType::BOOLEAN);
 		    }
-		    options.Add("connection", LogicalType::UBIGINT).Add("prepare", LogicalType::BOOLEAN);
+		    options.Add("connection", LogicalType::UBIGINT);
+		    options.Add("prepare", LogicalType::BOOLEAN);
 		    if (suppress_dml_output) {
 			    options.Add("suppress_dml_output", LogicalType::BOOLEAN);
 		    }
+		    options.Add("preliminary_queries", LogicalType::LIST(LogicalType::VARCHAR));
 	    });
 	return signature;
 }
