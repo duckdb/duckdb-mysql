@@ -566,22 +566,43 @@ WHERE table_schema = ${SCHEMA_NAME};
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) {
 	// serialize the query node into MySQL-compatible SQL (identifier quoting, type / function
 	// remapping, explicit NULL ordering, ...)
-	return RemoteExecute(context, MySQLSQLWriter::MySQLToString(context, capabilities.GetVersion(), *node));
+	vector<string> statements = MySQLSQLWriter::ToStatements(context, capabilities.GetVersion(), *node);
+	return RemoteExecuteInternal(context, std::move(statements));
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement) {
-	// TODO: OR REPLACE logic
-	return RemoteExecute(context, MySQLSQLWriter::MySQLToString(context, capabilities.GetVersion(), *statement));
+	vector<string> statements = MySQLSQLWriter::ToStatements(context, capabilities.GetVersion(), *statement);
+	return RemoteExecuteInternal(context, std::move(statements));
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const string &sql) {
+	vector<string> statements;
+	statements.push_back(sql);
+	return RemoteExecuteInternal(context, std::move(statements));
+}
+
+unique_ptr<TableRef> MySQLCatalog::RemoteExecuteInternal(ClientContext &context, vector<string> statements) {
+	if (statements.size() == 0) {
+		throw InvalidInputException("Specified statements list must be not empty");
+	}
+	string query = statements.back();
+	statements.pop_back();
+
 	vector<unique_ptr<ParsedExpression>> args;
 	args.push_back(ConstantExpression::String(GetName().GetIdentifierName()));
-	args.push_back(ConstantExpression::String(sql));
+	args.push_back(ConstantExpression::String(query));
 	args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
 	                                               make_uniq<ColumnRefExpression>("suppress_dml_output"),
 	                                               ConstantExpression::Boolean(true)));
-	auto func_ref = make_uniq<TableFunctionRef>();
+	vector<Value> preliminary_query_values;
+	for (const string &statement : statements) {
+		preliminary_query_values.push_back(Value(statement));
+	}
+	args.push_back(make_uniq<ComparisonExpression>(
+	    ExpressionType::COMPARE_EQUAL, make_uniq<ColumnRefExpression>("preliminary_queries"),
+	    ConstantExpression::FromValue(Value::LIST(LogicalType::VARCHAR, std::move(preliminary_query_values)))));
+
+	unique_ptr<TableFunctionRef> func_ref = make_uniq<TableFunctionRef>();
 	func_ref->function = make_uniq<FunctionExpression>("mysql_query", std::move(args));
 	return func_ref;
 }

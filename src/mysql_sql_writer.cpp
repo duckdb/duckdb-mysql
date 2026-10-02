@@ -43,9 +43,12 @@ MySQLSQLWriter::MySQLSQLWriter(ClientContext &context, const MySQLVersion &versi
     : context(context), binary_collation(version.GetBinaryCollation()) {
 }
 
-string MySQLSQLWriter::MySQLToString(ClientContext &context, const MySQLVersion &version, const QueryNode &node) {
+vector<string> MySQLSQLWriter::ToStatements(ClientContext &context, const MySQLVersion &version,
+                                            const QueryNode &node) {
 	MySQLSQLWriter writer(context, version);
-	return writer.WriteQueryNode(node);
+	vector<string> statements;
+	statements.emplace_back(writer.WriteQueryNode(node));
+	return statements;
 }
 
 //===--------------------------------------------------------------------===//
@@ -871,15 +874,13 @@ string MySQLSQLWriter::WriteQueryNode(const QueryNode &node) {
 	}
 }
 
-string MySQLSQLWriter::MySQLToString(ClientContext &context, const MySQLVersion &version,
-                                     const SQLStatement &statement) {
+vector<string> MySQLSQLWriter::ToStatements(ClientContext &context, const MySQLVersion &version,
+                                            const SQLStatement &statement) {
 	MySQLSQLWriter writer(context, version);
-	string result = writer.WriteStatement(statement);
-	result += " /* MySQLSQLWriter */";
-	return result;
+	return writer.WriteStatement(statement);
 }
 
-string MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
+vector<string> MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
 	switch (statement.type) {
 	case StatementType::CREATE_STATEMENT:
 		return WriteCreateStatement(*statement.Cast<CreateStatement>().info);
@@ -889,7 +890,7 @@ string MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
 	}
 }
 
-string MySQLSQLWriter::WriteCreateStatement(const CreateInfo &info) {
+vector<string> MySQLSQLWriter::WriteCreateStatement(const CreateInfo &info) {
 	switch (info.type) {
 	case CatalogType::TABLE_ENTRY:
 		return WriteCreateTableStatement(info.Cast<CreateTableInfo>());
@@ -995,7 +996,7 @@ static string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_p
 	return result;
 }
 
-string MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &info) {
+vector<string> MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &info) {
 	MySQLTypeConfig type_config(context);
 	std::unordered_map<string, LogicalType> column_types;
 	for (idx_t i = 0; i < info.columns.LogicalColumnCount(); i++) {
@@ -1006,26 +1007,37 @@ string MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &info) {
 		column_types.emplace(col.Name().GetIdentifierName(), std::move(mysql_type));
 	}
 
+	string qualified_name;
+	Identifier schema = info.GetQualifiedName().Schema();
+	// TODO: default schema
+	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
+		qualified_name += MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
+		qualified_name += ".";
+	}
+	qualified_name += MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());
+
 	string result;
+	vector<string> statements;
 	result += "CREATE TABLE ";
 	switch (info.on_conflict) {
 	case OnCreateConflict::ERROR_ON_CONFLICT:
 		break;
 	case OnCreateConflict::IGNORE_ON_CONFLICT:
 		result += "IF NOT EXISTS ";
+	case OnCreateConflict::REPLACE_ON_CONFLICT: {
+		string drop = "DROP TABLE IF EXISTS ";
+		drop += qualified_name;
+		statements.emplace_back(drop);
+		break;
+	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported OnCreateConflict - should have been blocked by "
 		                        "SupportsPushdown");
 	}
-	Identifier schema = info.GetQualifiedName().Schema();
-	// TODO: default schema
-	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
-		result += MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
-		result += ".";
-	}
-	result += MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());
+	result += qualified_name;
 	result += MySQLColumnsToSQL(info.columns, info.constraints, column_types);
-	return result;
+	statements.emplace_back(std::move(result));
+	return statements;
 }
 
 } // namespace duckdb

@@ -91,6 +91,7 @@ public:
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement);
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
+	unique_ptr<TableRef> RemoteExecuteInternal(ClientContext &context, vector<string> statements);
 
 	void ClearCache();
 
