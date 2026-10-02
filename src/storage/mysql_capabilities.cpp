@@ -1206,7 +1206,7 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 				return false;
 			}
 
-			return true;
+			return SupportsColumns(info.columns);
 		}
 		default:
 			return false;
@@ -1215,5 +1215,20 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 	default:
 		return false;
 	}
+}
+
+bool MySQLCapabilities::SupportsColumns(const ColumnList &column_list) {
+	MySQLTypeConfig type_config;
+	for (idx_t i = 0; i < column_list.LogicalColumnCount(); i++) {
+		const ColumnDefinition &col = column_list.GetColumn(LogicalIndex(i));
+		const unique_ptr<ParsedExpression> &expr = UnboundType::GetTypeExpression(col.GetType());
+		LogicalType duckdb_type = MySQLTypes::ToLogicalType(expr.get());
+		try {
+			MySQLTypes::ToMySQLType(type_config, duckdb_type);
+		} catch (const std::exception &) {
+			return false;
+		}
+	}
+	return true;
 }
 } // namespace duckdb

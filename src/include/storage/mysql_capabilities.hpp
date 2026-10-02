@@ -9,6 +9,8 @@
 #pragma once
 
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/parser/column_list.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"
 #include "duckdb/parser/sql_statement.hpp"
@@ -50,6 +52,7 @@ private:
 	bool SupportsSelectAliasUsage(const SelectNode &select);
 	bool SupportsValue(const Value &value);
 	bool SupportsType(const LogicalType &type, bool for_cast);
+	bool SupportsColumns(const ColumnList &column_list);
 };
 
 } // namespace duckdb
