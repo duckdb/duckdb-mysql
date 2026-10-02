@@ -103,8 +103,7 @@ string AddConnectionOption(const KeyValueSecret &kv_secret, const string &name,
 unique_ptr<SecretEntry> GetSecret(ClientContext &context, const string &secret_name) {
 	auto &secret_manager = SecretManager::Get(context);
 	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
-	// FIXME: this should be adjusted once the `GetSecretByName` API supports this
-	// use case
+	// the temporary and the local_file storage first, as before: a name in both still means the temporary one
 	auto secret_entry = secret_manager.GetSecretByName(transaction, secret_name, "memory");
 	if (secret_entry) {
 		return secret_entry;
@@ -113,7 +112,8 @@ unique_ptr<SecretEntry> GetSecret(ClientContext &context, const string &secret_n
 	if (secret_entry) {
 		return secret_entry;
 	}
-	return nullptr;
+	// then every other registered storage, such as one an extension registers
+	return secret_manager.GetSecretByName(transaction, secret_name);
 }
 
 struct URIToken {
