@@ -1,0 +1,199 @@
+# name: test/sql/remote_pushdown/remote_pushdown_create_constraints.test
+# description: Test remote pushdown of CREATE constraints into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_enable_remote_pushdown_ddl = TRUE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+# PRIMARY KEY
+
+# single
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT PRIMARY KEY)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT PRIMARY KEY)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	NO	PRI	NULL	(empty)
+
+# composite
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT, col3 SMALLINT, PRIMARY KEY(col2, col3))
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT, col3 SMALLINT, PRIMARY KEY(col2, col3))
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	NO	PRI	NULL	(empty)
+col3	smallint	NO	PRI	NULL	(empty)
+
+# NOT NULL
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT NOT NULL)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT NOT NULL)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	NO	(empty)	NULL	(empty)
+
+# UNIQUE
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT UNIQUE)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT UNIQUE)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	YES	UNI	NULL	(empty)
+
+# CHECK
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, CHECK (col1 > 42))
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, CHECK (col1 > 42))
+
+statement ok
+INSERT INTO s.pushdown_create_constraints_test values(43)
+
+statement error
+INSERT INTO s.pushdown_create_constraints_test values(42)
+----
+Check constraint 'pushdown_create_constraints_test_chk_1' is violated.
+
+# DEFAULT
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT DEFAULT 42)
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT DEFAULT 42)
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	YES	(empty)	42	DEFAULT_GENERATED
+
+# REFERENCES
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test_primary(col1 INT PRIMARY KEY)
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 INT REFERENCES pushdown_create_constraints_test_primary(col1))
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 INT REFERENCES pushdown_create_constraints_test_primary(col1))
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	int	YES	MUL	NULL	(empty)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_constraints_test')
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_constraints_test_primary')
+
+# COLLATE
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 VARCHAR COLLATE "utf8mb4_bin")
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 VARCHAR, col2 VARCHAR COLLATE "utf8mb4_bin")
+
+query I
+FROM mysql_query('s', '
+  SELECT COLLATION_NAME
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = ''mysqlscanner''
+  AND TABLE_NAME = ''pushdown_create_constraints_test''
+  ORDER BY COLUMN_NAME')
+----
+utf8mb4_0900_ai_ci
+utf8mb4_bin
+
+# GENERATED
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT GENERATED ALWAYS AS (41 + abs(-1)))
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_create_constraints_test(col1 INT, col2 BIGINT GENERATED ALWAYS AS (41 + abs(-1)))
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_create_constraints_test')
+----
+col1	int	YES	(empty)	NULL	(empty)
+col2	bigint	YES	(empty)	NULL	VIRTUAL GENERATED
+
+# TODO
+# statement ok
+# INSERT INTO s.pushdown_create_constraints_test(col1) values(41)
+
+# cleanup
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_create_constraints_test')
+
+statement ok
+DETACH s
+
+statement ok
+RESET mysql_enable_remote_pushdown_ddl

@@ -8,9 +8,6 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 require-env ORACLE_MYSQL_SERVER
 
-# statement ok
-# SET mysql_debug_show_queries = TRUE
-
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
 
@@ -174,17 +171,6 @@ FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
 col1	text	YES	(empty)	NULL	(empty)
 col2	text	YES	(empty)	NULL	(empty)
 col3	blob	YES	(empty)	NULL	(empty)
-
-# PRIMARY KEY
-
-statement ok
-CREATE OR REPLACE TABLE s.pushdown_create_test2(col1 INT, col2 BIGINT, PRIMARY KEY(col1, col2))
-
-query IIIIII
-FROM mysql_query('s', 'DESCRIBE pushdown_create_test2')
-----
-col1	int	NO	PRI	NULL	(empty)
-col2	bigint	NO	PRI	NULL	(empty)
 
 statement ok
 CALL mysql_execute('s', 'DROP TABLE pushdown_create_test')
