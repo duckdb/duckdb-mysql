@@ -302,6 +302,23 @@ static uint8_t ExtractTinyIntValue(const ParsedExpression *parsed_expr) {
 	return TinyIntValue::Get(int_val.value());
 }
 
+static string ExtractVarcharCollation(const ParsedExpression *parsed_expr) {
+	if (!parsed_expr) {
+		throw InvalidInputException("MySQLTypes::ToLogicalType: empty VARCHAR collation expression");
+	}
+	if (parsed_expr->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		throw InvalidInputException(
+		    "MySQLTypes::ToLogicalType: VARCHAR collation must be a constant value, expression: \"%s\"",
+		    parsed_expr->ToString());
+	}
+	const ConstantExpression &const_expr = parsed_expr->Cast<ConstantExpression>();
+	Value const_val = const_expr.GetLiteral().ToValue();
+	if (const_val.type().id() == LogicalTypeId::VARCHAR) {
+		return StringValue::Get(const_val);
+	}
+	return string();
+}
+
 LogicalType MySQLTypes::ToLogicalType(const TypeExpression &type_expr) {
 	const Identifier &type_name = type_expr.GetTypeName();
 	// pure map lookup, no other logic is inside, map can be moved to extension if needed
@@ -311,14 +328,22 @@ LogicalType MySQLTypes::ToLogicalType(const TypeExpression &type_expr) {
 	}
 	if (type_id == LogicalTypeId::DECIMAL) {
 		const vector<unique_ptr<ParsedExpression>> &children = type_expr.GetChildren();
-		shared_ptr<DecimalTypeInfo> dec_type_info = make_shared_ptr<DecimalTypeInfo>(18, 3);
+		shared_ptr<DecimalTypeInfo> type_info = make_shared_ptr<DecimalTypeInfo>(18, 3);
 		if (children.size() > 0) {
-			dec_type_info->width = ExtractTinyIntValue(children[0].get());
+			type_info->width = ExtractTinyIntValue(children[0].get());
 		}
 		if (children.size() > 1) {
-			dec_type_info->scale = ExtractTinyIntValue(children[1].get());
+			type_info->scale = ExtractTinyIntValue(children[1].get());
 		}
-		return LogicalType(type_id, std::move(dec_type_info));
+		return LogicalType(type_id, std::move(type_info));
+	}
+	if (type_id == LogicalType::VARCHAR) {
+		const vector<unique_ptr<ParsedExpression>> &children = type_expr.GetChildren();
+		shared_ptr<StringTypeInfo> type_info = make_shared_ptr<StringTypeInfo>("");
+		if (children.size() > 0) {
+			type_info->collation = ExtractVarcharCollation(children[0].get());
+		}
+		return LogicalType(type_id, std::move(type_info));
 	}
 	return LogicalType(type_id);
 }
