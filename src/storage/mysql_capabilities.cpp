@@ -1181,6 +1181,7 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 			for (auto &constr : info.constraints) {
 				switch (constr->type) {
 				case ConstraintType::NOT_NULL:
+				case ConstraintType::CHECK:
 				case ConstraintType::UNIQUE:
 				case ConstraintType::FOREIGN_KEY:
 					break;

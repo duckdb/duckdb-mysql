@@ -943,14 +943,22 @@ static string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_p
 			if (fk.info.type == ForeignKeyType::FK_TYPE_FOREIGN_KEY_TABLE ||
 			    fk.info.type == ForeignKeyType::FK_TYPE_SELF_REFERENCE_TABLE) {
 				extra_constraints.push_back(constraint->ToString());
+			} else {
+				throw InternalException("MySQLSQLWriter: unsupported constraint - should have been blocked by "
+				                        "SupportsPushdown: \"%s\"",
+				                        constraint->ToString());
 			}
+		} else if (constraint->type == ConstraintType::CHECK) {
+			// write CHECK constraint as is, accepted by the server even if not enforced
+			extra_constraints.push_back(constraint->ToString());
 		} else {
 			throw InternalException("MySQLSQLWriter: unsupported constraint - should have been blocked by "
-			                        "SupportsPushdown");
+			                        "SupportsPushdown: \"%s\"",
+			                        constraint->ToString());
 		}
 	}
 
-	for (auto &column : columns.Logical()) {
+	for (const ColumnDefinition &column : columns.Logical()) {
 		if (column.Oid() > 0) {
 			result += ", ";
 		}
@@ -959,7 +967,8 @@ static string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_p
 		result += " ";
 		auto it = column_types.find(col_name);
 		D_ASSERT(it != column_types.end());
-		result += MySQLTypes::TypeToString(it->second);
+		const LogicalType &column_type = it->second;
+		result += MySQLTypes::TypeToString(column_type);
 		bool not_null = not_null_columns.find(column.Logical()) != not_null_columns.end();
 		bool is_single_key_pk = pk_columns.find(column.Logical()) != pk_columns.end();
 		bool is_multi_key_pk = multi_key_pks.find(Identifier(column.Name().GetIdentifierName())) != multi_key_pks.end();
@@ -978,12 +987,24 @@ static string MySQLColumnsToSQL(const ColumnList &columns, const vector<unique_p
 		}
 		if (column.Generated()) {
 			result += " GENERATED ALWAYS AS(";
-			result += column.GeneratedExpression().ToString();
+			if (column.GeneratedExpression().GetExpressionType() == ExpressionType::OPERATOR_CAST) {
+				const CastExpression &cast_expr = column.GeneratedExpression().Cast<CastExpression>();
+				result += cast_expr.Child().ToString();
+			} else {
+				result += column.GeneratedExpression().ToString();
+			}
 			result += ")";
 		} else if (column.HasDefaultValue()) {
 			result += " DEFAULT(";
 			result += column.DefaultValue().ToString();
 			result += ")";
+		}
+		if (column_type.id() == LogicalTypeId::VARCHAR) {
+			string collation = StringType::GetCollation(column_type);
+			if (!collation.empty()) {
+				result += " COLLATE ";
+				result += MySQLUtils::WriteIdentifier(collation);
+			}
 		}
 	}
 	// print any extra constraints that still need to be printed
