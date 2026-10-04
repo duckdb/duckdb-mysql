@@ -25,6 +25,7 @@
 #include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/query_node/set_operation_node.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
+#include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tableref/expressionlistref.hpp"
@@ -884,6 +885,12 @@ vector<string> MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
 	switch (statement.type) {
 	case StatementType::CREATE_STATEMENT:
 		return WriteCreateStatement(*statement.Cast<CreateStatement>().info);
+	case StatementType::DROP_STATEMENT: {
+		vector<string> res;
+		string stmt = WriteDropStatement(*statement.Cast<DropStatement>().info);
+		res.emplace_back(std::move(stmt));
+		return res;
+	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported statement type - should have been blocked by "
 		                        "SupportsPushdown");
@@ -1028,14 +1035,7 @@ vector<string> MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &
 		column_types.emplace(col.Name().GetIdentifierName(), std::move(mysql_type));
 	}
 
-	string qualified_name;
-	Identifier schema = info.GetQualifiedName().Schema();
-	// TODO: default schema
-	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
-		qualified_name += MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
-		qualified_name += ".";
-	}
-	qualified_name += MySQLUtils::WriteIdentifier(info.GetTableName().GetIdentifierName());
+	string qualified_name = WriteQualifiedName(info.GetQualifiedName());
 
 	string result;
 	vector<string> statements;
@@ -1059,6 +1059,46 @@ vector<string> MySQLSQLWriter::WriteCreateTableStatement(const CreateTableInfo &
 	result += MySQLColumnsToSQL(info.columns, info.constraints, column_types);
 	statements.emplace_back(std::move(result));
 	return statements;
+}
+
+string MySQLSQLWriter::WriteDropStatement(const DropInfo &info) {
+	switch (info.type) {
+	case CatalogType::TABLE_ENTRY:
+		return WriteDropTableStatement(info);
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported DROP catalog type - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+}
+
+string MySQLSQLWriter::WriteDropTableStatement(const DropInfo &info) {
+	string result = "DROP TABLE ";
+	switch (info.if_not_found) {
+	case OnEntryNotFound::THROW_EXCEPTION:
+		break;
+	case OnEntryNotFound::RETURN_NULL:
+		result += "IF EXISTS ";
+		break;
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported OnEntryNotFound - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+
+	result += WriteQualifiedName(info.GetQualifiedName());
+
+	return result;
+}
+
+string MySQLSQLWriter::WriteQualifiedName(const QualifiedName &name) {
+	string res;
+	Identifier schema = name.Schema();
+	// TODO: default schema
+	if (!schema.empty() && schema != Identifier::DefaultSchema()) {
+		res += MySQLUtils::WriteIdentifier(schema.GetIdentifierName());
+		res += ".";
+	}
+	res += MySQLUtils::WriteIdentifier(name.Name().GetIdentifierName());
+	return res;
 }
 
 } // namespace duckdb

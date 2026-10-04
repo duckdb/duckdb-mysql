@@ -1,0 +1,48 @@
+# name: test/sql/remote_pushdown/remote_pushdown_drop.test
+# description: Test remote pushdown of DROP into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_enable_remote_pushdown_ddl = TRUE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_drop_test(col1 INT)
+
+query II
+EXPLAIN DROP TABLE s.pushdown_drop_test
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+DROP TABLE s.pushdown_drop_test
+
+statement error
+DROP TABLE s.pushdown_drop_test
+----
+Unknown table
+
+statement ok
+DROP TABLE IF EXISTS s.pushdown_drop_test
+
+# cleanup
+
+statement ok
+DETACH s
+
+statement ok
+RESET mysql_enable_remote_pushdown_ddl
