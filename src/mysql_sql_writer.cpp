@@ -24,6 +24,7 @@
 #include "duckdb/parser/query_node/recursive_cte_node.hpp"
 #include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/query_node/set_operation_node.hpp"
+#include "duckdb/parser/statement/alter_statement.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
@@ -881,15 +882,23 @@ vector<string> MySQLSQLWriter::ToStatements(ClientContext &context, const MySQLV
 	return writer.WriteStatement(statement);
 }
 
+vector<string> WrapIntoVector(string sql) {
+	vector<string> res;
+	res.emplace_back(std::move(sql));
+	return res;
+}
+
 vector<string> MySQLSQLWriter::WriteStatement(const SQLStatement &statement) {
 	switch (statement.type) {
 	case StatementType::CREATE_STATEMENT:
 		return WriteCreateStatement(*statement.Cast<CreateStatement>().info);
 	case StatementType::DROP_STATEMENT: {
-		vector<string> res;
-		string stmt = WriteDropStatement(*statement.Cast<DropStatement>().info);
-		res.emplace_back(std::move(stmt));
-		return res;
+		string res = WriteDropStatement(*statement.Cast<DropStatement>().info);
+		return WrapIntoVector(res);
+	}
+	case StatementType::ALTER_STATEMENT: {
+		string res = WriteAlterStatement(*statement.Cast<AlterStatement>().info);
+		return WrapIntoVector(res);
 	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported statement type - should have been blocked by "
@@ -1099,6 +1108,62 @@ string MySQLSQLWriter::WriteQualifiedName(const QualifiedName &name) {
 	}
 	res += MySQLUtils::WriteIdentifier(name.Name().GetIdentifierName());
 	return res;
+}
+
+string MySQLSQLWriter::WriteAlterStatement(const AlterInfo &info) {
+	switch (info.type) {
+	case AlterType::ALTER_TABLE:
+		return WriteAlterTableStatement(info.Cast<AlterTableInfo>());
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported ALTER catalog type - should have been blocked by "
+		                        "SupportsPushdown");
+	}
+}
+
+string MySQLSQLWriter::WriteAlterTableStatement(const AlterTableInfo &info) {
+	string result = "ALTER TABLE ";
+	result += WriteQualifiedName(info.GetQualifiedName());
+
+	switch (info.alter_table_type) {
+	case AlterTableType::RENAME_TABLE: {
+		const RenameTableInfo &rename_info = info.Cast<RenameTableInfo>();
+		result += " RENAME TO ";
+		result += MySQLUtils::WriteIdentifier(rename_info.new_table_name.GetIdentifierName());
+		return result;
+	}
+	case AlterTableType::RENAME_COLUMN: {
+		const RenameColumnInfo &rename_info = info.Cast<RenameColumnInfo>();
+		result += " RENAME COLUMN  ";
+		result += MySQLUtils::WriteIdentifier(rename_info.old_name.GetIdentifierName());
+		result += " TO ";
+		result += MySQLUtils::WriteIdentifier(rename_info.new_name.GetIdentifierName());
+		return result;
+	}
+	case AlterTableType::ADD_COLUMN: {
+		const AddColumnInfo &add_info = info.Cast<AddColumnInfo>();
+		result += " ADD COLUMN  ";
+		if (add_info.if_column_not_exists) {
+			result += "IF NOT EXISTS ";
+		}
+		result += MySQLUtils::WriteIdentifier(add_info.new_column.Name().GetIdentifierName());
+		result += " ";
+		result += add_info.new_column.Type().ToString();
+		return result;
+	}
+	case AlterTableType::REMOVE_COLUMN: {
+		const RemoveColumnInfo &remove_info = info.Cast<RemoveColumnInfo>();
+		result += " DROP COLUMN  ";
+		if (remove_info.if_column_exists) {
+			throw InternalException("MySQLSQLWriter: DROP COLUMN IF EXISTS - should have been blocked by "
+			                        "SupportsPushdown");
+		}
+		result += MySQLUtils::WriteIdentifier(remove_info.removed_column.GetIdentifierName());
+		return result;
+	}
+	default:
+		throw InternalException("MySQLSQLWriter: unsupported ALTER table type - should have been blocked by "
+		                        "SupportsPushdown");
+	}
 }
 
 } // namespace duckdb

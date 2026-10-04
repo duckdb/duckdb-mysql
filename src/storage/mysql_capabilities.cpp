@@ -31,6 +31,7 @@
 #include "duckdb/parser/query_node/set_operation_node.hpp"
 #include "duckdb/parser/query_node/update_query_node.hpp"
 #include "duckdb/parser/result_modifier.hpp"
+#include "duckdb/parser/statement/alter_statement.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/insert_statement.hpp"
@@ -1227,6 +1228,44 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 				return false;
 			}
 
+			return true;
+		}
+		default:
+			return false;
+		}
+	}
+	case StatementType::ALTER_STATEMENT: {
+		auto &stmt = statement.Cast<AlterStatement>();
+		AlterInfo &alter_info = *stmt.info;
+
+		switch (alter_info.type) {
+		case AlterType::ALTER_TABLE: {
+			AlterTableInfo &alter_table_info = alter_info.Cast<AlterTableInfo>();
+
+			/*
+	switch (alter_table_info.if_not_found) {
+		case OnEntryNotFound::RETURN_NULL:
+			return false;
+		default:
+			break;
+	}
+			*/
+
+			switch (alter_table_info.alter_table_type) {
+			case AlterTableType::RENAME_TABLE:
+			case AlterTableType::RENAME_COLUMN:
+			case AlterTableType::ADD_COLUMN:
+				return true;
+			case AlterTableType::REMOVE_COLUMN: {
+				const RemoveColumnInfo &remove_info = alter_table_info.Cast<RemoveColumnInfo>();
+				if (remove_info.if_column_exists) {
+					return false;
+				}
+			}
+				return true;
+			default:
+				return false;
+			}
 			return true;
 		}
 		default:

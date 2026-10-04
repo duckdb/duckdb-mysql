@@ -7,6 +7,15 @@ require mysql_scanner
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_enable_remote_pushdown_ddl = FALSE
+
+statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
 # add column
@@ -98,3 +107,9 @@ statement error
 ALTER TABLE s1.test2 RENAME zz TO i
 ----
 Unknown column
+
+statement ok
+DETACH s1
+
+statement ok
+RESET mysql_enable_remote_pushdown_ddl
