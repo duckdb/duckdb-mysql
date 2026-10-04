@@ -1,0 +1,216 @@
+# name: test/sql/remote_pushdown/remote_pushdown_alter.test
+# description: Test remote pushdown of ALTER into MySQL
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env ORACLE_MYSQL_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_enable_remote_pushdown_ddl = TRUE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CREATE OR REPLACE TABLE s.pushdown_test_alter(i INTEGER);
+
+statement ok
+INSERT INTO s.pushdown_test_alter VALUES (42);
+
+# add column
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter ADD COLUMN j INTEGER
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+ALTER TABLE s.pushdown_test_alter ADD COLUMN j INTEGER;
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_test_alter')
+----
+i	int	YES	(empty)	NULL	(empty)
+j	int	YES	(empty)	NULL	(empty)
+
+query II
+SELECT i, j FROM s.pushdown_test_alter
+----
+42	NULL
+
+# duplicate column in rename
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter RENAME j TO i
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter RENAME j TO i
+----
+Duplicate column name
+
+# rename column
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter RENAME j TO k
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+ALTER TABLE s.pushdown_test_alter RENAME j TO k
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_test_alter')
+----
+i	int	YES	(empty)	NULL	(empty)
+k	int	YES	(empty)	NULL	(empty)
+
+query II
+SELECT i, k FROM s.pushdown_test_alter
+----
+42	NULL
+
+# drop column
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter DROP COLUMN k
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+ALTER TABLE s.pushdown_test_alter DROP COLUMN k
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_test_alter')
+----
+i	int	YES	(empty)	NULL	(empty)
+
+query I
+SELECT * FROM s.pushdown_test_alter
+----
+42
+
+# rename table
+
+statement ok
+DROP TABLE IF EXISTS s.pushdown_test_alter2
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter RENAME TO pushdown_test_alter2
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement ok
+ALTER TABLE s.pushdown_test_alter RENAME TO pushdown_test_alter2
+
+statement error
+SELECT * FROM s.pushdown_test_alter
+----
+Catalog Error: Table with name pushdown_test_alter does not exist!
+
+query IIIIII
+FROM mysql_query('s', 'DESCRIBE pushdown_test_alter2')
+----
+i	int	YES	(empty)	NULL	(empty)
+
+query I
+SELECT * FROM s.pushdown_test_alter2
+----
+42
+
+# non-existent table
+
+query II
+EXPLAIN ALTER TABLE s.bla ADD COLUMN j INTEGER
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.bla ADD COLUMN j INTEGER
+----
+Failed to execute MySQL query
+
+# if exists
+
+# TODO: capabilities check is unstable
+# query II
+# EXPLAIN ALTER TABLE IF EXISTS s.bla ADD COLUMN j INTEGER
+# ----
+# physical_plan	<!REGEX>:.*Function: MYSQL_QUERY.*
+
+# statement ok
+# ALTER TABLE IF EXISTS s.bla ADD COLUMN j INTEGER
+
+# drop column if not exists
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter2 DROP COLUMN z
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter2 DROP COLUMN z
+----
+<REGEX>:.*check that [a-z/]+ exists.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter2 DROP COLUMN IF EXISTS z
+----
+not supported
+
+# add column if exists
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter2 DROP COLUMN z
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter2 ADD COLUMN i INTEGER
+----
+Duplicate column name
+
+# unsupported alter table type
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter2 ALTER COLUMN i DROP NOT NULL
+----
+physical_plan	<!REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter2 ALTER COLUMN i DROP NOT NULL
+----
+Unsupported ALTER TABLE type
+
+# rename column does not exist
+
+query II
+EXPLAIN ALTER TABLE s.pushdown_test_alter2 RENAME zz TO i
+----
+physical_plan	<REGEX>:.*Function: MYSQL_QUERY.*
+
+statement error
+ALTER TABLE s.pushdown_test_alter2 RENAME zz TO i
+----
+Unknown column
+
+# cleanup
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE pushdown_test_alter2')
+
+statement ok
+DETACH s
+
+statement ok
+RESET mysql_enable_remote_pushdown_ddl

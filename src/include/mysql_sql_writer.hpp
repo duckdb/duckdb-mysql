@@ -95,6 +95,9 @@ private:
 	string WriteDropStatement(const DropInfo &info);
 	string WriteDropTableStatement(const DropInfo &info);
 
+	string WriteAlterStatement(const AlterInfo &info);
+	string WriteAlterTableStatement(const AlterTableInfo &info);
+
 	string WriteQualifiedName(const QualifiedName &name);
 
 private:
