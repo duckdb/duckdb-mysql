@@ -32,6 +32,7 @@
 #include "duckdb/parser/query_node/update_query_node.hpp"
 #include "duckdb/parser/result_modifier.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
+#include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/insert_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
@@ -1211,6 +1212,22 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 			}
 
 			return SupportsColumns(info.columns);
+		}
+		default:
+			return false;
+		}
+	}
+	case StatementType::DROP_STATEMENT: {
+		auto &stmt = statement.Cast<DropStatement>();
+		DropInfo &info = *stmt.info;
+
+		switch (info.type) {
+		case CatalogType::TABLE_ENTRY: {
+			if (info.cascade) {
+				return false;
+			}
+
+			return true;
 		}
 		default:
 			return false;

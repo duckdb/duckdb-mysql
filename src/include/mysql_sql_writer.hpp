@@ -92,6 +92,11 @@ private:
 	vector<string> WriteCreateStatement(const CreateInfo &info);
 	vector<string> WriteCreateTableStatement(const CreateTableInfo &info);
 
+	string WriteDropStatement(const DropInfo &info);
+	string WriteDropTableStatement(const DropInfo &info);
+
+	string WriteQualifiedName(const QualifiedName &name);
+
 private:
 	ClientContext &context;
 	//! The NO PAD binary collation attached to string literals (derived from the server version)
