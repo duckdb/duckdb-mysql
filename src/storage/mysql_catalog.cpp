@@ -572,7 +572,11 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement) {
 	vector<string> statements = MySQLSQLWriter::ToStatements(context, capabilities.GetVersion(), *statement);
-	return RemoteExecuteInternal(context, std::move(statements));
+	vector<unique_ptr<ParsedExpression>> extra_args;
+	extra_args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
+	                                                     make_uniq<ColumnRefExpression>("clear_catalog_cache"),
+	                                                     ConstantExpression::Boolean(true)));
+	return RemoteExecuteInternal(context, std::move(statements), std::move(extra_args));
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const string &sql) {
@@ -581,7 +585,8 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const s
 	return RemoteExecuteInternal(context, std::move(statements));
 }
 
-unique_ptr<TableRef> MySQLCatalog::RemoteExecuteInternal(ClientContext &context, vector<string> statements) {
+unique_ptr<TableRef> MySQLCatalog::RemoteExecuteInternal(ClientContext &context, vector<string> statements,
+                                                         vector<unique_ptr<ParsedExpression>> extra_args) {
 	if (statements.size() == 0) {
 		throw InvalidInputException("Specified statements list must be not empty");
 	}
@@ -601,6 +606,10 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecuteInternal(ClientContext &context,
 	args.push_back(make_uniq<ComparisonExpression>(
 	    ExpressionType::COMPARE_EQUAL, make_uniq<ColumnRefExpression>("preliminary_queries"),
 	    ConstantExpression::FromValue(Value::LIST(LogicalType::VARCHAR, std::move(preliminary_query_values)))));
+
+	for (unique_ptr<ParsedExpression> &arg : extra_args) {
+		args.push_back(std::move(arg));
+	}
 
 	unique_ptr<TableFunctionRef> func_ref = make_uniq<TableFunctionRef>();
 	func_ref->function = make_uniq<FunctionExpression>("mysql_query", std::move(args));

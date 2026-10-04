@@ -370,6 +370,8 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			}
 		});
 
+		bool clear_catalog_cache = ExtractFlag(input, "clear_catalog_cache", false);
+
 		MySQLConnection &conn = *conn_ptr;
 		if (!ExtractFlag(input, "prepare", true)) {
 			if (params.size() > 0 || params_handle != 0) {
@@ -378,7 +380,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 			return_types.emplace_back(LogicalType::BIGINT);
 			names.emplace_back("rowcount");
 			return make_uniq<MySQLQueryBindData>(catalog, std::move(preliminary_queries), sql, user_streaming,
-			                                     pinned_connection_id);
+			                                     pinned_connection_id, clear_catalog_cache);
 		}
 
 		unique_ptr<MySQLStatement> stmt = conn.Prepare(sql);
@@ -406,7 +408,8 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 		return make_uniq<MySQLQueryBindData>(catalog, std::move(preliminary_queries), sql, std::move(params),
 		                                     params_handle, std::move(stmt->FieldsCopy()), user_streaming,
-		                                     std::move(stmt), prepare_connection_id, pinned_connection_id);
+		                                     std::move(stmt), prepare_connection_id, pinned_connection_id,
+		                                     clear_catalog_cache);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
 		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
@@ -472,6 +475,16 @@ static void SetRowCount(DataChunk &output, int64_t count) {
 	output.SetChildCardinality(1);
 }
 
+static void HandleCatalogCache(ClientContext &context, const MySQLQueryBindData &bdata,
+                               const MySQLGlobalState &gstate) {
+	if (!bdata.clear_catalog_cache || gstate.pinned_connection) {
+		return;
+	}
+	auto attached_catalog = MySQLCatalog::Lookup(context, bdata.catalog_name);
+	MySQLCatalog &catalog = attached_catalog.Get<MySQLCatalog>();
+	catalog.ClearCache();
+}
+
 static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &bdata = data.bind_data->CastNoConst<MySQLQueryBindData>();
 	auto &gstate = data.global_state->Cast<MySQLGlobalState>();
@@ -508,6 +521,7 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 
 		if (!bdata.prepared_stmt) {
 			conn.Execute(bdata.query);
+			HandleCatalogCache(context, bdata, gstate);
 			SetRowCount(output, -1);
 			gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
 			return;
@@ -522,6 +536,7 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		} else {
 			gstate.result = conn.Query(bdata.query, params, result_streaming);
 		}
+		HandleCatalogCache(context, bdata, gstate);
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;
 	}
 
@@ -550,6 +565,7 @@ static FunctionSignature MySQLQuerySignature(bool stream_results, bool suppress_
 			    options.Add("suppress_dml_output", LogicalType::BOOLEAN);
 		    }
 		    options.Add("preliminary_queries", LogicalType::LIST(LogicalType::VARCHAR));
+		    options.Add("clear_catalog_cache", LogicalType::BOOLEAN);
 	    });
 	return signature;
 }

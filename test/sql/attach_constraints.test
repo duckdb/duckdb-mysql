@@ -6,14 +6,52 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-statement ok
-ATTACH 'host=localhost user=root port=0 database=mysql' AS s1 (TYPE MYSQL_SCANNER)
+require-env ORACLE_MYSQL_SERVER
 
 statement ok
-CREATE OR REPLACE TABLE s1.constraints(s STRING NOT NULL, i INTEGER DEFAULT 12);
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+DETACH s
+
+statement ok
+SET mysql_enable_remote_pushdown_ddl = FALSE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.constraints_test(s STRING NOT NULL, i INTEGER DEFAULT 12);
 
 query IIIIII
-DESCRIBE s1.constraints
+FROM mysql_query('s', 'DESCRIBE constraints_test')
+----
+s	text	NO	(empty)	NULL	(empty)
+i	int	YES	(empty)	12	DEFAULT_GENERATED
+
+query IIIIII
+DESCRIBE s.constraints_test
 ----
 s	VARCHAR	NO	NULL	NULL	NULL
 i	INTEGER	YES	NULL	12	NULL
+
+statement ok
+DETACH s
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)
+
+# TODO: default value read from MySQL
+query IIIIII
+DESCRIBE s.constraints_test
+----
+s	VARCHAR	NO	NULL	NULL	NULL
+i	INTEGER	YES	NULL	NULL	NULL
+
+# cleanup
+
+statement ok
+DROP TABLE s.constraints_test
+
+statement ok
+DETACH s

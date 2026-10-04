@@ -29,7 +29,7 @@ void MySQLTableSet::AddColumn(MySQLTransaction &transaction, MySQLResult &result
 	auto column_name = result.GetString(column_index);
 	type_info.type_name = result.GetString(column_index + 1);
 	type_info.column_type = result.GetString(column_index + 2);
-	string default_value;
+	string default_value; // TODO
 	auto is_nullable = result.GetString(column_index + 4);
 	type_info.precision = result.IsNull(column_index + 5) ? -1 : result.GetInt64(column_index + 5);
 	type_info.scale = result.IsNull(column_index + 6) ? -1 : result.GetInt64(column_index + 6);

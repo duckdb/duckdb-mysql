@@ -1206,6 +1206,9 @@ bool MySQLCapabilities::SupportsPushdown(const SQLStatement &statement) {
 			if (info.options.size() > 0) {
 				return false;
 			}
+			if (info.query) {
+				return false;
+			}
 
 			return SupportsColumns(info.columns);
 		}
