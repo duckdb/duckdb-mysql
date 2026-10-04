@@ -40,6 +40,11 @@ protected:
 	Catalog &catalog;
 
 private:
+	optional_ptr<CatalogEntry> TryGetEntry(MySQLTransaction &transaction, const string &name);
+
+	void ClearEntriesNoLock();
+
+private:
 	// lock order -> clear, load, entry
 	mutex entry_lock;
 	mutex load_lock;

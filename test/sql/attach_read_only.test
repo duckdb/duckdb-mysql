@@ -12,7 +12,7 @@ ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER
 statement error
 CREATE TABLE s.read_only_tbl(i INTEGER);
 ----
-read-only mode
+<REGEX>:.*(statements that do not produce result sets cannot be run in a read-only connection|Failed to prepare MySQL query).*
 
 statement error
 CALL mysql_execute('s', 'CREATE TABLE test_execute_tbl(i INTEGER)')

@@ -172,6 +172,15 @@ col1	text	YES	(empty)	NULL	(empty)
 col2	text	YES	(empty)	NULL	(empty)
 col3	blob	YES	(empty)	NULL	(empty)
 
+# CTAS
+
+query II
+EXPLAIN CREATE OR REPLACE TABLE s.pushdown_create_test AS SELECT 42 
+----
+physical_plan	<!REGEX>:.*Function: MYSQL_QUERY.*
+
+# cleanup
+
 statement ok
 CALL mysql_execute('s', 'DROP TABLE pushdown_create_test')
 

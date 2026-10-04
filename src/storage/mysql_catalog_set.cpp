@@ -10,15 +10,26 @@ namespace duckdb {
 MySQLCatalogSet::MySQLCatalogSet(Catalog &catalog) : catalog(catalog), is_loaded(false) {
 }
 
-optional_ptr<CatalogEntry> MySQLCatalogSet::GetEntry(MySQLTransaction &transaction, const string &name) {
-	lock_guard<mutex> l1(clear_lock);
-	TryLoadEntries(transaction);
+optional_ptr<CatalogEntry> MySQLCatalogSet::TryGetEntry(MySQLTransaction &transaction, const string &name) {
 	lock_guard<mutex> l2(entry_lock);
 	auto entry = entries.find(name);
 	if (entry == entries.end()) {
 		return nullptr;
 	}
 	return transaction.ReferenceEntry(entry->second);
+}
+
+optional_ptr<CatalogEntry> MySQLCatalogSet::GetEntry(MySQLTransaction &transaction, const string &name) {
+	lock_guard<mutex> l1(clear_lock);
+	TryLoadEntries(transaction);
+	optional_ptr<CatalogEntry> res = TryGetEntry(transaction, name);
+	if (res) {
+		return res;
+	}
+	// reload attempt on not found
+	ClearEntriesNoLock();
+	TryLoadEntries(transaction);
+	return TryGetEntry(transaction, name);
 }
 
 void MySQLCatalogSet::TryLoadEntries(MySQLTransaction &transaction) {
@@ -74,6 +85,10 @@ optional_ptr<CatalogEntry> MySQLCatalogSet::CreateEntry(MySQLTransaction &transa
 
 void MySQLCatalogSet::ClearEntries() {
 	lock_guard<mutex> l1(clear_lock);
+	ClearEntriesNoLock();
+}
+
+void MySQLCatalogSet::ClearEntriesNoLock() {
 	lock_guard<mutex> l2(load_lock);
 	lock_guard<mutex> l3(entry_lock);
 	entries.clear();
