@@ -328,7 +328,7 @@ LogicalType MySQLTypes::ToLogicalType(const TypeExpression &type_expr) {
 	}
 	if (type_id == LogicalTypeId::DECIMAL) {
 		const vector<unique_ptr<ParsedExpression>> &children = type_expr.GetChildren();
-		shared_ptr<DecimalTypeInfo> type_info = make_shared_ptr<DecimalTypeInfo>(18, 3);
+		unique_ptr<DecimalTypeInfo> type_info = make_uniq<DecimalTypeInfo>(18, 3);
 		if (children.size() > 0) {
 			type_info->width = ExtractTinyIntValue(children[0].get());
 		}
@@ -339,7 +339,7 @@ LogicalType MySQLTypes::ToLogicalType(const TypeExpression &type_expr) {
 	}
 	if (type_id == LogicalType::VARCHAR) {
 		const vector<unique_ptr<ParsedExpression>> &children = type_expr.GetChildren();
-		shared_ptr<StringTypeInfo> type_info = make_shared_ptr<StringTypeInfo>("");
+		unique_ptr<StringTypeInfo> type_info = make_uniq<StringTypeInfo>("");
 		if (children.size() > 0) {
 			type_info->collation = ExtractVarcharCollation(children[0].get());
 		}
