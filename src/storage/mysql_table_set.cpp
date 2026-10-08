@@ -37,7 +37,7 @@ void MySQLTableSet::AddColumn(MySQLTransaction &transaction, MySQLResult &result
 	auto column_type = MySQLTypes::TypeToLogicalType({transaction.GetContext()}, type_info);
 	ColumnDefinition column(Identifier(std::move(column_name)), std::move(column_type));
 	if (!default_value.empty()) {
-		auto expressions = Parser::ParseExpressionList(default_value);
+		auto expressions = Parser::GetBuiltinParser().ParseExpressionList(default_value);
 		if (expressions.empty()) {
 			throw InternalException("Expression list is empty");
 		}
