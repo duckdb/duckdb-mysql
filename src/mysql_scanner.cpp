@@ -180,15 +180,14 @@ static unique_ptr<FunctionData> MySQLScanDeserialize(Deserializer &deserializer,
 	throw NotImplementedException("MySQLScanDeserialize");
 }
 
-static BindInfo MySQLGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
-	auto &bdata = bind_data_p->CastNoConst<MySQLBindData>();
-	BindInfo info(ScanType::EXTERNAL);
+static optional_ptr<TableCatalogEntry> MySQLGetTableEntry(optional_ptr<const FunctionData> bind_data_p) {
+	auto &bdata = bind_data_p->Cast<MySQLBindData>();
 	shared_ptr<ClientContext> ctx = bdata.context_ptr.lock();
-	if (ctx) { // cannot fail in known scenarios
-		auto attached_table = MySQLTableEntry::Lookup(*ctx, bdata.table_name);
-		info.table = attached_table.Get<MySQLTableEntry>();
+	if (!ctx) { // cannot fail in known scenarios
+		return nullptr;
 	}
-	return info;
+	auto attached_table = MySQLTableEntry::Lookup(*ctx, bdata.table_name);
+	return attached_table.Get<MySQLTableEntry>();
 }
 
 MySQLScanFunction::MySQLScanFunction()
@@ -201,7 +200,7 @@ MySQLScanFunction::MySQLScanFunction()
 	to_string = MySQLScanToString;
 	serialize = MySQLScanSerialize;
 	deserialize = MySQLScanDeserialize;
-	get_bind_info = MySQLGetBindInfo;
+	get_table_entry = MySQLGetTableEntry;
 	projection_pushdown = true;
 }
 
