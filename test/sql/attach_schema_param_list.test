@@ -2,7 +2,7 @@
 # description: Test attaching multiple specific schemas
 # group: [sql]
 
-require postgres_scanner
+require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
