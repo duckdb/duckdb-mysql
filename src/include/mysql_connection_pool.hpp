@@ -47,6 +47,7 @@ private:
 	//! Lock order: pool_lock (base) before calibration_lock. Never acquire pool_lock while holding calibration_lock.
 	mutable mutex calibration_lock;
 	NetworkCalibration network_calibration;
+	bool predicate_analyzer_enabled = false;
 };
 
 } // namespace duckdb

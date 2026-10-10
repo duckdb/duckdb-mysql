@@ -5,13 +5,21 @@
 
 namespace duckdb {
 
+static bool GetPredicateAnalyzerEnabled(ClientContext &ctx) {
+	Value val;
+	if (ctx.TryGetCurrentSetting("mysql_enable_predicate_analyzer", val) && !val.IsNull()) {
+		return BooleanValue::Get(val);
+	}
+	return false;
+}
+
 //===--------------------------------------------------------------------===//
 // MySQLConnectionPool
 //===--------------------------------------------------------------------===//
 MySQLConnectionPool::MySQLConnectionPool(ClientContext &context, string connection_string_p, string attach_path_p)
     : dbconnector::pool::ConnectionPool<MySQLConnection>(CreateConfig(context)),
       connection_string(std::move(connection_string_p)), attach_path(std::move(attach_path_p)),
-      type_config(MySQLTypeConfig(context)) {
+      type_config(MySQLTypeConfig(context)), predicate_analyzer_enabled(GetPredicateAnalyzerEnabled(context)) {
 }
 
 MySQLConnectionPool::~MySQLConnectionPool() = default;
@@ -19,7 +27,7 @@ MySQLConnectionPool::~MySQLConnectionPool() = default;
 std::unique_ptr<MySQLConnection> MySQLConnectionPool::CreateNewConnection() {
 	MySQLTypeConfig config_snapshot;
 	bool should_calibrate = false;
-	{
+	if (predicate_analyzer_enabled) {
 		lock_guard<mutex> lock(calibration_lock);
 		config_snapshot = type_config;
 		should_calibrate = !network_calibration.is_calibrated && !network_calibration.calibration_failed;

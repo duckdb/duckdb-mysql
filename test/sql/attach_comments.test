@@ -2,7 +2,7 @@
 # description: Test that MySQL table and column comments propagate through DuckDB metadata
 # group: [sql]
 
-require postgres_scanner
+require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 

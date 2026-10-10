@@ -72,6 +72,8 @@ vcpkg_cmake_configure(
         # don't add system include dirs
         -DAUTH_GSSAPI_PLUGIN_TYPE=OFF
         -DREMOTEIO_PLUGIN_TYPE=OFF 
+        # assignment discards ‘const’ qualifier from pointer target type [-Werror=discarded-qualifiers]
+        -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
     MAYBE_UNUSED_VARIABLES
         AUTH_GSSAPI_PLUGIN_TYPE
         CLIENT_PLUGIN_AUTH_GSSAPI_CLIENT
