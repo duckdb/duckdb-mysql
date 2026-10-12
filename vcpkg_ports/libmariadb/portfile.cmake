@@ -44,10 +44,17 @@ else()
     set(WITH_SSL SCHANNEL)
 endif()
 
+set(libmariadb_options)
+if(VCPKG_CHAINLOAD_TOOLCHAIN_FILE MATCHES "clangcl\\.cmake$")
+    # CMake forwards resource compiler flags to clang-cl during preprocessing.
+    list(APPEND libmariadb_options -DCMAKE_RC_FLAGS=/DWIN32)
+endif()
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         ${FEATURE_OPTIONS}
+        ${libmariadb_options}
         -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
         -DINSTALL_INCLUDEDIR=include/mysql # legacy port decision
         -DINSTALL_LIBDIR=lib
