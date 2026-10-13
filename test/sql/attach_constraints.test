@@ -15,7 +15,7 @@ statement ok
 DETACH s
 
 statement ok
-SET mysql_enable_remote_pushdown_ddl = FALSE
+SET mysql_enable_remote_pushdown = FALSE
 
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysql' AS s (TYPE MYSQL_SCANNER)

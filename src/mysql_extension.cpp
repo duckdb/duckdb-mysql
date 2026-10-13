@@ -158,10 +158,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &config = DBConfig::GetConfig(db);
 	StorageExtension::Register(config, "mysql_scanner", make_shared_ptr<MySQLStorageExtension>());
 
-	config.AddExtensionOption("mysql_enable_filter_pushdown",
-	                          "Whether or not to use filter pushdown (without predicate analyzer)",
+	config.AddExtensionOption("mysql_enable_filter_pushdown", "Whether or not to use filter pushdown",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
-	config.AddExtensionOption("mysql_enable_remote_pushdown_ddl", "Whether or not to use remote pushdown for DDL",
+	config.AddExtensionOption("mysql_enable_remote_pushdown", "Whether or not to use remote pushdown ",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(true));
 	config.AddExtensionOption("mysql_debug_show_queries", "DEBUG SETTING: print all queries sent to MySQL to stdout",
 	                          LogicalType::BOOLEAN, Value::BOOLEAN(false), SetMySQLDebugQueryPrint);

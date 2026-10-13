@@ -31,7 +31,7 @@ class MySQLCatalog : public Catalog {
 public:
 	explicit MySQLCatalog(AttachedDatabase &db_p, string connection_string, string attach_path, AccessMode access_mode,
 	                      vector<string> schemas_to_load, shared_ptr<MySQLConnectionPool> pool_p,
-	                      bool ddl_pushdown_enabled);
+	                      bool remote_pushdown_enabled);
 	~MySQLCatalog();
 
 	Identifier catalog_name;
@@ -76,16 +76,16 @@ public:
 		return capabilities.Supports(capability);
 	}
 	bool SupportsPushdown(const ParsedExpression &expression) override {
-		return capabilities.SupportsPushdown(expression);
+		return remote_pushdown_enabled && capabilities.SupportsPushdown(expression);
 	}
 	bool SupportsPushdown(const TableRef &ref) override {
-		return capabilities.SupportsPushdown(ref);
+		return remote_pushdown_enabled && capabilities.SupportsPushdown(ref);
 	}
 	bool SupportsPushdown(const QueryNode &node) override {
-		return capabilities.SupportsPushdown(node);
+		return remote_pushdown_enabled && capabilities.SupportsPushdown(node);
 	}
 	bool SupportsPushdown(const SQLStatement &statement) override {
-		return ddl_pushdown_enabled && capabilities.SupportsPushdown(statement);
+		return remote_pushdown_enabled && capabilities.SupportsPushdown(statement);
 	}
 
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
@@ -118,7 +118,7 @@ private:
 	string default_schema;
 	MySQLCapabilities capabilities;
 	shared_ptr<MySQLConnectionPool> connection_pool;
-	bool ddl_pushdown_enabled;
+	bool remote_pushdown_enabled;
 };
 
 } // namespace duckdb
