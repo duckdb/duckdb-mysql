@@ -1,20 +1,21 @@
 #include "storage/mysql_schema_entry.hpp"
-#include "duckdb/main/client_context.hpp"
+
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "storage/mysql_table_entry.hpp"
-#include "storage/mysql_transaction.hpp"
-#include "duckdb/parser/parsed_data/create_view_info.hpp"
-#include "duckdb/parser/parsed_data/create_index_info.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
-#include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/constraints/list.hpp"
-#include "duckdb/common/unordered_set.hpp"
+#include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/parser/parsed_data/alter_info.hpp"
 #include "duckdb/parser/parsed_data/alter_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_index_info.hpp"
+#include "duckdb/parser/parsed_data/create_view_info.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/parser/parsed_expression_iterator.hpp"
-#include "duckdb/parser/expression/columnref_expression.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
+
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 

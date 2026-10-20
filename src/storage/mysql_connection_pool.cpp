@@ -1,8 +1,8 @@
 #include "storage/mysql_connection_pool.hpp"
 
-#include <chrono>
 #include <cstring>
 
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"

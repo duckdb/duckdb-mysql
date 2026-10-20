@@ -1,11 +1,12 @@
 #include "storage/mysql_index_set.hpp"
-#include "duckdb/main/client_context.hpp"
+
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
+
+#include "storage/mysql_index_entry.hpp"
 #include "storage/mysql_schema_entry.hpp"
 #include "storage/mysql_transaction.hpp"
-#include "duckdb/parser/parsed_data/create_schema_info.hpp"
-#include "storage/mysql_index_entry.hpp"
-#include "duckdb/parser/parsed_data/drop_info.hpp"
 
 namespace duckdb {
 

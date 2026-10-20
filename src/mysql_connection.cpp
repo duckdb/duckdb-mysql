@@ -1,7 +1,6 @@
 #include "mysql_connection.hpp"
 
-#include "duckdb/common/types/uuid.hpp"
-#include "duckdb/parser/column_list.hpp"
+#include "duckdb.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/storage/table_storage_info.hpp"
 

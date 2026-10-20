@@ -8,11 +8,12 @@
 
 #pragma once
 
-#include "duckdb/planner/table_filter_set.hpp"
+#include "duckdb.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
+#include "duckdb/planner/table_filter_set.hpp"
 
-#include "dbconnector/attached.hpp"
+#include "dbconnector/attached/attached_catalog.hpp"
 #include "dbconnector/table_scan/filter_pushdown.hpp"
 
 namespace duckdb {

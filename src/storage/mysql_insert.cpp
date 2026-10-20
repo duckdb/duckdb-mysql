@@ -1,25 +1,23 @@
 #include "storage/mysql_insert.hpp"
-#include "duckdb/main/client_context.hpp"
+
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "duckdb/execution/physical_plan_generator.hpp"
-#include "duckdb/planner/logical_operator.hpp"
-
-#include "duckdb/planner/operator/logical_insert.hpp"
-#include "duckdb/planner/operator/logical_create_table.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/execution/operator/projection/physical_projection.hpp"
-#include "duckdb/execution/operator/scan/physical_table_scan.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "duckdb/planner/logical_operator.hpp"
+#include "duckdb/planner/operator/logical_create_table.hpp"
+#include "duckdb/planner/operator/logical_insert.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 
 #include "mysql_connection.hpp"
-#include "mysql_scanner.hpp"
 #include "mysql_types.hpp"
-
 #include "storage/mysql_catalog.hpp"
-#include "storage/mysql_transaction.hpp"
 #include "storage/mysql_table_entry.hpp"
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 

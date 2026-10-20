@@ -8,14 +8,14 @@
 
 #pragma once
 
-#include "dbconnector/attached.hpp"
-
-#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "duckdb/main/client_context.hpp"
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
-#include "mysql_utils.hpp"
+
+#include "dbconnector/attached/attached_table.hpp"
 
 namespace duckdb {
 

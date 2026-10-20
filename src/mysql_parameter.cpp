@@ -1,11 +1,12 @@
 #include "mysql_parameter.hpp"
 
-#include "dbconnector/defer.hpp"
-
+#include "duckdb.hpp"
 #include "duckdb/common/types/datetime.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/vector/struct_vector.hpp"
+
+#include "dbconnector/defer.hpp"
 
 #include "mysql_scanner.hpp"
 

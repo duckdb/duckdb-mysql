@@ -7,9 +7,11 @@
 
 #pragma once
 
-#include "duckdb/transaction/transaction.hpp"
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/common/enums/access_mode.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/transaction/transaction.hpp"
 
 #include "mysql_connection.hpp"
 #include "storage/mysql_connection_pool.hpp"

@@ -8,9 +8,9 @@
 
 #pragma once
 
-#include "duckdb/main/config.hpp"
-#include "duckdb/planner/logical_operator.hpp"
+#include "duckdb.hpp"
 #include "duckdb/optimizer/optimizer_extension.hpp"
+#include "duckdb/planner/logical_operator.hpp"
 
 namespace duckdb {
 class MySQLOptimizer {

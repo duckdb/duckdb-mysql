@@ -8,11 +8,13 @@
 
 #pragma once
 
-#include "dbconnector/pool.hpp"
+#include "duckdb.hpp"
+#include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_context.hpp"
 
+#include "dbconnector/pool.hpp"
+
 #include "mysql_connection.hpp"
-#include "network_calibration.hpp"
 
 namespace duckdb {
 

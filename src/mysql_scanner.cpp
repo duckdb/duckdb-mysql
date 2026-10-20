@@ -1,23 +1,19 @@
 #include "mysql_scanner.hpp"
 
+#include "duckdb.hpp"
+#include "duckdb/main/attached_database.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/database_manager.hpp"
+#include "duckdb/main/query_result.hpp"
+#include "duckdb/planner/binder.hpp"
+
 #include "dbconnector/defer.hpp"
 
-#include "duckdb.hpp"
-#include "duckdb/common/printer.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/main/attached_database.hpp"
-#include "duckdb/main/database_manager.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
-#include "duckdb/main/query_result.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/planner/binder.hpp"
-#include "duckdb/planner/filter/constant_filter.hpp"
-
-#include "storage/mysql_connection_pool.hpp"
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_parameter.hpp"
 #include "mysql_result.hpp"
 #include "storage/mysql_catalog.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_table_set.hpp"
 #include "storage/mysql_transaction.hpp"
 

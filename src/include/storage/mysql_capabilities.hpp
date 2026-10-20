@@ -8,15 +8,15 @@
 
 #pragma once
 
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/column_list.hpp"
+#include "duckdb/parser/expression/window_expression.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"
+#include "duckdb/parser/query_node/select_node.hpp"
 #include "duckdb/parser/sql_statement.hpp"
 #include "duckdb/parser/tableref.hpp"
-#include "duckdb/parser/expression/window_expression.hpp"
-#include "duckdb/parser/query_node/select_node.hpp"
 
 #include "mysql_version.hpp"
 

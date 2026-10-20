@@ -8,8 +8,13 @@
 
 #pragma once
 
-#include "duckdb.hpp"
+#include <set>
+
 #include "mysql.h"
+
+#include "duckdb.hpp"
+#include "duckdb/common/mutex.hpp"
+#include "duckdb/common/types/value.hpp"
 
 namespace duckdb {
 

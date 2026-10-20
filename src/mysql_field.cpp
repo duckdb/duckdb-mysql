@@ -1,3 +1,5 @@
+#include "mysql_field.hpp"
+
 #include "mysql_result.hpp"
 
 namespace duckdb {

@@ -1,5 +1,6 @@
 #include "mysql_types.hpp"
 
+#include "duckdb.hpp"
 #include "duckdb/catalog/default/default_types.hpp"
 #include "duckdb/common/logical_type_info.hpp"
 #include "duckdb/main/client_context.hpp"

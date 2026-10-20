@@ -1,15 +1,18 @@
-#include "storage/mysql_catalog.hpp"
-#include "duckdb/main/client_context.hpp"
+#include "storage/mysql_table_entry.hpp"
+
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "storage/mysql_schema_entry.hpp"
-#include "storage/mysql_table_entry.hpp"
-#include "storage/mysql_transaction.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/storage/statistics/base_statistics.hpp"
 #include "duckdb/storage/table_storage_info.hpp"
+
 #include "mysql_filter_pushdown.hpp"
 #include "mysql_scanner.hpp"
+#include "storage/mysql_catalog.hpp"
+#include "storage/mysql_schema_entry.hpp"
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 

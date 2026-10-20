@@ -8,19 +8,19 @@
 
 #pragma once
 
-#include "dbconnector/attached.hpp"
-
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
-#include "duckdb/main/attached_database.hpp"
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "duckdb/execution/physical_plan_generator.hpp"
-#include "duckdb/planner/logical_operator.hpp"
 #include "duckdb/common/enums/access_mode.hpp"
+#include "duckdb/execution/physical_plan_generator.hpp"
+#include "duckdb/main/attached_database.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/planner/logical_operator.hpp"
+
+#include "dbconnector/attached/attached_catalog.hpp"
 
 #include "storage/mysql_capabilities.hpp"
-#include "mysql_connection.hpp"
 #include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_schema_set.hpp"
 
@@ -89,7 +89,7 @@ public:
 	}
 
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) override;
-	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement);
+	unique_ptr<TableRef> RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement) override;
 	unique_ptr<TableRef> RemoteExecute(ClientContext &context, const string &sql) override;
 	unique_ptr<TableRef>
 	RemoteExecuteInternal(ClientContext &context, vector<string> statements,

@@ -7,14 +7,14 @@
 
 #pragma once
 
+#include "duckdb.hpp"
 #include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/common/types.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/query_node.hpp"
 #include "duckdb/parser/query_node/delete_query_node.hpp"
-#include "duckdb/parser/query_node/insert_query_node.hpp"
 #include "duckdb/parser/query_node/update_query_node.hpp"
 #include "duckdb/parser/result_modifier.hpp"
 #include "duckdb/parser/tableref.hpp"

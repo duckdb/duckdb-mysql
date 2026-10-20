@@ -9,8 +9,11 @@
 #pragma once
 
 #include "duckdb.hpp"
-#include "duckdb/common/types/interval.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/common/types/string_type.hpp"
+#include "duckdb/common/types/vector.hpp"
+#include "duckdb/common/vector/flat_vector.hpp"
 
 namespace duckdb {
 

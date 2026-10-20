@@ -1,5 +1,8 @@
 #include "mysql_version.hpp"
 
+#include "duckdb.hpp"
+#include "duckdb/common/string_util.hpp"
+
 namespace duckdb {
 
 MySQLVersion MySQLVersion::Parse(const string &version_string) {

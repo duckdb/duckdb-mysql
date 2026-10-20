@@ -1,11 +1,16 @@
 #include "mysql_result.hpp"
 
 #include <cstdint>
+
 #include <limits>
 
+#include "duckdb.hpp"
+#include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/common/types/datetime.hpp"
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/string_vector.hpp"
 
 #include "mysql_connection.hpp"
 
