@@ -10,6 +10,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/query_result.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb/planner/binder.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
 
 #include "storage/mysql_connection_pool.hpp"
@@ -339,6 +340,13 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 	int64_t params_handle = ExtractParamsHandle(input);
 	MySQLResultStreamingUser user_streaming = ExtractUserStreaming(input);
 	uint64_t pinned_connection_id = ExtractPinnedConnId(input);
+
+	// Arguments like "params_handle=getvariable('p1')" mark the statement as always requiring a rebind,
+	// that would destroy the bind data (and the params handle it owns) right after PREPARE.
+	// see https://github.com/duckdb/duckdb/pull/27502
+	if (params_handle != 0 && input.binder) {
+		input.binder->GetStatementProperties().always_require_rebind = false;
+	}
 
 	bool tran_restrict_dml = false;
 	try {
