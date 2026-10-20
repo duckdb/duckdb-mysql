@@ -9,6 +9,8 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/common/string.hpp"
+#include "duckdb/common/typedefs.hpp"
 
 namespace duckdb {
 

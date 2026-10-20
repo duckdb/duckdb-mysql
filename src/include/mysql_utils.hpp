@@ -8,8 +8,14 @@
 
 #pragma once
 
-#include "duckdb.hpp"
 #include "mysql.h"
+
+#include "duckdb.hpp"
+#include "duckdb/common/mutex.hpp"
+#include "duckdb/common/string.hpp"
+#include "duckdb/common/typedefs.hpp"
+#include "duckdb/common/types/value.hpp"
+#include "duckdb/common/unordered_set.hpp"
 
 namespace duckdb {
 class MySQLSchemaEntry;

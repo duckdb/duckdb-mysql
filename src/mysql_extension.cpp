@@ -1,19 +1,17 @@
 #define DUCKDB_BUILD_LOADABLE_EXTENSION
-#include "duckdb.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/main/config.hpp"
-
-#include "storage/mysql_connection_pool.hpp"
-#include "mysql_scanner.hpp"
-#include "mysql_storage.hpp"
 #include "mysql_scanner_extension.hpp"
 
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
-#include "duckdb/main/extension/extension_loader.hpp"
-#include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
-#include "storage/mysql_catalog.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/main/config.hpp"
+#include "duckdb/main/database_manager.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
+
+#include "mysql_scanner.hpp"
+#include "mysql_storage.hpp"
+#include "storage/mysql_connection_pool.hpp"
 #include "storage/mysql_optimizer.hpp"
 
 using namespace duckdb;

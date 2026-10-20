@@ -2,7 +2,7 @@
 
 #include <map>
 
-#include "duckdb/main/attached_database.hpp"
+#include "duckdb.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 

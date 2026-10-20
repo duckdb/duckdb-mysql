@@ -9,15 +9,15 @@
 #pragma once
 
 #include "duckdb.hpp"
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/catalog/catalog.hpp"
+#include "duckdb/function/table_function.hpp"
+#include "duckdb/main/client_context.hpp"
 
 #include "mysql_connection.hpp"
 #include "mysql_statement.hpp"
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"
 #include "storage/mysql_catalog.hpp"
-#include "storage/mysql_connection_pool.hpp"
 
 namespace duckdb {
 

@@ -2,6 +2,9 @@
 
 #include <unordered_map>
 
+#include "duckdb.hpp"
+#include "duckdb/common/index_map.hpp"
+#include "duckdb/common/logical_type_info.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
@@ -29,11 +32,8 @@
 #include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
-#include "duckdb/parser/tableref/expressionlistref.hpp"
 #include "duckdb/parser/tableref/joinref.hpp"
 #include "duckdb/parser/tableref/subqueryref.hpp"
-#include "duckdb/common/index_map.hpp"
-#include "duckdb/common/logical_type_info.hpp"
 
 #include "mysql_types.hpp"
 #include "mysql_utils.hpp"

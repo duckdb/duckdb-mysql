@@ -1,21 +1,20 @@
 #include "storage/mysql_table_set.hpp"
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
-#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/catalog/dependency_list.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/parser/constraints/list.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/parser/constraints/unique_constraint.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
-#include "duckdb/catalog/dependency_list.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
-#include "duckdb/parser/constraints/list.hpp"
 #include "duckdb/parser/parser.hpp"
-
-#include "storage/mysql_transaction.hpp"
-#include "storage/mysql_schema_entry.hpp"
+#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 
 #include "mysql_types.hpp"
+#include "storage/mysql_schema_entry.hpp"
+#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 

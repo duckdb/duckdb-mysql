@@ -1,20 +1,15 @@
 #include "mysql_filter_pushdown.hpp"
 
-#include "duckdb/planner/expression/bound_comparison_expression.hpp"
-#include "duckdb/planner/expression/bound_conjunction_expression.hpp"
-#include "duckdb/planner/expression/bound_constant_expression.hpp"
-#include "duckdb/planner/expression/bound_function_expression.hpp"
-#include "duckdb/planner/expression/bound_operator_expression.hpp"
-#include "duckdb/planner/filter/table_filter_functions.hpp"
+#include "duckdb.hpp"
 #include "duckdb/common/enum_util.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/planner/filter/table_filter_functions.hpp"
 
 #include "dbconnector/query/query_writer.hpp"
 #include "dbconnector/table_scan/filter_pushdown.hpp"
 #include "dbconnector/table_scan/filter_util.hpp"
 
 #include "mysql_scanner.hpp"
-#include "mysql_utils.hpp"
 #include "storage/mysql_catalog.hpp"
 
 namespace duckdb {

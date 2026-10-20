@@ -1,10 +1,10 @@
 #ifndef DUCKDB_BUILD_LOADABLE_EXTENSION
 #define DUCKDB_BUILD_LOADABLE_EXTENSION
 #endif
-#include "duckdb.hpp"
 
-#include "duckdb/catalog/catalog.hpp"
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
+#include "duckdb.hpp"
+#include "duckdb/main/extension.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 
 using namespace duckdb;
 

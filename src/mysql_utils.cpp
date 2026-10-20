@@ -2,12 +2,10 @@
 
 #include <tuple>
 
+#include "duckdb.hpp"
 #include "duckdb/common/string_util.hpp"
 
 #include "dbconnector/query/query_writer.hpp"
-
-#include "storage/mysql_schema_entry.hpp"
-#include "storage/mysql_transaction.hpp"
 
 namespace duckdb {
 

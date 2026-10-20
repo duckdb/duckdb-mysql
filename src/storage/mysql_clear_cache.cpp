@@ -1,13 +1,12 @@
 #include "duckdb.hpp"
+#include "duckdb/main/attached_database.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/main/database_manager.hpp"
 
-#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "mysql_scanner.hpp"
 #include "mysql_types.hpp"
-#include "storage/mysql_connection_pool.hpp"
-#include "duckdb/main/database_manager.hpp"
-#include "duckdb/main/attached_database.hpp"
 #include "storage/mysql_catalog.hpp"
+#include "storage/mysql_connection_pool.hpp"
 
 namespace duckdb {
 

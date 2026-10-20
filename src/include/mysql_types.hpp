@@ -12,8 +12,8 @@
 
 #include "duckdb.hpp"
 #include "duckdb/main/client_context.hpp"
-#include "duckdb/parser/parsed_expression.hpp"
 #include "duckdb/parser/expression/type_expression.hpp"
+#include "duckdb/parser/parsed_expression.hpp"
 
 namespace duckdb {
 

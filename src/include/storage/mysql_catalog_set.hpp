@@ -8,11 +8,12 @@
 
 #pragma once
 
-#include "duckdb/transaction/transaction.hpp"
-#include "duckdb/main/client_context.hpp"
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/common/mutex.hpp"
+#include "duckdb/main/client_context.hpp"
+#include "duckdb/transaction/transaction.hpp"
 
 namespace duckdb {
 struct DropInfo;

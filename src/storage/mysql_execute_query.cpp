@@ -1,19 +1,16 @@
 #include "storage/mysql_execute_query.hpp"
-#include "duckdb/main/client_context.hpp"
+
+#include "duckdb.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/execution/physical_plan_generator.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/planner/logical_operator.hpp"
-#include "storage/mysql_table_entry.hpp"
 #include "duckdb/planner/operator/logical_delete.hpp"
+#include "duckdb/planner/operator/logical_update.hpp"
+
+#include "mysql_connection.hpp"
 #include "storage/mysql_catalog.hpp"
 #include "storage/mysql_transaction.hpp"
-#include "mysql_connection.hpp"
-#include "duckdb/planner/operator/logical_update.hpp"
-#include "duckdb/execution/operator/filter/physical_filter.hpp"
-#include "duckdb/execution/operator/scan/physical_table_scan.hpp"
-#include "duckdb/planner/expression/bound_constant_expression.hpp"
-#include "duckdb/planner/expression/bound_reference_expression.hpp"
-#include "duckdb/execution/operator/projection/physical_projection.hpp"
 
 namespace duckdb {
 
