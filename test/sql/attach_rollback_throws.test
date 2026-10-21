@@ -4,7 +4,7 @@
 
 require mysql_scanner
 
-require-env POSTGRES_TEST_DATABASE_AVAILABLE
+require-env MYSQL_TEST_DATABASE_AVAILABLE
 
 # ROLLBACK throws
 
@@ -55,7 +55,7 @@ FROM mysql_query('s', 'SELECT 42')
 42
 
 statement ok
-CALL mysql_execute('s1', 'KILL ?', params=row(getvariable(s1_cid)))
+CALL mysql_execute('s1', 'KILL ' || getvariable(s1_cid), prepare=FALSE)
 
 query II
 SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')

@@ -81,12 +81,17 @@ MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, C
 }
 
 MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, MySQLTableInfo &info)
-    : TableCatalogEntry(catalog, schema, *info.create_info), columns(std::move(info.create_info->columns)) {
+    : TableCatalogEntry(catalog, schema, *info.create_info), columns(std::move(info.create_info->columns)),
+      generated_columns(std::move(info.generated_columns)) {
 	this->internal = TableIsInternal(schema, name.GetIdentifierName());
 }
 
 const ColumnList &MySQLTableEntry::GetColumns() const {
 	return columns;
+}
+
+bool MySQLTableEntry::IsGeneratedColumn(LogicalIndex index) const {
+	return generated_columns.find(index.index) != generated_columns.end();
 }
 
 unique_ptr<BaseStatistics> MySQLTableEntry::GetStatistics(ClientContext &context, column_t column_id) {

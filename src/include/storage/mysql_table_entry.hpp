@@ -35,6 +35,8 @@ struct MySQLTableInfo {
 	}
 
 	unique_ptr<CreateTableInfo> create_info;
+	//! Logical indexes of MySQL generated (VIRTUAL or STORED) columns
+	unordered_set<idx_t> generated_columns;
 };
 
 class MySQLTableEntry : public TableCatalogEntry {
@@ -56,8 +58,12 @@ public:
 
 	static dbconnector::attached::AttachedTable Lookup(ClientContext &ctx, QualifiedName name);
 
+	//! Whether the column is a MySQL generated column, values for such columns cannot be inserted
+	bool IsGeneratedColumn(LogicalIndex index) const;
+
 protected:
 	ColumnList columns;
+	unordered_set<idx_t> generated_columns;
 };
 
 } // namespace duckdb
