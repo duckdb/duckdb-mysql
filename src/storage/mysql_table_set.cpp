@@ -46,16 +46,23 @@ void MySQLTableSet::AddColumn(MySQLTransaction &transaction, MySQLResult &result
 		column.SetComment(result.GetString(column_index + 8));
 	}
 	auto &create_info = *table_info.create_info;
+	auto column_idx = create_info.columns.LogicalColumnCount();
 	if (is_nullable != "YES") {
-		auto column_idx = create_info.columns.LogicalColumnCount();
 		create_info.constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_idx)));
+	}
+	if (!result.IsNull(column_index + 9)) {
+		// "VIRTUAL GENERATED" or "STORED GENERATED", note that "DEFAULT_GENERATED" is used for expression defaults
+		auto extra = StringUtil::Upper(result.GetString(column_index + 9));
+		if (StringUtil::Contains(extra, "VIRTUAL GENERATED") || StringUtil::Contains(extra, "STORED GENERATED")) {
+			table_info.generated_columns.insert(column_idx);
+		}
 	}
 	create_info.columns.AddColumn(std::move(column));
 }
 
 void MySQLTableSet::LoadEntries(MySQLTransaction &transaction) {
 	auto query = StringUtil::Replace(R"(
-SELECT c.table_name, c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment
+SELECT c.table_name, c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment, c.extra
 FROM information_schema.columns c
 LEFT JOIN information_schema.tables t
 	ON t.TABLE_CATALOG = c.TABLE_CATALOG
@@ -95,7 +102,7 @@ ORDER BY c.table_name, c.ordinal_position;
 
 string GetTableInfoQuery(const string &schema_name, const string &table_name) {
 	return StringUtil::Replace(StringUtil::Replace(R"(
-SELECT c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment
+SELECT c.column_name, c.data_type, c.column_type, c.column_default, c.is_nullable, c.numeric_precision, c.numeric_scale, t.table_comment, c.column_comment, c.extra
 FROM information_schema.columns c
 LEFT JOIN information_schema.tables t
 	ON t.TABLE_CATALOG = c.TABLE_CATALOG

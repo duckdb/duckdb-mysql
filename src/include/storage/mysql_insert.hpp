@@ -22,8 +22,7 @@ namespace duckdb {
 class MySQLInsert : public PhysicalOperator {
 public:
 	//! INSERT INTO
-	MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-	            physical_index_vector_t<idx_t> column_index_map);
+	MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table);
 	//! CREATE TABLE AS
 	MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
 	            unique_ptr<BoundCreateTableInfo> info);
@@ -34,8 +33,6 @@ public:
 	optional_ptr<SchemaCatalogEntry> schema;
 	//! Create table info, in case of CREATE TABLE AS
 	unique_ptr<BoundCreateTableInfo> info;
-	//! column_index_map
-	physical_index_vector_t<idx_t> column_index_map;
 
 public:
 	// Source interface

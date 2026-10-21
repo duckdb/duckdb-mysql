@@ -1,0 +1,64 @@
+# name: test/sql/generated_columns.test
+# description: Test inserting into MySQL tables with generated columns
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS generated_columns_test')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE generated_columns_test (
+    id    INT AUTO_INCREMENT PRIMARY KEY,
+    price DECIMAL(10,2),
+    qty   INT,
+    total DECIMAL(12,2) GENERATED ALWAYS AS (price * qty) STORED,
+    total_virtual DECIMAL(12,2) GENERATED ALWAYS AS (price * qty * 2) VIRTUAL)')
+
+statement ok
+CALL mysql_clear_cache()
+
+# generated and auto-increment columns not specified
+statement ok
+INSERT INTO s.generated_columns_test (price, qty) VALUES (2.50, 4)
+
+# columns specified in a different order
+statement ok
+INSERT INTO s.generated_columns_test (qty, price) VALUES (3, 1.00)
+
+# all columns, generated columns set to NULL
+statement ok
+INSERT INTO s.generated_columns_test VALUES (100, 5.00, 2, NULL, NULL)
+
+# explicit values for generated columns are not allowed
+statement error
+INSERT INTO s.generated_columns_test (price, qty, total) VALUES (1.00, 1, 42)
+----
+Cannot insert into a generated column "total"
+
+statement error
+INSERT INTO s.generated_columns_test (price, qty, total_virtual) VALUES (1.00, 1, 42)
+----
+Cannot insert into a generated column "total_virtual"
+
+# insert from a query
+statement ok
+INSERT INTO s.generated_columns_test (price, qty) SELECT 1.5, i FROM range(3) t(i)
+
+query IIIII
+SELECT * FROM s.generated_columns_test ORDER BY id
+----
+1	2.50	4	10.00	20.00
+2	1.00	3	3.00	6.00
+100	5.00	2	10.00	20.00
+101	1.50	0	0.00	0.00
+102	1.50	1	1.50	3.00
+103	1.50	2	3.00	6.00
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE generated_columns_test')

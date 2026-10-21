@@ -21,10 +21,8 @@
 
 namespace duckdb {
 
-MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-                         physical_index_vector_t<idx_t> column_index_map_p)
-    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
-      column_index_map(std::move(column_index_map_p)) {
+MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table)
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr) {
 }
 
 MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
@@ -49,30 +47,30 @@ public:
 	idx_t insert_count;
 	string base_insert_query;
 	string insert_values;
+	//! Indexes of the input columns that are written into the VALUES list
+	vector<idx_t> value_columns;
+	//! Indexes of the input columns that map to MySQL generated columns, these are not written
+	vector<idx_t> generated_columns;
 };
 
-vector<string> GetInsertColumns(const MySQLInsert &insert, MySQLTableEntry &entry) {
+vector<string> GetInsertColumns(MySQLTableEntry &entry, MySQLInsertGlobalState &gstate) {
 	vector<string> column_names;
 	auto &columns = entry.GetColumns();
-	idx_t column_count;
-	if (!insert.column_index_map.empty()) {
-		column_count = 0;
-		vector<PhysicalIndex> column_indexes;
-		column_indexes.resize(columns.LogicalColumnCount(), PhysicalIndex(DConstants::INVALID_INDEX));
-		for (idx_t c = 0; c < insert.column_index_map.size(); c++) {
-			auto column_index = PhysicalIndex(c);
-			auto mapped_index = insert.column_index_map[column_index];
-			if (mapped_index == DConstants::INVALID_INDEX) {
-				// column not specified
-				continue;
-			}
-			column_indexes[mapped_index] = column_index;
-			column_count++;
-		}
-		for (idx_t c = 0; c < column_count; c++) {
-			auto &col = columns.GetColumn(column_indexes[c]);
+	// the input contains all physical columns of the table (with defaults filled in for unspecified columns),
+	// skip the MySQL generated columns as MySQL does not allow inserting into them
+	bool has_generated = false;
+	for (auto &col : columns.Physical()) {
+		if (entry.IsGeneratedColumn(col.Logical())) {
+			gstate.generated_columns.push_back(col.Physical().index);
+			has_generated = true;
+		} else {
 			column_names.emplace_back(col.GetName().GetIdentifierName());
+			gstate.value_columns.push_back(col.Physical().index);
 		}
+	}
+	if (!has_generated) {
+		// insert into all columns, no need for a column list
+		column_names.clear();
 	}
 	return column_names;
 }
@@ -107,14 +105,10 @@ unique_ptr<GlobalSinkState> MySQLInsert::GetGlobalSinkState(ClientContext &conte
 	} else {
 		insert_table = &table.get_mutable()->Cast<MySQLTableEntry>();
 	}
-	auto insert_columns = GetInsertColumns(*this, *insert_table);
-	vector<LogicalType> insert_types;
-	idx_t insert_column_count =
-	    insert_columns.empty() ? insert_table->GetColumns().LogicalColumnCount() : insert_columns.size();
-	for (idx_t c = 0; c < insert_column_count; c++) {
-		insert_types.push_back(LogicalType::VARCHAR);
-	}
-	auto result = make_uniq<MySQLInsertGlobalState>(context, *insert_table, insert_types);
+	auto &child_types = children[0].get().GetTypes();
+	vector<LogicalType> varchar_types(child_types.size(), LogicalType::VARCHAR);
+	auto result = make_uniq<MySQLInsertGlobalState>(context, *insert_table, varchar_types);
+	auto insert_columns = GetInsertColumns(*insert_table, *result);
 	result->base_insert_query = GetBaseInsertQuery(*insert_table, insert_columns);
 	return std::move(result);
 }
@@ -202,14 +196,26 @@ SinkResultType MySQLInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 		add_quotes.push_back(add_quotes_for_type);
 	}
 
+	// values for generated columns can only be NULL (i.e. the column was not specified)
+	for (auto c : gstate.generated_columns) {
+		for (idx_t r = 0; r < chunk.size(); r++) {
+			if (!FlatVector::IsNull(chunk.data[c], r)) {
+				auto &col = gstate.table.GetColumns().GetColumn(PhysicalIndex(c));
+				throw InvalidInputException("Cannot insert into a generated column \"%s\"",
+				                            col.GetName().GetIdentifierName());
+			}
+		}
+	}
+
 	// generate INSERT INTO statements
 	for (idx_t r = 0; r < chunk.size(); r++) {
 		if (!gstate.insert_values.empty()) {
 			gstate.insert_values += ", ";
 		}
 		gstate.insert_values += "(";
-		for (idx_t c = 0; c < gstate.varchar_chunk.ColumnCount(); c++) {
-			if (c > 0) {
+		for (idx_t i = 0; i < gstate.value_columns.size(); i++) {
+			auto c = gstate.value_columns[i];
+			if (i > 0) {
 				gstate.insert_values += ", ";
 			}
 			if (FlatVector::IsNull(gstate.varchar_chunk.data[c], r)) {
@@ -326,9 +332,13 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 	}
 
 	D_ASSERT(plan);
+	if (!op.column_index_map.empty()) {
+		// deprecated: column_index_map is only populated by older DuckDB versions, push the defaults projection
+		plan = planner.ResolveDefaultsProjection(op, *plan);
+	}
 	MySQLCatalog::MaterializeMySQLScans(*plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
-	auto &insert = planner.Make<MySQLInsert>(op, op.table, op.column_index_map);
+	auto &insert = planner.Make<MySQLInsert>(op, op.table);
 	insert.children.push_back(inner_plan);
 	return insert;
 }
