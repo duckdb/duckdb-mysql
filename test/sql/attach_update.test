@@ -6,6 +6,8 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
+require icu
+
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
 
@@ -113,3 +115,63 @@ UPDATE s1.test SET i=42 WHERE i=(SELECT MIN(i) FROM s1.test);
 ----
 PREPARE error
 
+statement ok
+CALL mysql_execute('s1', 'CREATE TABLE IF NOT EXISTS test_update_events (
+    id INT PRIMARY KEY,
+    ts DATETIME NULL)');
+
+statement ok
+CALL mysql_execute('s1', 'REPLACE INTO test_update_events VALUES (1, NULL)');
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+UPDATE s1.test_update_events SET ts = TIMESTAMPTZ '2026-01-01 12:00:00+00' WHERE id = 1;
+
+# TIMESTAMP WITH TIME ZONE literals are converted to the DuckDB session time zone
+statement ok
+SET TimeZone='America/New_York'
+
+statement ok
+CALL mysql_execute('s1', 'REPLACE INTO test_update_events VALUES (2, NULL), (3, ''2026-01-01 08:00:00'')');
+
+statement ok
+UPDATE s1.test_update_events SET ts = TIMESTAMPTZ '2026-01-01 12:00:00+00' WHERE id = 2;
+
+# literals without an offset are interpreted in the session time zone
+query I
+UPDATE s1.test_update_events SET ts = TIMESTAMPTZ '2026-01-01 09:00:00' WHERE id = 1;
+----
+1
+
+query II
+SELECT * FROM s1.test_update_events ORDER BY id
+----
+1	2026-01-01 09:00:00
+2	2026-01-01 07:00:00
+3	2026-01-01 08:00:00
+
+query I
+UPDATE s1.test_update_events SET id = id + 10 WHERE ts = TIMESTAMPTZ '2026-01-01 13:00:00+00';
+----
+1
+
+query II
+SELECT * FROM s1.test_update_events ORDER BY id
+----
+1	2026-01-01 09:00:00
+2	2026-01-01 07:00:00
+13	2026-01-01 08:00:00
+
+# casts of non-literals to TIMESTAMP WITH TIME ZONE are not pushed down
+statement error
+UPDATE s1.test_update_events SET ts = CAST(ts AS TIMESTAMPTZ) WHERE id = 1;
+----
+UPDATE syntax not supported
+
+statement ok
+RESET TimeZone
+
+statement ok
+CALL mysql_execute('s1', 'DROP TABLE test_update_events');

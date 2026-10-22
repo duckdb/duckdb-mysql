@@ -35,10 +35,12 @@ namespace duckdb {
 
 bool MySQLCapabilities::SupportsType(const LogicalType &type, bool for_cast) {
 	switch (type.id()) {
-	case LogicalTypeId::BOOLEAN: // TRUE / FALSE literals; MySQL has no boolean cast target
-	case LogicalTypeId::SQLNULL: // NULL literal
-	case LogicalTypeId::BLOB:    // x'..' literals; DuckDB's VARCHAR -> BLOB cast interprets
-	                             // backslash escapes, MySQL's CAST AS BINARY does not
+	case LogicalTypeId::BOOLEAN:      // TRUE / FALSE literals; MySQL has no boolean cast target
+	case LogicalTypeId::SQLNULL:      // NULL literal
+	case LogicalTypeId::BLOB:         // x'..' literals; DuckDB's VARCHAR -> BLOB cast interprets
+	                                  // backslash escapes, MySQL's CAST AS BINARY does not
+	case LogicalTypeId::TIMESTAMP_TZ: // TIMESTAMP '..' literals in the session time zone; MySQL has
+	                                  // no time zone aware cast target
 		return !for_cast;
 	case LogicalTypeId::TINYINT:
 	case LogicalTypeId::SMALLINT:
@@ -76,8 +78,30 @@ bool MySQLCapabilities::SupportsValue(const Value &value) {
 		return Value::IsFinite(DateValue::Get(value));
 	case LogicalTypeId::TIMESTAMP:
 		return Value::IsFinite(TimestampValue::Get(value));
+	case LogicalTypeId::TIMESTAMP_TZ:
+		return Value::IsFinite(TimestampTZValue::Get(value));
 	default:
 		return true;
+	}
+}
+
+//! TIMESTAMP WITH TIME ZONE literals are serialized as TIMESTAMP literals in the session time zone
+//! (see MySQLSQLWriter::WriteConstant), this is only equivalent where the value is compared against
+//! or assigned to a DATETIME / TIMESTAMP column
+static bool MySQLIsTimestampTZLiteral(const ParsedExpression &expr) {
+	switch (expr.GetExpressionClass()) {
+	case ExpressionClass::CONSTANT: {
+		auto value = expr.Cast<ConstantExpression>().GetLiteral().ToValue();
+		return value.type().id() == LogicalTypeId::TIMESTAMP_TZ;
+	}
+	case ExpressionClass::CAST: {
+		// typed literals (TIMESTAMPTZ '...') are casts of a string constant
+		auto &cast_expr = expr.Cast<CastExpression>();
+		return cast_expr.Child().GetExpressionClass() == ExpressionClass::CONSTANT &&
+		       MySQLTypes::ToLogicalType(cast_expr.TargetType()).id() == LogicalTypeId::TIMESTAMP_TZ;
+	}
+	default:
+		return false;
 	}
 }
 
@@ -734,7 +758,9 @@ bool MySQLCapabilities::SupportsPushdown(const ParsedExpression &expr) {
 		// the cast target is an unbound type expression - resolve it against the built-in types
 		const TypeExpression &target_type_expr = cast_expr.TargetType();
 		LogicalType target_type = MySQLTypes::ToLogicalType(target_type_expr);
-		if (!SupportsType(target_type, true)) {
+		if (!SupportsType(target_type, true) && !MySQLIsTimestampTZLiteral(expr)) {
+			// TIMESTAMP WITH TIME ZONE has no MySQL cast target, only casts of literals (evaluated
+			// locally, see below) are supported
 			return false;
 		}
 		// MySQL's CAST semantics differ from DuckDB's in several ways: malformed input returns
@@ -802,6 +828,11 @@ bool MySQLCapabilities::SupportsPushdown(const ParsedExpression &expr) {
 		for (auto &child : children) {
 			if (child.HasName()) {
 				// MySQL has no named function arguments
+				return false;
+			}
+			if (MySQLIsTimestampTZLiteral(child.GetExpression())) {
+				// the literal is serialized without its time zone offset, functions that format or
+				// inspect it would produce different results than DuckDB
 				return false;
 			}
 		}
@@ -1035,6 +1066,13 @@ bool MySQLCapabilities::SupportsPushdown(const QueryNode &node) {
 			// list and filters rows, while DuckDB turns the query into an aggregation and raises
 			// a binder error for non-aggregated columns
 			return false;
+		}
+		for (auto &expr : select.select_list) {
+			if (MySQLIsTimestampTZLiteral(*expr)) {
+				// MySQL would return the literal as a TIMESTAMP in the session time zone instead of
+				// a TIMESTAMP WITH TIME ZONE value
+				return false;
+			}
 		}
 		if (!SupportsSelectAliasUsage(select)) {
 			// the query references select-list aliases at positions MySQL cannot resolve

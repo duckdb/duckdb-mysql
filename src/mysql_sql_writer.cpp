@@ -101,6 +101,17 @@ string MySQLSQLWriter::WriteConstant(const Value &value) {
 		return "TIME " + MySQLUtils::WriteLiteral(value.ToString());
 	case LogicalTypeId::TIMESTAMP:
 		return "TIMESTAMP " + MySQLUtils::WriteLiteral(value.ToString());
+	case LogicalTypeId::TIMESTAMP_TZ: {
+		// MySQL has no time zone aware literals - convert the value to a timestamp in the DuckDB
+		// session time zone, the same way DuckDB casts it when comparing it against or assigning
+		// it to a (DATETIME / TIMESTAMP) column
+		auto local_value = value.TryCastAs(context, LogicalType::TIMESTAMP);
+		if (!local_value) {
+			throw InternalException("MySQLSQLWriter: TIMESTAMP WITH TIME ZONE literal cannot be converted to "
+			                        "TIMESTAMP - should have been blocked by SupportsPushdown");
+		}
+		return "TIMESTAMP " + MySQLUtils::WriteLiteral(local_value->ToString());
+	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported constant type %s - should have been blocked by "
 		                        "SupportsPushdown",
@@ -489,7 +500,10 @@ string MySQLSQLWriter::WriteExpression(const ParsedExpression &expr) {
 			// instead of errors), numeric strings ('1e2', '5.7') and time zone offsets
 			// (SupportsPushdown verifies that the cast succeeds)
 			auto value = cast_expr.Child().Cast<ConstantExpression>().GetLiteral().ToValue();
-			auto cast_result = value.DefaultTryCastAs(target_type);
+			// strings without an explicit offset are cast to TIMESTAMP WITH TIME ZONE in the
+			// session time zone, which requires the client context
+			auto cast_result = target_type.id() == LogicalTypeId::TIMESTAMP_TZ ? value.TryCastAs(context, target_type)
+			                                                                   : value.DefaultTryCastAs(target_type);
 			if (!cast_result) {
 				throw InternalException("MySQLSQLWriter: cast of literal failed - should have been blocked by "
 				                        "SupportsPushdown");
