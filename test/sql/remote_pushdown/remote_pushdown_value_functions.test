@@ -6,8 +6,6 @@ require mysql_scanner
 
 require-env MYSQL_TEST_DATABASE_AVAILABLE
 
-require icu
-
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
@@ -51,7 +49,7 @@ SELECT id FROM s.value_functions_events WHERE ts IS NOT NULL AND d IS NOT NULL A
 2
 
 query I
-SELECT count(*) FROM s.value_functions_events WHERE ts <= CURRENT_TIMESTAMP + INTERVAL 1 DAY
+SELECT count(*) FROM s.value_functions_events WHERE ts <= CURRENT_TIMESTAMP AND d <= CURRENT_DATE
 ----
 2
 
