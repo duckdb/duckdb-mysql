@@ -168,6 +168,14 @@ string MySQLSQLWriter::WriteExpressionList(const vector<unique_ptr<ParsedExpress
 }
 
 string MySQLSQLWriter::WriteColumnRef(const ColumnRefExpression &column_ref) {
+	// SQL value functions without parentheses (CURRENT_TIMESTAMP, ...) are parsed as unqualified
+	// column references - write the ones MySQL supports in the same form unquoted, so MySQL
+	// evaluates them instead of looking up a column
+	static const case_insensitive_set_t MYSQL_VALUE_FUNCTIONS = {"current_date", "current_time", "current_timestamp",
+	                                                             "localtime", "localtimestamp"};
+	if (!column_ref.IsQualified() && MYSQL_VALUE_FUNCTIONS.count(column_ref.GetColumnName().GetIdentifierName()) > 0) {
+		return StringUtil::Upper(column_ref.GetColumnName().GetIdentifierName());
+	}
 	string result;
 	for (auto &column_name : column_ref.ColumnNames()) {
 		if (!result.empty()) {

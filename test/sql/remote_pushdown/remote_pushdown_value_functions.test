@@ -1,0 +1,64 @@
+# name: test/sql/remote_pushdown/remote_pushdown_value_functions.test
+# description: SQL value functions without parentheses (CURRENT_TIMESTAMP, current_date, ...) in pushed down queries
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require icu
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE IF NOT EXISTS value_functions_events (
+    id INT PRIMARY KEY,
+    ts DATETIME NULL,
+    d DATE NULL,
+    t TIME NULL)');
+
+statement ok
+CALL mysql_execute('s', 'REPLACE INTO value_functions_events VALUES (1, NULL, NULL, NULL), (2, NULL, NULL, NULL)');
+
+statement ok
+CALL mysql_clear_cache();
+
+query I
+UPDATE s.value_functions_events SET ts = CURRENT_TIMESTAMP WHERE id = 1;
+----
+1
+
+query I
+UPDATE s.value_functions_events SET ts = current_date::TIMESTAMP WHERE id = 2;
+----
+1
+
+query I
+UPDATE s.value_functions_events SET d = current_date, t = current_time WHERE id = 1;
+----
+1
+
+query I
+UPDATE s.value_functions_events SET d = CURRENT_DATE, t = LOCALTIME, ts = LOCALTIMESTAMP WHERE id = 2;
+----
+1
+
+query I
+SELECT id FROM s.value_functions_events WHERE ts IS NOT NULL AND d IS NOT NULL AND t IS NOT NULL ORDER BY id
+----
+1
+2
+
+query I
+SELECT count(*) FROM s.value_functions_events WHERE ts <= CURRENT_TIMESTAMP + INTERVAL 1 DAY
+----
+2
+
+query I
+DELETE FROM s.value_functions_events WHERE d > current_date
+----
+0
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE value_functions_events');
