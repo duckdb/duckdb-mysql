@@ -58,19 +58,13 @@ vector<string> GetInsertColumns(MySQLTableEntry &entry, MySQLInsertGlobalState &
 	auto &columns = entry.GetColumns();
 	// the input contains all physical columns of the table (with defaults filled in for unspecified columns),
 	// skip the MySQL generated columns as MySQL does not allow inserting into them
-	bool has_generated = false;
 	for (auto &col : columns.Physical()) {
 		if (entry.IsGeneratedColumn(col.Logical())) {
 			gstate.generated_columns.push_back(col.Physical().index);
-			has_generated = true;
 		} else {
 			column_names.emplace_back(col.GetName().GetIdentifierName());
 			gstate.value_columns.push_back(col.Physical().index);
 		}
-	}
-	if (!has_generated) {
-		// insert into all columns, no need for a column list
-		column_names.clear();
 	}
 	return column_names;
 }
@@ -331,10 +325,8 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 		throw BinderException("ON CONFLICT clause not yet supported for insertion into MySQL table");
 	}
 
-	D_ASSERT(plan);
-	if (!op.column_index_map.empty()) {
-		// deprecated: column_index_map is only populated by older DuckDB versions, push the defaults projection
-		plan = planner.ResolveDefaultsProjection(op, *plan);
+	if (!plan) {
+		throw InternalException("MySQLCatalog::PlanInsert: insert without a child plan");
 	}
 	MySQLCatalog::MaterializeMySQLScans(*plan);
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
