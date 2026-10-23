@@ -1,0 +1,23 @@
+name: Setup MariaDB
+description: Start a MariaDB server in Docker and load the test data
+runs:
+  using: composite
+  steps:
+    - name: Setup MariaDB
+      shell: bash
+      run: |
+        docker run -d --name mariadb \
+          -e MARIADB_ROOT_PASSWORD=root \
+          -p 3306:3306 \
+          mariadb:10.11 \
+          --character-set-server=utf8mb4
+        for i in $(seq 1 60); do
+          if docker exec mariadb mariadb-admin ping -h 127.0.0.1 -u root -proot --silent; then
+            break
+          fi
+          sleep 2
+        done
+        docker exec mariadb mariadb-admin ping -h 127.0.0.1 -u root -proot --silent || { docker logs mariadb; exit 1; }
+        docker exec mariadb mariadb -h 127.0.0.1 -u root -proot -e "select @@version"
+        docker exec -i mariadb mariadb -h 127.0.0.1 -u root -proot --default-character-set=utf8mb4 < test/test_data.sql
+        docker exec mariadb mariadb -h 127.0.0.1 -u root -proot -e "SELECT 42"
