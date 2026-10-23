@@ -1,0 +1,23 @@
+name: Setup MySQL
+description: Start a MySQL server in Docker and load the test data
+runs:
+  using: composite
+  steps:
+    - name: Setup MySQL
+      shell: bash
+      run: |
+        docker run -d --name mysql \
+          -e MYSQL_ROOT_PASSWORD=root \
+          -p 3306:3306 \
+          mysql:8.0 \
+          --default-authentication-plugin=mysql_native_password \
+          --character-set-server=utf8mb4
+        for i in $(seq 1 60); do
+          if docker exec mysql mysqladmin ping -h 127.0.0.1 -u root -proot --silent; then
+            break
+          fi
+          sleep 2
+        done
+        docker exec mysql mysqladmin ping -h 127.0.0.1 -u root -proot --silent || { docker logs mysql; exit 1; }
+        docker exec -i mysql mysql -h 127.0.0.1 -u root -proot --default-character-set=utf8mb4 < test/test_data.sql
+        docker exec mysql mysql -h 127.0.0.1 -u root -proot -e "SELECT 42"
