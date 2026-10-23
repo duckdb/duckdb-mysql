@@ -1,0 +1,49 @@
+# name: test/sql/no_transaction_autocommit.test
+# description: Test that no transaction is started on MySQL when transactions are disabled
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET mysql_enable_transactions = FALSE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS reader (TYPE MYSQL_SCANNER)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS writer (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('writer', 'DROP TABLE IF EXISTS no_tx_autocommit')
+
+statement ok
+CALL mysql_execute('writer', 'CREATE TABLE no_tx_autocommit(i INTEGER)')
+
+statement ok
+BEGIN
+
+query I
+SELECT count(*) FROM mysql_query('reader', 'SELECT * FROM no_tx_autocommit')
+----
+0
+
+statement ok
+CALL mysql_execute('writer', 'INSERT INTO no_tx_autocommit VALUES (42)')
+
+# without a transaction on the reader's connection there is no REPEATABLE READ
+# snapshot, and the writer's statement is autocommitted, so the row is visible
+query I
+SELECT count(*) FROM mysql_query('reader', 'SELECT * FROM no_tx_autocommit')
+----
+1
+
+statement ok
+COMMIT
+
+statement ok
+CALL mysql_execute('writer', 'DROP TABLE no_tx_autocommit')
+
+statement ok
+SET mysql_enable_transactions = TRUE
