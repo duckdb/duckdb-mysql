@@ -66,7 +66,7 @@ MySQLConnection &MySQLTransaction::GetConnection() {
 		}
 	}
 
-	if (transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
+	if (transactions_enabled && transaction_state == MySQLTransactionState::TRANSACTION_NOT_YET_STARTED) {
 		string query = "START TRANSACTION";
 		if (access_mode == AccessMode::READ_ONLY) {
 			query += " READ ONLY";
