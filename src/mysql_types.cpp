@@ -262,9 +262,10 @@ string MySQLTypes::TypeToString(const LogicalType &input) {
 	case LogicalType::UBIGINT:
 		return "BIGINT UNSIGNED";
 	case LogicalType::TIMESTAMP:
-		return "DATETIME";
+		// without an explicit precision MySQL uses DATETIME(0) and rounds fractional seconds
+		return "DATETIME(6)";
 	case LogicalType::TIMESTAMP_TZ:
-		return "TIMESTAMP";
+		return "TIMESTAMP(6)";
 	default:
 		return input.ToString();
 	}

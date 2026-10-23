@@ -1,0 +1,138 @@
+# name: test/sql/attach_create_timestamp_precision.test
+# description: Test that tables created in MySQL keep fractional seconds of timestamps
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+statement ok
+CREATE TABLE ts_src AS SELECT * FROM (VALUES
+  (1, '2020-01-01 23:59:59.7'::TIMESTAMP, '1999-12-31 23:59:59.999'::TIMESTAMP_MS,
+      '2021-06-30 23:59:59.999999999'::TIMESTAMP_NS, '2022-03-04 05:06:07'::TIMESTAMP_S,
+      '2023-12-31 23:59:59.654321+00'::TIMESTAMPTZ),
+  (2, '2026-10-17 08:30:00.123456'::TIMESTAMP, '2020-01-01 10:00:00.25'::TIMESTAMP_MS,
+      '2026-10-17 08:30:00.123456789'::TIMESTAMP_NS, '2026-10-17 08:30:00'::TIMESTAMP_S,
+      '2026-10-17 08:30:00.5+00'::TIMESTAMPTZ)
+) v(id, ts, tms, tns, tsec, tstz)
+
+# CREATE TABLE AS
+# TIMESTAMP_NS values are rounded to microseconds by the DuckDB cast to TIMESTAMP
+
+statement ok
+DROP TABLE IF EXISTS s.ts_precision_ctas
+
+statement ok
+CREATE TABLE s.ts_precision_ctas AS FROM ts_src
+
+query IIIIII
+FROM s.ts_precision_ctas ORDER BY id
+----
+1	2020-01-01 23:59:59.7	1999-12-31 23:59:59.999	2021-07-01 00:00:00	2022-03-04 05:06:07	2023-12-31 23:59:59.654321
+2	2026-10-17 08:30:00.123456	2020-01-01 10:00:00.25	2026-10-17 08:30:00.123457	2026-10-17 08:30:00	2026-10-17 08:30:00.5
+
+query II
+SELECT column_name, column_type
+FROM mysql_query('s', '
+  SELECT column_name, column_type
+  FROM information_schema.columns
+  WHERE table_schema = ''mysqlscanner''
+  AND table_name = ''ts_precision_ctas''
+  ORDER BY ordinal_position'
+)
+WHERE column_name <> 'id'
+----
+ts	datetime(6)
+tms	datetime(6)
+tns	datetime(6)
+tsec	datetime(6)
+tstz	datetime(6)
+
+# CREATE TABLE + INSERT
+
+statement ok
+DROP TABLE IF EXISTS s.ts_precision_create
+
+statement ok
+CREATE TABLE s.ts_precision_create(id INTEGER, ts TIMESTAMP, tms TIMESTAMP_MS, tns TIMESTAMP_NS, tsec TIMESTAMP_S, tstz TIMESTAMPTZ)
+
+statement ok
+INSERT INTO s.ts_precision_create FROM ts_src
+
+query IIIIII
+FROM s.ts_precision_create ORDER BY id
+----
+1	2020-01-01 23:59:59.7	1999-12-31 23:59:59.999	2021-07-01 00:00:00	2022-03-04 05:06:07	2023-12-31 23:59:59.654321
+2	2026-10-17 08:30:00.123456	2020-01-01 10:00:00.25	2026-10-17 08:30:00.123457	2026-10-17 08:30:00	2026-10-17 08:30:00.5
+
+query II
+SELECT column_name, column_type
+FROM mysql_query('s', '
+  SELECT column_name, column_type
+  FROM information_schema.columns
+  WHERE table_schema = ''mysqlscanner''
+  AND table_name = ''ts_precision_create''
+  ORDER BY ordinal_position'
+)
+WHERE column_name <> 'id'
+----
+ts	datetime(6)
+tms	datetime(6)
+tns	datetime(6)
+tsec	datetime(6)
+tstz	datetime(6)
+
+# INSERT + SELECT of fractional seconds
+
+statement ok
+DROP TABLE IF EXISTS s.ts_precision_insert
+
+statement ok
+CREATE TABLE s.ts_precision_insert(id INTEGER, ts TIMESTAMP)
+
+statement ok
+INSERT INTO s.ts_precision_insert VALUES
+  (1, '2020-01-01 23:59:59.999999'),
+  (2, '2020-01-01 23:59:59.5'),
+  (3, '2020-01-01 00:00:00.000001'),
+  (4, '2020-01-01 12:34:56')
+
+query III
+SELECT id, ts, microsecond(ts) % 1000000 FROM s.ts_precision_insert ORDER BY id
+----
+1	2020-01-01 23:59:59.999999	999999
+2	2020-01-01 23:59:59.5	500000
+3	2020-01-01 00:00:00.000001	1
+4	2020-01-01 12:34:56	0
+
+# fractional part as stored on the MySQL side
+query III
+SELECT * FROM mysql_query('s', 'SELECT id, CAST(ts AS CHAR), MICROSECOND(ts) FROM ts_precision_insert ORDER BY id')
+----
+1	2020-01-01 23:59:59.999999	999999
+2	2020-01-01 23:59:59.500000	500000
+3	2020-01-01 00:00:00.000001	1
+4	2020-01-01 12:34:56.000000	0
+
+# equality filters on the exact fractional value
+query I
+SELECT id FROM s.ts_precision_insert WHERE ts = TIMESTAMP '2020-01-01 23:59:59.999999'
+----
+1
+
+query I
+SELECT id FROM s.ts_precision_insert WHERE ts > TIMESTAMP '2020-01-01 23:59:59.5' ORDER BY id
+----
+1
+
+statement ok
+DROP TABLE s.ts_precision_ctas
+
+statement ok
+DROP TABLE s.ts_precision_create
+
+statement ok
+DROP TABLE s.ts_precision_insert

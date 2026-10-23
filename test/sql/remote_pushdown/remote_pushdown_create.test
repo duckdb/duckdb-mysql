@@ -150,10 +150,10 @@ FROM mysql_query('s', 'DESCRIBE pushdown_create_test')
 col1	date	YES	(empty)	NULL	(empty)
 col2	text	YES	(empty)	NULL	(empty)
 col3	text	YES	(empty)	NULL	(empty)
-col4	datetime	YES	(empty)	NULL	(empty)
-col5	datetime	YES	(empty)	NULL	(empty)
-col6	datetime	YES	(empty)	NULL	(empty)
-col7	datetime	YES	(empty)	NULL	(empty)
+col4	datetime(6)	YES	(empty)	NULL	(empty)
+col5	datetime(6)	YES	(empty)	NULL	(empty)
+col6	datetime(6)	YES	(empty)	NULL	(empty)
+col7	datetime(6)	YES	(empty)	NULL	(empty)
 
 # strings
 
