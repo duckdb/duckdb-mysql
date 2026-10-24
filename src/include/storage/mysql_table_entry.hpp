@@ -37,6 +37,8 @@ struct MySQLTableInfo {
 	unique_ptr<CreateTableInfo> create_info;
 	//! Logical indexes of MySQL generated (VIRTUAL or STORED) columns
 	unordered_set<idx_t> generated_columns;
+	//! Logical indexes of columns that have a MySQL-side default value
+	unordered_set<idx_t> default_columns;
 };
 
 class MySQLTableEntry : public TableCatalogEntry {
@@ -60,10 +62,13 @@ public:
 
 	//! Whether the column is a MySQL generated column, values for such columns cannot be inserted
 	bool IsGeneratedColumn(LogicalIndex index) const;
+	//! Whether the column has a MySQL-side default value, NULL values for such columns are replaced with the default
+	bool HasDefaultValue(LogicalIndex index) const;
 
 protected:
 	ColumnList columns;
 	unordered_set<idx_t> generated_columns;
+	unordered_set<idx_t> default_columns;
 };
 
 } // namespace duckdb

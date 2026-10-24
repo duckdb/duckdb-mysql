@@ -1,0 +1,210 @@
+# name: test/sql/attach_insert_defaults.test
+# description: Test that MySQL column defaults are applied to the columns not specified in INSERT
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS insert_defaults_test')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE insert_defaults_test (
+    id      INT AUTO_INCREMENT PRIMARY KEY,
+    name    VARCHAR(20),
+    qty     INT NULL DEFAULT 7,
+    created DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+    line_no INT NOT NULL DEFAULT 0)')
+
+statement ok
+CALL mysql_clear_cache()
+
+# nullable columns with defaults not specified
+statement ok
+INSERT INTO s.insert_defaults_test (name, line_no) VALUES ('nullable_defaults', 1)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 1
+----
+1	nullable_defaults	7	1	1
+
+# NOT NULL column with a default not specified
+statement ok
+INSERT INTO s.insert_defaults_test (name) VALUES ('not_null_default')
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 2
+----
+2	not_null_default	7	1	0
+
+# columns specified in a different order
+statement ok
+INSERT INTO s.insert_defaults_test (line_no, name) VALUES (2, 'reordered')
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 3
+----
+3	reordered	7	1	2
+
+# explicit NULL values in the columns with defaults are replaced with the defaults
+statement ok
+INSERT INTO s.insert_defaults_test (name, qty, created) VALUES ('explicit_null', NULL, NULL)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 4
+----
+4	explicit_null	7	1	0
+
+# insert from a query
+statement ok
+INSERT INTO s.insert_defaults_test (name) SELECT 'select_' || i FROM range(2) t(i)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id IN (5, 6) ORDER BY id
+----
+5	select_0	7	1	0
+6	select_1	7	1	0
+
+# all columns specified without a column list
+statement ok
+INSERT INTO s.insert_defaults_test VALUES (100, 'all_columns', 42, '2020-01-01 00:00:00', 3)
+
+query IIIII
+SELECT id, name, qty, created, line_no FROM s.insert_defaults_test WHERE id = 100
+----
+100	all_columns	42	2020-01-01 00:00:00	3
+
+# no columns specified
+statement ok
+INSERT INTO s.insert_defaults_test DEFAULT VALUES
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 101
+----
+101	NULL	7	1	0
+
+# explicit NULL in a NOT NULL column with a default
+statement ok
+INSERT INTO s.insert_defaults_test (name, line_no) VALUES ('null_not_null', NULL)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 102
+----
+102	null_not_null	7	1	0
+
+# DEFAULT keyword, the column without a default is set to NULL
+statement ok
+INSERT INTO s.insert_defaults_test VALUES (DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 103
+----
+103	NULL	7	1	0
+
+# DEFAULT keyword mixed with explicit values
+statement ok
+INSERT INTO s.insert_defaults_test (name, qty, line_no) VALUES ('default_keyword', DEFAULT, 5)
+
+query IIIII
+SELECT id, name, qty, (created IS NOT NULL)::INTEGER, line_no FROM s.insert_defaults_test WHERE id = 104
+----
+104	default_keyword	7	1	5
+
+# explicit NULL in a NOT NULL column without a default is sent to MySQL as is
+statement ok
+CALL mysql_execute('s', 'ALTER TABLE insert_defaults_test ADD COLUMN required INT NOT NULL')
+
+statement ok
+CALL mysql_clear_cache()
+
+statement error
+INSERT INTO s.insert_defaults_test (name, required) VALUES ('null_required', NULL)
+----
+Column 'required' cannot be null
+
+statement ok
+CALL mysql_execute('s', 'ALTER TABLE insert_defaults_test DROP COLUMN required')
+
+statement ok
+CALL mysql_clear_cache()
+
+query I
+SELECT count(*) FROM s.insert_defaults_test
+----
+11
+
+statement ok
+DELETE FROM s.insert_defaults_test
+
+# large insert that is split into multiple INSERT statements
+statement ok
+INSERT INTO s.insert_defaults_test (name) SELECT 'bulk_' || i FROM range(5000) t(i)
+
+query IIIIII
+SELECT count(*), count(DISTINCT id), count(DISTINCT name), count(*) FILTER (qty = 7), count(created), sum(line_no)
+FROM s.insert_defaults_test
+----
+5000	5000	5000	5000	5000	0
+
+statement ok
+DELETE FROM s.insert_defaults_test
+
+# large insert with NULL and non-NULL values in the same column
+statement ok
+INSERT INTO s.insert_defaults_test (name, qty) SELECT 'mixed_' || i, CASE WHEN i % 3 = 0 THEN NULL ELSE i END
+FROM range(5000) t(i)
+
+query IIIII
+SELECT count(*), count(qty), sum(qty), count(created), sum(line_no) FROM s.insert_defaults_test
+----
+5000	5000	8343336	5000	0
+
+query I
+SELECT count(*) FROM (SELECT qty, substr(name, 7)::INTEGER AS i FROM s.insert_defaults_test)
+WHERE qty IS DISTINCT FROM (CASE WHEN i % 3 = 0 THEN 7 ELSE i END)
+----
+0
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE insert_defaults_test')
+
+# table created through DuckDB, the default is created in MySQL and applied there
+statement ok
+CREATE OR REPLACE TABLE s.insert_duckdb_defaults_test (i INTEGER DEFAULT 42, j INTEGER)
+
+statement ok
+INSERT INTO s.insert_duckdb_defaults_test (j) VALUES (1)
+
+statement ok
+INSERT INTO s.insert_duckdb_defaults_test VALUES (NULL, 2)
+
+query II
+SELECT * FROM s.insert_duckdb_defaults_test ORDER BY j
+----
+42	1
+42	2
+
+# the table is loaded from MySQL after the cache is cleared
+statement ok
+CALL mysql_clear_cache()
+
+statement ok
+INSERT INTO s.insert_duckdb_defaults_test (j) VALUES (3)
+
+statement ok
+INSERT INTO s.insert_duckdb_defaults_test VALUES (NULL, 4)
+
+query II
+SELECT * FROM s.insert_duckdb_defaults_test ORDER BY j
+----
+42	1
+42	2
+42	3
+42	4
+
+statement ok
+DROP TABLE s.insert_duckdb_defaults_test

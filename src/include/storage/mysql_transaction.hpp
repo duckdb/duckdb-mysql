@@ -39,6 +39,9 @@ public:
 	}
 
 	ClientContext &GetContext();
+	MySQLCatalog &GetCatalog() {
+		return catalog;
+	}
 	optional_ptr<CatalogEntry> ReferenceEntry(shared_ptr<CatalogEntry> &entry);
 
 private:
