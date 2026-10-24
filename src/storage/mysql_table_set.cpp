@@ -13,6 +13,7 @@
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 
 #include "mysql_types.hpp"
+#include "storage/mysql_catalog.hpp"
 #include "storage/mysql_schema_entry.hpp"
 #include "storage/mysql_transaction.hpp"
 
@@ -49,6 +50,15 @@ void MySQLTableSet::AddColumn(MySQLTransaction &transaction, MySQLResult &result
 	auto column_idx = create_info.columns.LogicalColumnCount();
 	if (is_nullable != "YES") {
 		create_info.constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_idx)));
+	}
+	if (!result.IsNull(column_index + 3)) {
+		// MariaDB reports "NULL" for the columns without a default, string literal defaults are quoted there
+		auto &version = transaction.GetCatalog().GetVersion();
+		bool is_mariadb_null =
+		    version.server_type == MySQLServerType::MARIADB && result.GetString(column_index + 3) == "NULL";
+		if (!is_mariadb_null) {
+			table_info.default_columns.insert(column_idx);
+		}
 	}
 	if (!result.IsNull(column_index + 9)) {
 		// "VIRTUAL GENERATED" or "STORED GENERATED", note that "DEFAULT_GENERATED" is used for expression defaults

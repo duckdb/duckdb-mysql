@@ -21,8 +21,10 @@
 
 namespace duckdb {
 
-MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table)
-    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr) {
+MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
+                         unordered_set<idx_t> unspecified_columns_p)
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
+      unspecified_columns(std::move(unspecified_columns_p)) {
 }
 
 MySQLInsert::MySQLInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
@@ -51,19 +53,26 @@ public:
 	vector<idx_t> value_columns;
 	//! Indexes of the input columns that map to MySQL generated columns, these are not written
 	vector<idx_t> generated_columns;
+	//! For each entry in value_columns, whether NULL values are written as DEFAULT
+	vector<bool> use_default;
 };
 
-vector<string> GetInsertColumns(MySQLTableEntry &entry, MySQLInsertGlobalState &gstate) {
+vector<string> GetInsertColumns(const MySQLInsert &insert, MySQLTableEntry &entry, MySQLInsertGlobalState &gstate) {
 	vector<string> column_names;
 	auto &columns = entry.GetColumns();
-	// the input contains all physical columns of the table (with defaults filled in for unspecified columns),
-	// skip the MySQL generated columns as MySQL does not allow inserting into them
+	// the input contains all physical columns of the table (with NULLs filled in for unspecified columns),
+	// skip the unspecified columns so MySQL applies their defaults, and skip the MySQL generated columns
+	// as MySQL does not allow inserting into them, NULL values of the columns with defaults are written as DEFAULT
 	for (auto &col : columns.Physical()) {
+		if (insert.unspecified_columns.count(col.Physical().index) > 0) {
+			continue;
+		}
 		if (entry.IsGeneratedColumn(col.Logical())) {
 			gstate.generated_columns.push_back(col.Physical().index);
 		} else {
 			column_names.emplace_back(col.GetName().GetIdentifierName());
 			gstate.value_columns.push_back(col.Physical().index);
+			gstate.use_default.push_back(entry.HasDefaultValue(col.Logical()));
 		}
 	}
 	return column_names;
@@ -102,7 +111,7 @@ unique_ptr<GlobalSinkState> MySQLInsert::GetGlobalSinkState(ClientContext &conte
 	auto &child_types = children[0].get().GetTypes();
 	vector<LogicalType> varchar_types(child_types.size(), LogicalType::VARCHAR);
 	auto result = make_uniq<MySQLInsertGlobalState>(context, *insert_table, varchar_types);
-	auto insert_columns = GetInsertColumns(*insert_table, *result);
+	auto insert_columns = GetInsertColumns(*this, *insert_table, *result);
 	result->base_insert_query = GetBaseInsertQuery(*insert_table, insert_columns);
 	return std::move(result);
 }
@@ -213,7 +222,7 @@ SinkResultType MySQLInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 				gstate.insert_values += ", ";
 			}
 			if (FlatVector::IsNull(gstate.varchar_chunk.data[c], r)) {
-				gstate.insert_values += "NULL";
+				gstate.insert_values += gstate.use_default[i] ? "DEFAULT" : "NULL";
 			} else {
 				auto data = FlatVector::GetDataMutable<string_t>(gstate.varchar_chunk.data[c]);
 				if (add_quotes[c]) {
@@ -329,8 +338,16 @@ PhysicalOperator &MySQLCatalog::PlanInsert(ClientContext &context, PhysicalPlanG
 		throw InternalException("MySQLCatalog::PlanInsert: insert without a child plan");
 	}
 	MySQLCatalog::MaterializeMySQLScans(*plan);
+	// the binder moves the default expressions of the columns not specified in the INSERT into the input projection
+	unordered_set<idx_t> unspecified_columns;
+	for (auto &col : op.table.GetColumns().Physical()) {
+		auto storage_idx = col.StorageOid();
+		if (storage_idx < op.bound_defaults.size() && !op.bound_defaults[storage_idx]) {
+			unspecified_columns.insert(col.Physical().index);
+		}
+	}
 	auto &inner_plan = AddCastToMySQLTypes(context, planner, *plan);
-	auto &insert = planner.Make<MySQLInsert>(op, op.table);
+	auto &insert = planner.Make<MySQLInsert>(op, op.table, std::move(unspecified_columns));
 	insert.children.push_back(inner_plan);
 	return insert;
 }

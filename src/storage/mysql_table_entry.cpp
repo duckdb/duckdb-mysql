@@ -78,11 +78,16 @@ static bool TableIsInternal(const SchemaCatalogEntry &schema, const string &name
 MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info)
     : TableCatalogEntry(catalog, schema, info), columns(std::move(info.columns)) {
 	this->internal = TableIsInternal(schema, name.GetIdentifierName());
+	for (auto &col : columns.Logical()) {
+		if (col.HasDefaultValue()) {
+			default_columns.insert(col.Logical().index);
+		}
+	}
 }
 
 MySQLTableEntry::MySQLTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, MySQLTableInfo &info)
     : TableCatalogEntry(catalog, schema, *info.create_info), columns(std::move(info.create_info->columns)),
-      generated_columns(std::move(info.generated_columns)) {
+      generated_columns(std::move(info.generated_columns)), default_columns(std::move(info.default_columns)) {
 	this->internal = TableIsInternal(schema, name.GetIdentifierName());
 }
 
@@ -92,6 +97,10 @@ const ColumnList &MySQLTableEntry::GetColumns() const {
 
 bool MySQLTableEntry::IsGeneratedColumn(LogicalIndex index) const {
 	return generated_columns.find(index.index) != generated_columns.end();
+}
+
+bool MySQLTableEntry::HasDefaultValue(LogicalIndex index) const {
+	return default_columns.find(index.index) != default_columns.end();
 }
 
 unique_ptr<BaseStatistics> MySQLTableEntry::GetStatistics(ClientContext &context, column_t column_id) {
