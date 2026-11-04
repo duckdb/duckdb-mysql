@@ -106,7 +106,7 @@ static void MySQLScan(ClientContext &context, TableFunctionInput &data, DataChun
 		MySQLTableEntry &table_entry = attached_table.Get<MySQLTableEntry>();
 		auto &transaction = MySQLTransaction::Get(context, table_entry.ParentCatalog());
 		auto &con = transaction.GetConnection();
-		gstate.result = con.Query(gstate.scan_query, bdata.optimizer_streaming);
+		gstate.result = con.Query(context, gstate.scan_query, bdata.optimizer_streaming);
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;
 	}
 
@@ -517,13 +517,13 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		MySQLConnection &conn = *conn_ptr;
 
 		for (const string &query : bdata.preliminary_queries) {
-			conn.Execute(query);
+			conn.Execute(context, query);
 		}
 
 		const vector<Value> &params = ResolveParams(bdata, gstate);
 
 		if (!bdata.prepared_stmt) {
-			conn.Execute(bdata.query);
+			conn.Execute(context, bdata.query);
 			HandleCatalogCache(context, bdata, gstate);
 			SetRowCount(output, -1);
 			gstate.exec_state = MySQLQueryExecState::EXHAUSTED;
@@ -531,13 +531,13 @@ static void MySQLQueryScan(ClientContext &context, TableFunctionInput &data, Dat
 		}
 
 		if (current_connection_id == bdata.prepare_connection_id) {
-			gstate.result = conn.QueryStmt(*bdata.prepared_stmt, params, result_streaming);
+			gstate.result = conn.QueryStmt(context, *bdata.prepared_stmt, params, result_streaming);
 		} else if (bdata.params_handle != 0) {
 			throw InvalidInputException(
 			    "MySQL connection is no longer available to reuse the prepared statement. Use 'params' option instead "
 			    "of 'params_handle' if re-preparing of the statement is acceptable.");
 		} else {
-			gstate.result = conn.Query(bdata.query, params, result_streaming);
+			gstate.result = conn.Query(context, bdata.query, params, result_streaming);
 		}
 		HandleCatalogCache(context, bdata, gstate);
 		gstate.exec_state = MySQLQueryExecState::EXECUTED;

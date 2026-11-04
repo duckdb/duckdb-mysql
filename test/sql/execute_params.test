@@ -29,6 +29,39 @@ SELECT * FROM mysql_query('s', 'SELECT * FROM tab1 WHERE col1 = ?', params=row(4
 ----
 42	44.123	2020-12-31 12:36:45
 
+# parameters are passed to statements without result columns also when called as FROM
+query I
+FROM mysql_execute('s', 'INSERT INTO tab1 VALUES (?, ?, ?)', params=row(45, 45.123::DOUBLE, '2020-12-31 12:37:45'))
+----
+1
+
+query I
+FROM mysql_query('s', 'INSERT INTO tab1 VALUES (?, ?, ?)', params=row(46, 46.123::DOUBLE, '2020-12-31 12:38:45'))
+----
+1
+
+query III
+SELECT * FROM mysql_query('s', 'SELECT * FROM tab1 WHERE col1 >= ? ORDER BY col1', params=row(45))
+----
+45	45.123	2020-12-31 12:37:45
+46	46.123	2020-12-31 12:38:45
+
+# superfluous parameters for statements without placeholders are not ignored
+statement error
+CALL mysql_execute('s', 'INSERT INTO tab1 VALUES (47, 47.123, ''2020-12-31 12:39:45'')', params=row(47))
+----
+Incorrect query parameters count specified, expected: 0, actual: 1
+
+statement error
+FROM mysql_execute('s', 'INSERT INTO tab1 VALUES (?, ?, ?)', params=row(47))
+----
+Incorrect query parameters count specified, expected: 3, actual: 1
+
+query I
+SELECT count(*) FROM mysql_query('s', 'SELECT * FROM tab1 WHERE col1 = 47')
+----
+0
+
 statement ok
 CALL mysql_execute('s', 'DROP TABLE tab1')
 

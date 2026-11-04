@@ -1,0 +1,125 @@
+# name: test/sql/scan_materialize_memory_limit.test_slow
+# description: Materialized (non-streamed) MySQL results are stored in DuckDB buffer manager and respect memory_limit
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.mat_seed(i INT);
+
+statement ok
+INSERT INTO s.mat_seed FROM range(1000);
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS mat_big')
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS mat_copy')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE mat_big (id INT NOT NULL PRIMARY KEY, s VARCHAR(200))')
+
+# 1M rows, ~110MB of string data
+statement ok
+CALL mysql_execute('s', 'INSERT INTO mat_big SELECT a.i * 1000 + b.i, CONCAT(REPEAT(''x'', 100), a.i * 1000 + b.i) FROM mat_seed a, mat_seed b')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE mat_copy (id INT NOT NULL PRIMARY KEY, s VARCHAR(200))')
+
+statement ok
+CALL mysql_clear_cache();
+
+statement ok
+SET threads=1
+
+statement ok
+SET memory_limit='50MB'
+
+# without a temp directory the materialized result cannot be spilled
+
+statement ok
+SET temp_directory=''
+
+statement error
+SELECT count(*), sum(length(s)) FROM mysql_query('s', 'SELECT id, s FROM mat_big', stream_results=false)
+----
+Out of Memory Error
+
+# remaining rows are discarded after the failure, the connection can be used for further queries
+
+query I
+SELECT count(*) FROM s.mat_seed
+----
+1000
+
+statement ok
+SET VARIABLE conn = mysql_pin_connection('s')
+
+statement ok
+CALL mysql_execute('s', 'SET @mat_marker = 42', connection=getvariable('conn'))
+
+statement error
+SELECT count(*), sum(length(s)) FROM mysql_query('s', 'SELECT id, s FROM mat_big', stream_results=false, connection=getvariable('conn'))
+----
+Out of Memory Error
+
+query II
+FROM mysql_query('s', 'SELECT @mat_marker, COUNT(*) FROM mat_seed', connection=getvariable('conn'))
+----
+42	1000
+
+statement ok
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
+
+# with a temp directory the materialized result is spilled to disk
+
+statement ok
+SET temp_directory='{TEST_DIR}/mysql_materialize_spill'
+
+query II
+SELECT count(*), sum(length(s)) FROM mysql_query('s', 'SELECT id, s FROM mat_big', stream_results=false)
+----
+1000000	105888890
+
+# multiple scans of the same attached database are materialized
+
+query III
+SELECT count(*), sum(length(a.s)), sum(length(b.s)) FROM s.mat_big a JOIN s.mat_big b USING (id)
+----
+1000000	105888890	105888890
+
+# scans in an INSERT into the same attached database are materialized
+
+query I
+INSERT INTO s.mat_copy SELECT * FROM s.mat_big
+----
+1000000
+
+query II
+SELECT count(*), sum(length(s)) FROM s.mat_copy
+----
+1000000	105888890
+
+# empty materialized result
+
+query II
+SELECT count(*), sum(length(s)) FROM mysql_query('s', 'SELECT id, s FROM mat_big WHERE id < 0', stream_results=false)
+----
+0	NULL
+
+statement ok
+RESET memory_limit
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE mat_copy')
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE mat_big')
+
+statement ok
+DROP TABLE s.mat_seed

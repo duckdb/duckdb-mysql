@@ -52,6 +52,46 @@ FROM mysql_configure_pool(catalog_name='s')
 s	0
 
 statement ok
+DETACH s
+
+# health check query returning multiple chunks of rows, the rows are drained,
+# so the connection remains usable and is returned to the pool
+
+statement ok
+SET GLOBAL mysql_pool_health_check_query = 'SELECT * FROM large_tbl'
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL)
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+query I
+FROM mysql_query('s', 'SELECT 42')
+----
+42
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+query I
+SELECT count(*) FROM s.large_tbl
+----
+100000
+
+query II
+SELECT catalog_name, available_connections
+FROM mysql_configure_pool(catalog_name='s')
+----
+s	1
+
+statement ok
 RESET GLOBAL mysql_pool_health_check_query
 
 statement ok

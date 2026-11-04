@@ -11,6 +11,7 @@
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/vector/flat_vector.hpp"
 #include "duckdb/common/vector/string_vector.hpp"
+#include "duckdb/storage/buffer_manager.hpp"
 
 #include "mysql_connection.hpp"
 
@@ -59,11 +60,11 @@ static vector<LogicalType> CreateChunkTypes(vector<MySQLField> &fields, const My
 	return ltypes;
 }
 
-MySQLResult::MySQLResult(const std::string &query_p, MySQLStatementPtr stmt_p, MySQLTypeConfig type_config_p,
-                         const string &connection_string_p, unsigned long connection_id_p,
-                         MySQLResultStreaming streaming_p, idx_t affected_rows_p, vector<MySQLField> fields_p,
-                         MySQLResultStatementLifetime stmt_lifetime_p)
-    : query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
+MySQLResult::MySQLResult(optional_ptr<ClientContext> context_p, const std::string &query_p, MySQLStatementPtr stmt_p,
+                         MySQLTypeConfig type_config_p, const string &connection_string_p,
+                         unsigned long connection_id_p, MySQLResultStreaming streaming_p, idx_t affected_rows_p,
+                         vector<MySQLField> fields_p, MySQLResultStatementLifetime stmt_lifetime_p)
+    : context(context_p), query(query_p), stmt(std::move(stmt_p)), type_config(std::move(type_config_p)),
       connection_string(connection_string_p), connection_id(connection_id_p), streaming(streaming_p),
       affected_rows(affected_rows_p), fields(std::move(fields_p)), stmt_lifetime(stmt_lifetime_p) {
 	if (affected_rows != static_cast<idx_t>(-1)) {
@@ -127,7 +128,51 @@ void MySQLResult::HandleTruncatedData() {
 	}
 }
 
+void MySQLResult::Materialize() {
+	if (!context) {
+		throw InternalException("MySQLResult::Materialize called without a context, MySQL query \"%s\"", query);
+	}
+	if (exhausted) {
+		return;
+	}
+	auto collection = make_uniq<ColumnDataCollection>(BufferManager::GetBufferManager(*context), data_chunk.GetTypes());
+	ColumnDataAppendState append_state;
+	collection->InitializeAppend(append_state);
+	try {
+		while (!exhausted) {
+			context->InterruptCheck();
+			FetchChunk();
+			collection->Append(append_state, data_chunk);
+		}
+	} catch (...) {
+		// the remaining rows must be discarded from the connection before it can be used for other queries
+		TryCancelQuery();
+		mysql_stmt_free_result(stmt.get());
+		throw;
+	}
+	// reset to the initial state, so the first Next() call scans the first chunk
+	data_chunk.Reset();
+	row_idx = static_cast<idx_t>(-1);
+	materialized = std::move(collection);
+	materialized->InitializeScan(materialized_scan_state);
+	exhausted = materialized->Count() == 0;
+}
+
 DataChunk &MySQLResult::NextChunk() {
+	if (!materialized) {
+		FetchChunk();
+		return this->data_chunk;
+	}
+	this->row_idx = 0;
+	materialized->Scan(materialized_scan_state, this->data_chunk);
+	materialized_rows_scanned += this->data_chunk.size();
+	if (materialized_rows_scanned >= materialized->Count()) {
+		this->exhausted = true;
+	}
+	return this->data_chunk;
+}
+
+void MySQLResult::FetchChunk() {
 	this->data_chunk.Reset();
 	this->row_idx = 0;
 
@@ -142,7 +187,6 @@ DataChunk &MySQLResult::NextChunk() {
 	}
 
 	this->data_chunk.SetChildCardinality(r);
-	return this->data_chunk;
 }
 
 bool MySQLResult::Exhausted() {
@@ -280,13 +324,13 @@ const vector<MySQLField> &MySQLResult::Fields() {
 }
 
 bool MySQLResult::TryCancelQuery() {
-	if (connection_string.empty()) {
+	if (!context || connection_string.empty()) {
 		return false;
 	}
 	try {
 		auto con = MySQLConnection::Open(type_config, connection_string, "");
 		string kill_query = "KILL QUERY " + to_string(connection_id);
-		con.Execute(kill_query);
+		con.Execute(*context, kill_query);
 		return true;
 	} catch (std::exception &) {
 		return false;
