@@ -40,9 +40,38 @@ MySQLConnection MySQLConnection::Open(MySQLTypeConfig type_config, const string 
 	return MySQLConnection(std::move(connection), std::move(type_config), connection_string);
 }
 
+// Reads and discards the result of a query executed with the basic interface (if the query produced a result),
+// the result is fetched unbuffered, so the connection can be used for other queries.
 // must be called with the query_lock held
-idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
-                                    bool prepared) {
+void MySQLConnection::DrainBasicResult(optional_ptr<ClientContext> context, const string &query) {
+	auto con = GetConn();
+	auto result = MySQLResultPtr(mysql_use_result(con), MySQLResultDelete);
+	if (result) {
+		try {
+			// rows are not read into chunks here, interrupts are checked once per the chunk size of rows
+			idx_t row_count = 0;
+			while (mysql_fetch_row(result.get())) {
+				row_count++;
+				if (context && row_count % STANDARD_VECTOR_SIZE == 0) {
+					context->InterruptCheck();
+				}
+			}
+		} catch (...) {
+			// remaining rows are discarded when the result is freed, cancel the query to not read all of them
+			if (context) {
+				TryCancelQuery(*context, type_config, connection_string, connection->GetID());
+			}
+			throw;
+		}
+	}
+	if (mysql_errno(con) != 0) {
+		throw IOException("Failed to read result of query \"%s\": %s\n", query.c_str(), mysql_error(con));
+	}
+}
+
+// must be called with the query_lock held
+idx_t MySQLConnection::MySQLExecute(optional_ptr<ClientContext> context, MYSQL_STMT *stmt, const string &query,
+                                    const vector<Value> &params, bool streaming, bool prepared) {
 	if (MySQLConnection::DebugPrintQueries()) {
 		string msg = StringUtil::Format("%s /* streaming=%s */\n", query, streaming ? "TRUE" : "FALSE");
 		Printer::Print(msg);
@@ -54,15 +83,7 @@ idx_t MySQLConnection::MySQLExecute(MYSQL_STMT *stmt, const string &query, const
 		if (res_query != 0) {
 			throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
 		}
-		// the result, if any, is fetched unbuffered and drained immediately
-		auto result = MySQLResultPtr(mysql_use_result(con), MySQLResultDelete);
-		if (result) {
-			while (mysql_fetch_row(result.get())) {
-			}
-		}
-		if (mysql_errno(con) != 0) {
-			throw IOException("Failed to read result of query \"%s\": %s\n", query.c_str(), mysql_error(con));
-		}
+		DrainBasicResult(context, query);
 		return 0;
 	}
 
@@ -124,7 +145,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(optional_ptr<ClientContex
 	lock_guard<mutex> guard(query_lock);
 
 	if (basic_interface) {
-		MySQLExecute(nullptr, query, params, result_streaming);
+		MySQLExecute(context, nullptr, query, params, result_streaming);
 		return unique_ptr<MySQLResult>(nullptr);
 	}
 
@@ -140,7 +161,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(optional_ptr<ClientContex
 		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
 	}
 
-	idx_t affected_rows = MySQLExecute(stmt.get(), query, params, result_streaming);
+	idx_t affected_rows = MySQLExecute(context, stmt.get(), query, params, result_streaming);
 	unsigned long connection_id = connection->GetID();
 	auto result = make_uniq<MySQLResult>(context, query, std::move(stmt), type_config, connection_string, connection_id,
 	                                     streaming, affected_rows);
@@ -166,7 +187,7 @@ unique_ptr<MySQLResult> MySQLConnection::QueryStmt(ClientContext &context, MySQL
 
 	bool result_streaming = streaming == MySQLResultStreaming::ALLOW_STREAMING;
 	bool prepared = true;
-	idx_t affected_rows = MySQLExecute(stmt.get(), stmt.Query(), params, result_streaming, prepared);
+	idx_t affected_rows = MySQLExecute(context, stmt.get(), stmt.Query(), params, result_streaming, prepared);
 	MYSQL_STMT *stmt_ptr_bare = stmt.get();
 	// owning pointer here only because it is required by result interface, stmt won't be destroyed
 	MySQLStatementPtr stmt_ptr(stmt_ptr_bare, MySQLStatementDelete);
@@ -245,6 +266,21 @@ void MySQLConnection::DebugSetPrintQueries(bool print) {
 
 bool MySQLConnection::DebugPrintQueries() {
 	return debug_mysql_print_queries;
+}
+
+bool MySQLConnection::TryCancelQuery(ClientContext &context, const MySQLTypeConfig &type_config,
+                                     const string &connection_string, unsigned long connection_id) {
+	if (connection_string.empty()) {
+		return false;
+	}
+	try {
+		auto con = MySQLConnection::Open(type_config, connection_string, "");
+		string kill_query = "KILL QUERY " + to_string(connection_id);
+		con.Execute(context, kill_query);
+		return true;
+	} catch (std::exception &) {
+		return false;
+	}
 }
 
 bool MySQLConnection::IsConnectionHealthy(const string &health_check_query) {

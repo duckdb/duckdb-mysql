@@ -1,0 +1,80 @@
+# name: test/sql/query_interrupt.test
+# description: Reading of MySQL results can be interrupted, the connection remains usable after the interrupt
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+SET VARIABLE conn = mysql_pin_connection('s')
+
+statement ok
+CALL mysql_execute('s', 'SET @interrupt_marker = 42', connection=getvariable('conn'))
+
+# the cross join produces 10^10 rows, reading them is only stopped by the interrupt
+
+statement ok
+SET max_execution_time=300
+
+# result materialized into buffer manager
+
+statement error
+SELECT count(*) FROM mysql_query('s', 'SELECT a.i, b.i AS j FROM large_tbl a, large_tbl b', stream_results=false, connection=getvariable('conn'))
+----
+Query exceeded maximum execution time
+
+# streamed result
+
+statement error
+SELECT count(*) FROM mysql_query('s', 'SELECT a.i, b.i AS j FROM large_tbl a, large_tbl b', connection=getvariable('conn'))
+----
+Query exceeded maximum execution time
+
+# result drained by statement executed without prepare
+
+statement error
+CALL mysql_execute('s', 'SELECT a.i, b.i AS j FROM large_tbl a, large_tbl b', prepare=FALSE, connection=getvariable('conn'))
+----
+Query exceeded maximum execution time
+
+# result drained by preliminary query
+
+statement error
+CALL mysql_execute('s', 'SELECT 1', preliminary_queries=['SELECT a.i, b.i AS j FROM large_tbl a, large_tbl b'], connection=getvariable('conn'))
+----
+Query exceeded maximum execution time
+
+statement ok
+RESET max_execution_time
+
+# the same connection is still usable
+
+query II
+FROM mysql_query('s', 'SELECT @interrupt_marker, COUNT(*) FROM large_tbl', connection=getvariable('conn'))
+----
+42	100000
+
+statement ok
+SELECT mysql_close_pinned_connection('s', getvariable('conn'))
+
+# not pinned connection from the pool is also usable after the interrupt
+
+statement ok
+SET max_execution_time=300
+
+statement error
+SELECT count(*) FROM mysql_query('s', 'SELECT a.i, b.i AS j FROM large_tbl a, large_tbl b', stream_results=false)
+----
+Query exceeded maximum execution time
+
+statement ok
+RESET max_execution_time
+
+query I
+SELECT count(*) FROM s.large_tbl
+----
+100000

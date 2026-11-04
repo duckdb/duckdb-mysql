@@ -94,6 +94,9 @@ public:
 	}
 
 	bool IsConnectionHealthy(const string &health_check_query);
+	//! Runs KILL QUERY for the specified connection ID using a separate connection
+	static bool TryCancelQuery(ClientContext &context, const MySQLTypeConfig &type_config,
+	                           const string &connection_string, unsigned long connection_id);
 	void Reset();
 	string GetServerInfo();
 
@@ -101,8 +104,9 @@ private:
 	unique_ptr<MySQLResult> QueryInternal(optional_ptr<ClientContext> context, const string &query,
 	                                      const vector<Value> &params, MySQLResultStreaming streaming,
 	                                      MySQLConnectorInterface con_interface);
-	idx_t MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
-	                   bool prepared = false);
+	idx_t MySQLExecute(optional_ptr<ClientContext> context, MYSQL_STMT *stmt, const string &query,
+	                   const vector<Value> &params, bool streaming, bool prepared = false);
+	void DrainBasicResult(optional_ptr<ClientContext> context, const string &query);
 
 	MYSQL *GetConn() {
 		if (!connection || !connection->connection) {

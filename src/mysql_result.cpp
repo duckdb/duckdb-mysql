@@ -140,7 +140,6 @@ void MySQLResult::Materialize() {
 	collection->InitializeAppend(append_state);
 	try {
 		while (!exhausted) {
-			context->InterruptCheck();
 			FetchChunk();
 			collection->Append(append_state, data_chunk);
 		}
@@ -164,6 +163,7 @@ DataChunk &MySQLResult::NextChunk() {
 		return this->data_chunk;
 	}
 	this->row_idx = 0;
+	context->InterruptCheck();
 	materialized->Scan(materialized_scan_state, this->data_chunk);
 	materialized_rows_scanned += this->data_chunk.size();
 	if (materialized_rows_scanned >= materialized->Count()) {
@@ -173,6 +173,10 @@ DataChunk &MySQLResult::NextChunk() {
 }
 
 void MySQLResult::FetchChunk() {
+	// the context is not available only for the health check queries
+	if (context) {
+		context->InterruptCheck();
+	}
 	this->data_chunk.Reset();
 	this->row_idx = 0;
 
@@ -324,17 +328,10 @@ const vector<MySQLField> &MySQLResult::Fields() {
 }
 
 bool MySQLResult::TryCancelQuery() {
-	if (!context || connection_string.empty()) {
+	if (!context) {
 		return false;
 	}
-	try {
-		auto con = MySQLConnection::Open(type_config, connection_string, "");
-		string kill_query = "KILL QUERY " + to_string(connection_id);
-		con.Execute(*context, kill_query);
-		return true;
-	} catch (std::exception &) {
-		return false;
-	}
+	return MySQLConnection::TryCancelQuery(*context, type_config, connection_string, connection_id);
 }
 
 // MySQL TIME values may range from '-838:59:59' to '838:59:59'
