@@ -235,7 +235,7 @@ SinkResultType MySQLInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 		gstate.insert_values += ")";
 		if (gstate.insert_values.size() >= INSERT_FLUSH_SIZE) {
 			// perform the actual insert
-			con.Execute(gstate.base_insert_query + gstate.insert_values);
+			con.Execute(context.client, gstate.base_insert_query + gstate.insert_values);
 			// reset the to-be-inserted values
 			gstate.insert_values = string();
 		}
@@ -254,7 +254,7 @@ SinkFinalizeType MySQLInsert::Finalize(Pipeline &pipeline, Event &event, ClientC
 		// perform the final insert
 		auto &transaction = MySQLTransaction::Get(context, gstate.table.catalog);
 		auto &con = transaction.GetConnection();
-		con.Execute(gstate.base_insert_query + gstate.insert_values);
+		con.Execute(context, gstate.base_insert_query + gstate.insert_values);
 	}
 	return SinkFinalizeType::READY;
 }

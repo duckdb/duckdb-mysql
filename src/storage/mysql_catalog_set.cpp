@@ -56,7 +56,8 @@ void MySQLCatalogSet::DropEntry(MySQLTransaction &transaction, DropInfo &info) {
 			drop_query += " CASCADE";
 		}
 	}
-	transaction.GetConnection().Execute(drop_query);
+	auto context = transaction.GetContext();
+	transaction.GetConnection().Execute(*context, drop_query);
 
 	// erase the entry from the catalog set
 	EraseEntryInternal(info.GetQualifiedName().Name().GetIdentifierName());

@@ -69,14 +69,15 @@ public:
 public:
 	static MySQLConnection Open(MySQLTypeConfig type_config, const string &connection_string,
 	                            const string &attach_path);
-	void Initialize(const MySQLConnectionInitOptions &options);
-	void Execute(const string &query);
-	void Execute(ClientContext &, const string &query);
-	void Execute(const string &query, const vector<Value> &params);
-	unique_ptr<MySQLResult> Query(const string &query,
+	void Initialize(ClientContext &context, const MySQLConnectionInitOptions &options);
+	void Execute(ClientContext &context, const string &query);
+	void Execute(ClientContext &context, const string &query, const vector<Value> &params);
+	//! Not streamed result is read eagerly into a buffer-managed collection
+	unique_ptr<MySQLResult> Query(ClientContext &context, const string &query,
 	                              MySQLResultStreaming streaming = MySQLResultStreaming::FORCE_MATERIALIZATION);
-	unique_ptr<MySQLResult> Query(const string &query, const vector<Value> &params, MySQLResultStreaming streaming);
-	unique_ptr<MySQLResult> QueryStmt(MySQLStatement &stmt, const vector<Value> &params,
+	unique_ptr<MySQLResult> Query(ClientContext &context, const string &query, const vector<Value> &params,
+	                              MySQLResultStreaming streaming);
+	unique_ptr<MySQLResult> QueryStmt(ClientContext &context, MySQLStatement &stmt, const vector<Value> &params,
 	                                  MySQLResultStreaming streaming);
 	unique_ptr<MySQLStatement> Prepare(const string &query);
 
@@ -97,8 +98,9 @@ public:
 	string GetServerInfo();
 
 private:
-	unique_ptr<MySQLResult> QueryInternal(const string &query, const vector<Value> &params,
-	                                      MySQLResultStreaming streaming, MySQLConnectorInterface con_interface);
+	unique_ptr<MySQLResult> QueryInternal(optional_ptr<ClientContext> context, const string &query,
+	                                      const vector<Value> &params, MySQLResultStreaming streaming,
+	                                      MySQLConnectorInterface con_interface);
 	idx_t MySQLExecute(MYSQL_STMT *stmt, const string &query, const vector<Value> &params, bool streaming,
 	                   bool prepared = false);
 

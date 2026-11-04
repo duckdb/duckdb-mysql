@@ -50,7 +50,7 @@ SinkFinalizeType MySQLExecuteQuery::Finalize(Pipeline &pipeline, Event &event, C
 	auto &gstate = input.global_state.Cast<MySQLExecuteQueryGlobalState>();
 	auto &transaction = MySQLTransaction::Get(context, table.catalog);
 	auto &connection = transaction.GetConnection();
-	auto result = connection.Query(query, MySQLResultStreaming::FORCE_MATERIALIZATION);
+	auto result = connection.Query(context, query, MySQLResultStreaming::FORCE_MATERIALIZATION);
 	gstate.affected_rows = result->AffectedRows();
 	return SinkFinalizeType::READY;
 }

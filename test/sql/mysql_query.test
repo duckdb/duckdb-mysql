@@ -364,5 +364,36 @@ CALL mysql_query('simple', 'DROP TABLE preliminary_queries_test', preliminary_qu
   'CREATE TABLE preliminary_queries_test(col1 INT)'
 ])
 
+# results of statements run with prepare=FALSE and of preliminary queries are drained,
+# the same connection remains usable
+
+# create a table
+statement ok
+CREATE OR REPLACE TABLE simple.large_tbl AS FROM range(100000) t(i)
+
+statement ok
+BEGIN TRANSACTION
+
+query I
+FROM mysql_query('simple', 'SELECT * FROM large_tbl', prepare=FALSE)
+----
+-1
+
+query I
+FROM mysql_query('simple', 'SELECT COUNT(*) FROM large_tbl', preliminary_queries=[
+  'SELECT * FROM large_tbl',
+  'SELECT * FROM large_tbl'
+])
+----
+100000
+
+query I
+FROM mysql_query('simple', 'SELECT 42')
+----
+42
+
+statement ok
+ROLLBACK
+
 statement ok
 DETACH simple;

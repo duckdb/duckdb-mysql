@@ -38,7 +38,8 @@ public:
 		return access_mode;
 	}
 
-	ClientContext &GetContext();
+	//! Throws if the client context of this transaction is no longer available
+	shared_ptr<ClientContext> GetContext();
 	MySQLCatalog &GetCatalog() {
 		return catalog;
 	}
