@@ -1,0 +1,76 @@
+# name: test/sql/query_decimal.test
+# description: Test DECIMAL width derived from the result set metadata in mysql_query
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS query_decimal_test')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE query_decimal_test (
+    s18_9  DECIMAL(18,9),
+    u18_9  DECIMAL(18,9) UNSIGNED,
+    s10_0  DECIMAL(10,0),
+    u10_0  DECIMAL(10,0) UNSIGNED,
+    s38_10 DECIMAL(38,10),
+    u38_10 DECIMAL(38,10) UNSIGNED,
+    s38_0  DECIMAL(38,0),
+    u38_0  DECIMAL(38,0) UNSIGNED)')
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO query_decimal_test VALUES (
+    -999999999.999999999,
+    999999999.999999999,
+    -9999999999,
+    9999999999,
+    -9999999999999999999999999999.9999999999,
+    9999999999999999999999999999.9999999999,
+    -99999999999999999999999999999999999999,
+    99999999999999999999999999999999999999)')
+
+query IIIIIIII
+SELECT typeof(COLUMNS(*)) FROM mysql_query('s', 'SELECT * FROM query_decimal_test')
+----
+DECIMAL(18,9)	DECIMAL(18,9)	DECIMAL(10,0)	DECIMAL(10,0)	DECIMAL(38,10)	DECIMAL(38,10)	DECIMAL(38,0)	DECIMAL(38,0)
+
+query IIIIIIII
+FROM mysql_query('s', 'SELECT * FROM query_decimal_test')
+----
+-999999999.999999999	999999999.999999999	-9999999999	9999999999	-9999999999999999999999999999.9999999999	9999999999999999999999999999.9999999999	-99999999999999999999999999999999999999	99999999999999999999999999999999999999
+
+# the case from the issue report
+statement ok
+CALL mysql_execute('s', 'DELETE FROM query_decimal_test')
+
+statement ok
+CALL mysql_execute('s', 'INSERT INTO query_decimal_test (u18_9) VALUES (100000000.000000000)')
+
+query I
+FROM mysql_query('s', 'SELECT u18_9 FROM query_decimal_test')
+----
+100000000.000000000
+
+query I
+SELECT typeof(u18_9) FROM mysql_query('s', 'SELECT CAST(u18_9 AS DECIMAL(18,9)) AS u18_9 FROM query_decimal_test')
+----
+DECIMAL(18,9)
+
+# literals
+query II
+SELECT typeof(COLUMNS(*)) FROM mysql_query('s', 'SELECT 12345.67 AS a, CAST(1234567890 AS DECIMAL(10,0)) AS b')
+----
+DECIMAL(7,2)	DECIMAL(10,0)
+
+query II
+FROM mysql_query('s', 'SELECT 12345.67 AS a, CAST(1234567890 AS DECIMAL(10,0)) AS b')
+----
+12345.67	1234567890
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE query_decimal_test')
