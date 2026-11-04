@@ -145,7 +145,14 @@ LogicalType MySQLTypes::FieldToLogicalType(const MySQLTypeConfig &type_config, M
 		break;
 	case MYSQL_TYPE_DECIMAL:
 	case MYSQL_TYPE_NEWDECIMAL:
-		type_data.precision = int64_t(field->length) - 2; // -2 for minus sign and dot
+		// display length includes the dot only when scale > 0 and the minus sign only for signed types
+		type_data.precision = int64_t(field->length);
+		if (field->decimals > 0) {
+			type_data.precision--;
+		}
+		if (!(field->flags & UNSIGNED_FLAG)) {
+			type_data.precision--;
+		}
 		type_data.scale = field->decimals;
 		type_data.type_name = "decimal";
 		break;
