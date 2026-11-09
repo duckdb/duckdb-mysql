@@ -79,3 +79,146 @@ SELECT COUNT(*) FROM s.txn_tbl, range(1) t(x)
 
 statement ok
 ROLLBACK
+
+# pushed down statements are checked against the transaction
+
+# read-only transaction
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+# reads are allowed
+query I
+SELECT COUNT(*) FROM s.txn_tbl
+----
+6
+
+statement error
+UPDATE s.txn_tbl SET i = i + 1
+----
+transaction is launched in read-only mode
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+statement error
+DELETE FROM s.txn_tbl WHERE i = 200
+----
+transaction is launched in read-only mode
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+statement error
+CREATE TABLE s.txn_tbl_new(i INTEGER)
+----
+transaction is launched in read-only mode
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+statement error
+ALTER TABLE s.txn_tbl RENAME COLUMN i TO j
+----
+transaction is launched in read-only mode
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN TRANSACTION READ ONLY
+
+statement error
+DROP TABLE s.txn_tbl
+----
+transaction is launched in read-only mode
+
+statement ok
+ROLLBACK
+
+# nothing was changed
+query II
+SELECT COUNT(*), MAX(i) FROM s.txn_tbl
+----
+6	200
+
+# a transaction can only write to a single database
+statement ok
+ATTACH ':memory:' AS txn_local
+
+statement ok
+CREATE TABLE txn_local.tbl(i INTEGER)
+
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO txn_local.tbl VALUES (1)
+
+statement error
+UPDATE s.txn_tbl SET i = i + 1
+----
+a single transaction can only write to a single attached database
+
+statement ok
+ROLLBACK
+
+statement ok
+BEGIN
+
+statement ok
+DELETE FROM s.txn_tbl WHERE i = 200
+
+statement error
+INSERT INTO txn_local.tbl VALUES (1)
+----
+a single transaction can only write to a single attached database
+
+statement ok
+ROLLBACK
+
+# reading from MySQL while writing to another database is allowed
+statement ok
+BEGIN
+
+statement ok
+INSERT INTO txn_local.tbl VALUES (1)
+
+query I
+SELECT COUNT(*) FROM s.txn_tbl
+----
+6
+
+statement ok
+COMMIT
+
+# prepared statements are rebound after the table is changed
+statement ok
+PREPARE txn_prepared AS SELECT MAX(i) AS m FROM s.txn_tbl
+
+query I
+EXECUTE txn_prepared
+----
+200
+
+statement ok
+CREATE OR REPLACE TABLE s.txn_tbl(i VARCHAR)
+
+statement ok
+INSERT INTO s.txn_tbl VALUES ('a'), ('b')
+
+query I
+EXECUTE txn_prepared
+----
+b
+
+statement ok
+DROP TABLE s.txn_tbl

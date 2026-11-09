@@ -322,6 +322,23 @@ static bool ExtractFlag(TableFunctionBindInput &input, const string &name, bool 
 	return default_val;
 }
 
+static void RegisterDatabaseAccess(ClientContext &context, TableFunctionBindInput &input, MySQLCatalog &catalog) {
+	// "modifies_database" is set for queries and statements that are executed remotely in place of DuckDB queries /
+	// statements - arbitrary mysql_query / mysql_execute calls are not registered, as it is unknown whether they
+	// write to the database, and registering them would rebind their prepared statements on every execution
+	auto it = input.named_parameters.find(Identifier("modifies_database"));
+	if (!input.binder || it == input.named_parameters.end() || it->second.IsNull()) {
+		return;
+	}
+	// let DuckDB check the transaction (e.g. that a read-only transaction does not write, or that a transaction only
+	// writes to a single database), and rebind prepared statements when the catalog may have changed
+	auto &properties = input.binder->GetStatementProperties();
+	properties.RegisterDBRead(catalog, context);
+	if (BooleanValue::Get(it->second)) {
+		properties.RegisterDBModify(catalog, context, DatabaseModificationType::UPDATE_DATA);
+	}
+}
+
 static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<Identifier> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
@@ -330,6 +347,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 
 	string db_name = input.inputs[0].GetValue<string>();
 	MySQLCatalog &catalog = GetCatalogByName(context, db_name);
+	RegisterDatabaseAccess(context, input, catalog);
 	vector<string> preliminary_queries = ExtractPreliminaryQueries(input);
 	auto sql = input.inputs[1].GetValue<string>();
 	vector<Value> params = ExtractParams(input);
@@ -569,6 +587,7 @@ static FunctionSignature MySQLQuerySignature(bool stream_results, bool suppress_
 		    }
 		    options.Add("preliminary_queries", LogicalType::LIST(LogicalType::VARCHAR));
 		    options.Add("clear_catalog_cache", LogicalType::BOOLEAN);
+		    options.Add("modifies_database", LogicalType::BOOLEAN);
 	    });
 	return signature;
 }

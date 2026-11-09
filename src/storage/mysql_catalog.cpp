@@ -542,11 +542,32 @@ WHERE table_schema = ${SCHEMA_NAME};
 	return size;
 }
 
+static bool MySQLIsDML(const QueryNode &node) {
+	switch (node.type) {
+	case QueryNodeType::UPDATE_QUERY_NODE:
+	case QueryNodeType::DELETE_QUERY_NODE:
+	case QueryNodeType::INSERT_QUERY_NODE:
+	case QueryNodeType::MERGE_QUERY_NODE:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static unique_ptr<ParsedExpression> MySQLModifiesDatabaseArg(bool modifies_database) {
+	// let DuckDB check that the transaction can read from / write to the database
+	return make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
+	                                       make_uniq<ColumnRefExpression>("modifies_database"),
+	                                       ConstantExpression::Boolean(modifies_database));
+}
+
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) {
 	// serialize the query node into MySQL-compatible SQL (identifier quoting, type / function
 	// remapping, explicit NULL ordering, ...)
 	vector<string> statements = MySQLSQLWriter::ToStatements(context, capabilities.GetVersion(), *node);
-	return RemoteExecuteInternal(context, std::move(statements));
+	vector<unique_ptr<ParsedExpression>> extra_args;
+	extra_args.push_back(MySQLModifiesDatabaseArg(MySQLIsDML(*node)));
+	return RemoteExecuteInternal(context, std::move(statements), std::move(extra_args));
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<SQLStatement> statement) {
@@ -555,6 +576,7 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_
 	extra_args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
 	                                                     make_uniq<ColumnRefExpression>("clear_catalog_cache"),
 	                                                     ConstantExpression::Boolean(true)));
+	extra_args.push_back(MySQLModifiesDatabaseArg(true));
 	return RemoteExecuteInternal(context, std::move(statements), std::move(extra_args));
 }
 
