@@ -83,16 +83,7 @@ public:
 	bool SupportsPushdown(const TableRef &ref) override {
 		return capabilities.SupportsPushdown(ref);
 	}
-	bool SupportsPushdown(const QueryNode &node) override {
-		switch (node.type) {
-		case QueryNodeType::UPDATE_QUERY_NODE:
-		case QueryNodeType::DELETE_QUERY_NODE:
-			// there is no local fallback for UPDATE and DELETE, so they are pushed down regardless of the setting
-			return capabilities.SupportsPushdown(node);
-		default:
-			return remote_pushdown_enabled && capabilities.SupportsPushdown(node);
-		}
-	}
+	bool SupportsPushdown(const QueryNode &node) override;
 	bool SupportsPushdown(const SQLStatement &statement) override {
 		return remote_pushdown_enabled && capabilities.SupportsPushdown(statement);
 	}
