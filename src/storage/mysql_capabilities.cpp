@@ -246,6 +246,14 @@ bool MySQLSupportsFunction(const FunctionExpression &func) {
 	return MYSQL_SCALAR_FUNCTIONS.count(function_name) > 0;
 }
 
+//! Whether an aggregate can be pushed down with the given number of arguments - aggregates that take a single argument
+//! in MySQL can have more in DuckDB (e.g. min(x, n) returns the n smallest values)
+static bool MySQLSupportsAggregateArgumentCount(const string &function_name, idx_t argument_count) {
+	static const case_insensitive_set_t SINGLE_ARGUMENT_AGGREGATES = {
+	    "sum", "avg", "min", "max", "stddev", "stddev_pop", "stddev_samp", "variance", "var_pop", "var_samp"};
+	return SINGLE_ARGUMENT_AGGREGATES.count(function_name) == 0 || argument_count == 1;
+}
+
 //! Collect the binding names of all tables within a join tree - MySQL requires unique
 //! table names/aliases within a join, while DuckDB can disambiguate duplicates
 static void MySQLCollectJoinTableNames(const TableRef &ref, case_insensitive_set_t &names, bool &duplicate) {
@@ -725,6 +733,9 @@ bool MySQLCapabilities::SupportsWindow(const WindowExpression &window) {
 	default:
 		break;
 	}
+	if (!MySQLSupportsAggregateArgumentCount(window.FunctionName().GetIdentifierName(), children.size())) {
+		return false;
+	}
 	// whitelist of window functions supported by MySQL 8.0+ with identical semantics
 	// (count_star is rewritten to count(*) during serialization)
 	static const case_insensitive_set_t MYSQL_WINDOW_FUNCTIONS = {
@@ -874,6 +885,9 @@ bool MySQLCapabilities::SupportsPushdown(const ParsedExpression &expr) {
 			if (children.size() == 3 && !MySQLIsIntegerLiteralAtLeast(children[2].GetExpression(), 0)) {
 				return false;
 			}
+		}
+		if (!MySQLSupportsAggregateArgumentCount(function_name, children.size())) {
+			return false;
 		}
 		return MySQLSupportsFunction(func);
 	}

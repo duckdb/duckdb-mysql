@@ -1,0 +1,58 @@
+# name: test/sql/remote_pushdown/remote_pushdown_aggregate_arguments.test
+# description: Aggregates that take more arguments in DuckDB than in MySQL are not pushed down (min(x, n) / max(x, n))
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.aggregate_arguments_tbl AS SELECT i FROM range(1, 6) t(i)
+
+# min(x, n) / max(x, n) return the n smallest / largest values
+query II
+SELECT min(i, 2), max(i, 3) FROM s.aggregate_arguments_tbl
+----
+[1, 2]	[5, 4, 3]
+
+query II
+explain SELECT min(i, 2) FROM s.aggregate_arguments_tbl
+----
+physical_plan	<REGEX>:.*Aggregate.*
+
+# as window functions
+query II
+SELECT i, max(i, 2) OVER (ORDER BY i ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM s.aggregate_arguments_tbl ORDER BY i
+----
+1	[1]
+2	[2, 1]
+3	[3, 2]
+4	[4, 3]
+5	[5, 4]
+
+query II
+explain SELECT i, max(i, 2) OVER (ORDER BY i) FROM s.aggregate_arguments_tbl
+----
+physical_plan	<REGEX>:.*Window.*
+
+# the single argument versions are still pushed down
+query II
+SELECT min(i), max(i) FROM s.aggregate_arguments_tbl
+----
+1	5
+
+query II
+explain SELECT min(i), max(i) FROM s.aggregate_arguments_tbl
+----
+physical_plan	<!REGEX>:.*Aggregate.*
+
+query II
+explain SELECT i, max(i) OVER (ORDER BY i) FROM s.aggregate_arguments_tbl
+----
+physical_plan	<!REGEX>:.*Window.*
+
+statement ok
+DROP TABLE s.aggregate_arguments_tbl
