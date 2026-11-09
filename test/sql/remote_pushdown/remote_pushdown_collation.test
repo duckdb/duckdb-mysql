@@ -1,0 +1,82 @@
+# name: test/sql/remote_pushdown/remote_pushdown_collation.test
+# description: Queries are not pushed down when default_collation is set
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.collation_tbl(i INTEGER, v VARCHAR)
+
+statement ok
+INSERT INTO s.collation_tbl VALUES (1, 'a'), (2, 'A'), (3, 'b'), (4, 'B'), (5, 'c')
+
+# without default_collation string literals are compared byte-wise
+query I
+SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+1
+
+statement ok
+SET default_collation = 'nocase'
+
+# DuckDB compares the strings case-insensitively
+query I
+SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+2
+
+query II
+explain SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+physical_plan	<REGEX>:.*Aggregate.*
+
+query I
+SELECT i FROM s.collation_tbl WHERE v IN ('a', 'c') ORDER BY i
+----
+1
+2
+5
+
+# UPDATE and DELETE cannot be executed locally
+statement error
+UPDATE s.collation_tbl SET i = i + 10 WHERE v = 'b'
+----
+UPDATE syntax not supported
+
+statement error
+DELETE FROM s.collation_tbl WHERE v = 'b'
+----
+DELETE syntax not supported
+
+statement ok
+RESET default_collation
+
+query I
+SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+1
+
+# the session setting is only known when the query is executed - it fails instead of returning different results
+statement ok
+SET SESSION default_collation = 'nocase'
+
+statement error
+SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+default_collation
+
+statement ok
+RESET SESSION default_collation
+
+query I
+SELECT count(*) FROM s.collation_tbl WHERE v = 'b'
+----
+1
+
+statement ok
+DROP TABLE s.collation_tbl

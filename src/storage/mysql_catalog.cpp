@@ -8,6 +8,7 @@
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/main/settings.hpp"
 #include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/parser/expression/comparison_expression.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
@@ -44,6 +45,27 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
 }
 
 MySQLCatalog::~MySQLCatalog() = default;
+
+bool MySQLCatalog::SupportsPushdown(const QueryNode &node) {
+	switch (node.type) {
+	case QueryNodeType::UPDATE_QUERY_NODE:
+	case QueryNodeType::DELETE_QUERY_NODE:
+		// there is no local fallback for UPDATE and DELETE, so they are pushed down regardless of the setting
+		break;
+	default:
+		if (!remote_pushdown_enabled) {
+			return false;
+		}
+		break;
+	}
+	if (!Settings::Get<DefaultCollationSetting>(GetDatabase()).empty()) {
+		// DuckDB compares strings with the default collation, while MySQL uses the collation of the columns
+		// and the binary collation of the string literals - only the global setting can be checked here,
+		// the session setting is checked in RemoteExecute
+		return false;
+	}
+	return capabilities.SupportsPushdown(node);
+}
 
 string EscapeConnectionString(const string &input) {
 	string result = "\"";
@@ -562,6 +584,12 @@ static unique_ptr<ParsedExpression> MySQLModifiesDatabaseArg(bool modifies_datab
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_ptr<QueryNode> node) {
+	if (!Settings::Get<DefaultCollationSetting>(context).empty()) {
+		throw BinderException("The query cannot be executed in MySQL when the default_collation setting is set only "
+		                      "in the session, set it globally (SET GLOBAL default_collation = ...) to execute "
+		                      "the query in DuckDB, or ATTACH the database with mysql_enable_remote_pushdown "
+		                      "disabled");
+	}
 	// serialize the query node into MySQL-compatible SQL (identifier quoting, type / function
 	// remapping, explicit NULL ordering, ...)
 	vector<string> statements = MySQLSQLWriter::ToStatements(context, capabilities.GetVersion(), *node);
