@@ -21,7 +21,7 @@ s	1
 statement error
 CALL mysql_execute('s', 'KILL connection_id()')
 ----
-connection_id
+<REGEX>:.*(Query execution was interrupted|Connection was killed).*
 
 # connection must have been discarded, as it cannot pass the health check on returning it to the pool
 query II
@@ -65,7 +65,7 @@ s	1
 statement error
 COMMIT
 ----
-COMMIT
+Failed to commit
 
 query II
 SELECT catalog_name, total_connections FROM mysql_configure_pool(catalog_name='s')

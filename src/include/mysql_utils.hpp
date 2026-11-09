@@ -67,6 +67,10 @@ public:
 	static string WriteQuoted(const string &text, char quote);
 	static string TransformConstant(const Value &val);
 
+	//! The error message of the last failed call, without the excerpt of the SQL that MySQL adds to syntax errors
+	static string GetErrorMessage(MYSQL *con);
+	static string GetErrorMessage(MYSQL_STMT *stmt);
+
 private:
 	static mutex libmariadb_races_lock;
 	static bool real_connect_succeeded_at_least_once;

@@ -148,7 +148,7 @@ MySQLParameter::MySQLParameter(const string &query, Value value_p) : value(std::
 		// use string ref from the value
 		break;
 	default:
-		throw IOException("Unsupported parameters type: \"%s\", MySQL query \"%s\"", value.type(), query.c_str());
+		throw IOException("Unsupported parameters type: \"%s\"", value.type());
 	}
 }
 

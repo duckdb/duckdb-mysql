@@ -389,6 +389,31 @@ string MySQLUtils::TransformConstant(const Value &val) {
 	return val.DefaultCastAs(LogicalType::VARCHAR).ToSQLString();
 }
 
+//! Remove the excerpt of the SQL from the message of a syntax error ("... near '<rest of the query>' at line 1"),
+//! it can contain the literal values of the query
+static string MySQLStripQueryExcerpt(unsigned int error_code, const char *error_message) {
+	// ER_PARSE_ERROR
+	static constexpr unsigned int MYSQL_PARSE_ERROR = 1064;
+	string message = error_message ? error_message : "";
+	if (error_code != MYSQL_PARSE_ERROR) {
+		return message;
+	}
+	auto excerpt_start = message.find(" near '");
+	auto excerpt_end = message.rfind("' at line ");
+	if (excerpt_start == string::npos || excerpt_end == string::npos || excerpt_end < excerpt_start) {
+		return message;
+	}
+	return message.substr(0, excerpt_start) + message.substr(excerpt_end + 1);
+}
+
+string MySQLUtils::GetErrorMessage(MYSQL *con) {
+	return MySQLStripQueryExcerpt(mysql_errno(con), mysql_error(con));
+}
+
+string MySQLUtils::GetErrorMessage(MYSQL_STMT *stmt) {
+	return MySQLStripQueryExcerpt(mysql_stmt_errno(stmt), mysql_stmt_error(stmt));
+}
+
 MYSQL *MySQLUtils::CallMySQLInit() {
 	lock_guard<mutex> guard(libmariadb_races_lock);
 	return mysql_init(nullptr);

@@ -433,7 +433,7 @@ static unique_ptr<FunctionData> MySQLQueryBind(ClientContext &context, TableFunc
 		                                     clear_catalog_cache);
 	} catch (const std::exception &ex) {
 		ErrorData error(ex);
-		throw BinderException("PREPARE error, query: \"%s\", message: \"%s\"", sql, error.RawMessage());
+		throw BinderException("PREPARE error: %s", error.RawMessage());
 	}
 }
 
