@@ -1,0 +1,61 @@
+# name: test/sql/attach_update_delete_no_pushdown.test
+# description: Test UPDATE and DELETE statements with remote pushdown disabled
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+SET mysql_enable_remote_pushdown = FALSE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s1.update_delete_no_pushdown(i INTEGER, j INTEGER);
+
+statement ok
+INSERT INTO s1.update_delete_no_pushdown VALUES (1, 10), (2, 20), (3, 30), (NULL, 40);
+
+# SELECTs are still not pushed down
+query II
+explain SELECT SUM(i) FROM s1.update_delete_no_pushdown
+----
+physical_plan	<REGEX>:.*Aggregate.*
+
+# UPDATE and DELETE are always pushed down
+statement ok
+UPDATE s1.update_delete_no_pushdown SET i = i + 1;
+
+statement ok
+UPDATE s1.update_delete_no_pushdown SET j = j * 2 WHERE i = 3;
+
+query II
+SELECT i, j FROM s1.update_delete_no_pushdown ORDER BY i
+----
+2	10
+3	40
+4	30
+NULL	40
+
+statement ok
+DELETE FROM s1.update_delete_no_pushdown WHERE i = 4
+
+query II
+SELECT i, j FROM s1.update_delete_no_pushdown ORDER BY i
+----
+2	10
+3	40
+NULL	40
+
+statement ok
+DELETE FROM s1.update_delete_no_pushdown
+
+query I
+SELECT COUNT(*) FROM s1.update_delete_no_pushdown
+----
+0
+
+statement ok
+DROP TABLE s1.update_delete_no_pushdown

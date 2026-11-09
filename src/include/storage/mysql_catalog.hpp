@@ -75,14 +75,23 @@ public:
 	bool Supports(RemoteCapability capability) const override {
 		return capabilities.Supports(capability);
 	}
+	// expressions and table references are only checked as parts of an enclosing query node, they are
+	// never pushed down on their own - so the remote pushdown setting is applied to the query nodes
 	bool SupportsPushdown(const ParsedExpression &expression) override {
-		return remote_pushdown_enabled && capabilities.SupportsPushdown(expression);
+		return capabilities.SupportsPushdown(expression);
 	}
 	bool SupportsPushdown(const TableRef &ref) override {
-		return remote_pushdown_enabled && capabilities.SupportsPushdown(ref);
+		return capabilities.SupportsPushdown(ref);
 	}
 	bool SupportsPushdown(const QueryNode &node) override {
-		return remote_pushdown_enabled && capabilities.SupportsPushdown(node);
+		switch (node.type) {
+		case QueryNodeType::UPDATE_QUERY_NODE:
+		case QueryNodeType::DELETE_QUERY_NODE:
+			// there is no local fallback for UPDATE and DELETE, so they are pushed down regardless of the setting
+			return capabilities.SupportsPushdown(node);
+		default:
+			return remote_pushdown_enabled && capabilities.SupportsPushdown(node);
+		}
 	}
 	bool SupportsPushdown(const SQLStatement &statement) override {
 		return remote_pushdown_enabled && capabilities.SupportsPushdown(statement);
