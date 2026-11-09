@@ -84,8 +84,7 @@ MySQLResult::MySQLResult(optional_ptr<ClientContext> context_p, const std::strin
 
 	int res_bind = mysql_stmt_bind_result(stmt.get(), binds.data());
 	if (res_bind != 0) {
-		throw IOException("Failed to bind result set for MySQL query \"%s\": %s\n", query.c_str(),
-		                  mysql_stmt_error(stmt.get()));
+		throw IOException("Failed to bind result set for MySQL query: %s\n", mysql_stmt_error(stmt.get()));
 	}
 
 	auto ltypes = CreateChunkTypes(fields, type_config);
@@ -122,15 +121,15 @@ void MySQLResult::HandleTruncatedData() {
 		int res_fetch = mysql_stmt_fetch_column(stmt.get(), &b, static_cast<unsigned int>(i),
 		                                        static_cast<unsigned long>(f.bind_buffer.size()));
 		if (res_fetch != 0) {
-			throw IOException("Failed to re-fetch result field \"%s\" for MySQL query \"%s\": %s\n", f.name.c_str(),
-			                  query.c_str(), mysql_stmt_error(stmt.get()));
+			throw IOException("Failed to re-fetch result field \"%s\" for MySQL query: %s\n", f.name.c_str(),
+			                  mysql_stmt_error(stmt.get()));
 		}
 	}
 }
 
 void MySQLResult::Materialize() {
 	if (!context) {
-		throw InternalException("MySQLResult::Materialize called without a context, MySQL query \"%s\"", query);
+		throw InternalException("MySQLResult::Materialize called without a context");
 	}
 	if (exhausted) {
 		return;
@@ -217,7 +216,7 @@ bool MySQLResult::FetchNext() {
 				stmt_error = conn_err;
 			}
 		}
-		throw IOException("Failed to fetch result row for MySQL query \"%s\": %s\n", query.c_str(),
+		throw IOException("Failed to fetch result row for MySQL query: %s\n",
 		                  stmt_error ? stmt_error : "<unknown error>");
 	}
 
@@ -238,14 +237,13 @@ bool MySQLResult::Next() {
 
 void MySQLResult::CheckColumnIdx(idx_t col) {
 	if (col >= data_chunk.ColumnCount()) {
-		throw IOException("Column: %zu out of range of field count: %zu, MySQL query \"%s\"\n", col,
-		                  data_chunk.ColumnCount(), query.c_str());
+		throw IOException("Column: %zu out of range of field count: %zu\n", col, data_chunk.ColumnCount());
 	}
 }
 
 void MySQLResult::CheckNotNull(idx_t col) {
 	if (IsNull(col)) {
-		throw InternalException("Get called for a NULL value, column: %zu, MySQL query \"%s\"\n", col, query.c_str());
+		throw InternalException("Get called for a NULL value, column: %zu\n", col);
 	}
 }
 
@@ -258,8 +256,8 @@ string MySQLResult::GetString(idx_t col) {
 		string_t &st = data[row_idx];
 		return string(st.GetData(), st.GetSize());
 	}
-	throw InternalException("Get called for a String type, actual type: \"%s\", column: %zu, MySQL query \"%s\"\n",
-	                        f.duckdb_type.ToString(), col, query.c_str());
+	throw InternalException("Get called for a String type, actual type: \"%s\", column: %zu\n",
+	                        f.duckdb_type.ToString(), col);
 }
 
 int32_t MySQLResult::GetInt32(idx_t col) {
@@ -273,8 +271,8 @@ int32_t MySQLResult::GetInt32(idx_t col) {
 		uint32_t *data = FlatVector::GetDataMutable<uint32_t>(vec);
 		return static_cast<int32_t>(data[row_idx]);
 	}
-	throw InternalException("Get called for an Int32 type, actual type: \"%s\", column: %zu, MySQL query \"%s\"\n",
-	                        f.duckdb_type.ToString(), col, query.c_str());
+	throw InternalException("Get called for an Int32 type, actual type: \"%s\", column: %zu\n",
+	                        f.duckdb_type.ToString(), col);
 }
 
 int64_t MySQLResult::GetInt64(idx_t col) {
@@ -297,8 +295,8 @@ int64_t MySQLResult::GetInt64(idx_t col) {
 			return atoll(st.GetData());
 		}
 	}
-	throw InternalException("Get called for an Int64 type, actual type: \"%s\", column: %zu, MySQL query \"%s\"\n",
-	                        f.duckdb_type.ToString(), col, query.c_str());
+	throw InternalException("Get called for an Int64 type, actual type: \"%s\", column: %zu\n",
+	                        f.duckdb_type.ToString(), col);
 }
 
 bool MySQLResult::IsNull(idx_t col) {
@@ -309,9 +307,7 @@ bool MySQLResult::IsNull(idx_t col) {
 
 idx_t MySQLResult::AffectedRows() {
 	if (affected_rows == idx_t(-1)) {
-		throw InternalException("MySQLResult::AffectedRows called for result "
-		                        "that didn't affect any rows, query \"%s\"\n",
-		                        query.c_str());
+		throw InternalException("MySQLResult::AffectedRows called for result that didn't affect any rows");
 	}
 	return affected_rows;
 }

@@ -112,7 +112,7 @@ CALL mysql_query('s', 'DROP TABLE detach_prepare_test')
 statement error
 EXECUTE p2
 ----
-IO Error: Failed to prepare MySQL query "SELECT * FROM detach_prepare_test": Table 'mysqlscanner.detach_prepare_test' doesn't exist
+IO Error: Failed to prepare MySQL query: Table 'mysqlscanner.detach_prepare_test' doesn't exist
 
 statement ok
 DEALLOCATE p2

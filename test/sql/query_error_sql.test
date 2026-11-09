@@ -1,0 +1,52 @@
+# name: test/sql/query_error_sql.test
+# description: Error messages do not include the SQL sent to MySQL (it can contain literal values)
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.error_sql_tbl(i INTEGER, v VARCHAR)
+
+# syntax errors: the excerpt of the query that MySQL adds to the message ("near '...'") is removed as well
+statement error
+SELECT * FROM mysql_query('s', 'SELECT 1 2 ''secret_value''')
+----
+<REGEX>:.*Failed to prepare MySQL query: You have an error in your SQL syntax; .* to use at line 1.*
+
+statement error
+CALL mysql_execute('s', 'SELECT 1 2 ''secret_value''')
+----
+<REGEX>:.*Failed to prepare MySQL query: You have an error in your SQL syntax; .* to use at line 1.*
+
+statement error
+CALL mysql_execute('s', 'SELECT 1 2 ''secret_value''', prepare=FALSE)
+----
+<REGEX>:.*Failed to run query: You have an error in your SQL syntax; .* to use at line 1.*
+
+statement error
+SELECT * FROM mysql_query('s', 'SELECT * FROM error_sql_missing WHERE v = ''secret_value''')
+----
+PREPARE error: Failed to prepare MySQL query: Table 'mysqlscanner.error_sql_missing' doesn't exist
+
+# pushed down queries that fail in MySQL - the user did not write the generated SQL
+
+statement ok
+INSERT INTO s.error_sql_tbl VALUES (1, 'secret_value')
+
+statement error
+UPDATE s.error_sql_tbl SET i = (SELECT 1 UNION ALL SELECT 2) WHERE v = 'secret_value'
+----
+<!REGEX>:.*secret_value.*
+
+statement error
+SELECT * FROM s.error_sql_tbl WHERE v = 'secret_value' AND i = (SELECT 1 UNION ALL SELECT 2)
+----
+<!REGEX>:.*secret_value.*
+
+statement ok
+DROP TABLE s.error_sql_tbl

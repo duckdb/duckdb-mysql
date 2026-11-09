@@ -65,7 +65,7 @@ void MySQLConnection::DrainBasicResult(optional_ptr<ClientContext> context, cons
 		}
 	}
 	if (mysql_errno(con) != 0) {
-		throw IOException("Failed to read result of query \"%s\": %s\n", query.c_str(), mysql_error(con));
+		throw IOException("Failed to read result of query: %s\n", MySQLUtils::GetErrorMessage(con));
 	}
 }
 
@@ -81,7 +81,7 @@ idx_t MySQLConnection::MySQLExecute(optional_ptr<ClientContext> context, MYSQL_S
 		auto con = GetConn();
 		int res_query = mysql_real_query(con, query.c_str(), query.size());
 		if (res_query != 0) {
-			throw IOException("Failed to run query \"%s\": %s\n", query.c_str(), mysql_error(con));
+			throw IOException("Failed to run query: %s\n", MySQLUtils::GetErrorMessage(con));
 		}
 		DrainBasicResult(context, query);
 		return 0;
@@ -92,7 +92,7 @@ idx_t MySQLConnection::MySQLExecute(optional_ptr<ClientContext> context, MYSQL_S
 	if (!prepared) {
 		int res_prepare = mysql_stmt_prepare(stmt, query.c_str(), query.size());
 		if (res_prepare != 0) {
-			throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+			throw IOException("Failed to prepare MySQL query: %s\n", MySQLUtils::GetErrorMessage(stmt));
 		}
 	}
 
@@ -101,9 +101,8 @@ idx_t MySQLConnection::MySQLExecute(optional_ptr<ClientContext> context, MYSQL_S
 	if (params.size() > 0) {
 		size_t expected_count = mysql_stmt_param_count(stmt);
 		if (expected_count != params.size()) {
-			throw IOException(
-			    "Incorrect query parameters count specified, expected: %zu, actual: %zu, MySQL query \"%s\": %s\n",
-			    expected_count, params.size(), query.c_str(), mysql_stmt_error(stmt));
+			throw IOException("Incorrect query parameters count specified, expected: %zu, actual: %zu: %s\n",
+			                  expected_count, params.size(), mysql_stmt_error(stmt));
 		}
 		mysql_params.reserve(params.size());
 		binds.reserve(params.size());
@@ -113,14 +112,13 @@ idx_t MySQLConnection::MySQLExecute(optional_ptr<ClientContext> context, MYSQL_S
 		}
 		auto res_bind = mysql_stmt_bind_param(stmt, binds.data());
 		if (res_bind != 0) {
-			throw IOException("Failed to bind parameters, count: %zu, MySQL query \"%s\": %s\n", binds.size(),
-			                  query.c_str(), mysql_stmt_error(stmt));
+			throw IOException("Failed to bind parameters, count: %zu: %s\n", binds.size(), mysql_stmt_error(stmt));
 		}
 	}
 
 	int res_exec = mysql_stmt_execute(stmt);
 	if (res_exec != 0) {
-		throw IOException("Failed to execute MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt));
+		throw IOException("Failed to execute MySQL query: %s\n", MySQLUtils::GetErrorMessage(stmt));
 	}
 
 	// the result is never stored by the client library, it is either streamed to the caller
@@ -152,13 +150,12 @@ unique_ptr<MySQLResult> MySQLConnection::QueryInternal(optional_ptr<ClientContex
 	// results that are not streamed are read eagerly into a buffer-managed ColumnDataCollection
 	// that is subject to the DuckDB memory limit and can be spilled to disk
 	if (!result_streaming && !context) {
-		throw InternalException("MySQL query result cannot be materialized without a client context, query \"%s\"",
-		                        query);
+		throw InternalException("MySQL query result cannot be materialized without a client context");
 	}
 
 	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
 	if (!stmt) {
-		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+		throw IOException("Failed to initialize MySQL query: %s\n", mysql_error(con));
 	}
 
 	idx_t affected_rows = MySQLExecute(context, stmt.get(), query, params, result_streaming);
@@ -207,12 +204,12 @@ unique_ptr<MySQLStatement> MySQLConnection::Prepare(const string &query) {
 
 	auto stmt = MySQLStatementPtr(mysql_stmt_init(con), MySQLStatementDelete);
 	if (!stmt) {
-		throw IOException("Failed to initialize MySQL query \"%s\": %s\n", query.c_str(), mysql_error(con));
+		throw IOException("Failed to initialize MySQL query: %s\n", mysql_error(con));
 	}
 
 	int res_prepare = mysql_stmt_prepare(stmt.get(), query.c_str(), query.size());
 	if (res_prepare != 0) {
-		throw IOException("Failed to prepare MySQL query \"%s\": %s\n", query.c_str(), mysql_stmt_error(stmt.get()));
+		throw IOException("Failed to prepare MySQL query: %s\n", MySQLUtils::GetErrorMessage(stmt.get()));
 	}
 
 	vector<MySQLField> fields = MySQLField::ReadFields(query, stmt.get(), type_config);

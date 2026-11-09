@@ -173,7 +173,7 @@ Query parameters must be specified in a STRUCT
 statement error
 SELECT * FROM mysql_query('s', 'SELECT ? col1',  params=row('2020-12-31 12:34:56'::TIMESTAMP_NS))
 ----
-IO Error: Unsupported parameters type: "TIMESTAMP_NS", MySQL query "SELECT ? col1"
+IO Error: Unsupported parameters type: "TIMESTAMP_NS"
 
 query II
 SELECT col1, typeof(col1) FROM mysql_query('s', 'SELECT ? col1',

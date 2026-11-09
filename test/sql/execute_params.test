@@ -78,4 +78,4 @@ Query parameters must be specified in a STRUCT
 statement error
 CALL mysql_execute('s', 'SELECT ? col1',  params=row('2020-12-31 12:34:56'::TIMESTAMP_NS))
 ----
-Unsupported parameters type: "TIMESTAMP_NS", MySQL query "SELECT ? col1"
+Unsupported parameters type: "TIMESTAMP_NS"
