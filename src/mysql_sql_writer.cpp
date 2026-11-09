@@ -60,6 +60,16 @@ string MySQLSQLWriter::WriteIdentifier(const string &identifier) {
 	return MySQLUtils::WriteIdentifier(identifier);
 }
 
+//! Write a DOUBLE literal - MySQL reads numeric literals without an exponent as DECIMAL values (with a
+//! different result type and exact arithmetic), so the exponent is always included
+static string MySQLWriteDoubleLiteral(double value) {
+	auto result = Value::DOUBLE(value).ToString();
+	if (result.find_first_of("eE") == string::npos) {
+		result += "e0";
+	}
+	return result;
+}
+
 string MySQLSQLWriter::WriteConstant(const Value &value) {
 	if (value.IsNull()) {
 		return "NULL";
@@ -76,10 +86,14 @@ string MySQLSQLWriter::WriteConstant(const Value &value) {
 	case LogicalTypeId::USMALLINT:
 	case LogicalTypeId::UINTEGER:
 	case LogicalTypeId::UBIGINT:
-	case LogicalTypeId::FLOAT:
-	case LogicalTypeId::DOUBLE:
 	case LogicalTypeId::DECIMAL:
 		return value.ToString();
+	case LogicalTypeId::FLOAT:
+		// MySQL has no FLOAT literals - write the exact value of the float as a DOUBLE literal and cast it back,
+		// so that it compares equal to the same value in a FLOAT column
+		return "CAST(" + MySQLWriteDoubleLiteral(FloatValue::Get(value)) + " AS FLOAT)";
+	case LogicalTypeId::DOUBLE:
+		return MySQLWriteDoubleLiteral(DoubleValue::Get(value));
 	case LogicalTypeId::VARCHAR:
 		if (binary_collation.empty()) {
 			// SupportsPushdown blocks string literals when the server has no binary collation

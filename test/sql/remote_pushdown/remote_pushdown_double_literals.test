@@ -1,0 +1,60 @@
+# name: test/sql/remote_pushdown/remote_pushdown_double_literals.test
+# description: DOUBLE and FLOAT constants keep their type when pushed down (MySQL reads 0.1 as a DECIMAL literal)
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.double_literals_tbl(r DOUBLE, f FLOAT)
+
+statement ok
+INSERT INTO s.double_literals_tbl VALUES (1e-6, 0.1), (0.1, 0.5), (1e300, 1)
+
+# the result types of pushed down constants match DuckDB (the query of the CREATE TABLE AS is pushed down)
+statement ok
+CREATE TEMP TABLE double_literals_types AS SELECT 0.1::DOUBLE * 3 AS d1, 1e20::DOUBLE AS d2, 0.5::FLOAT AS f1, 0.1 AS dec1 FROM s.double_literals_tbl
+
+query TT
+SELECT column_name, column_type FROM (DESCRIBE double_literals_types)
+----
+d1	DOUBLE
+d2	DOUBLE
+f1	FLOAT
+dec1	DECIMAL(2,1)
+
+query RRRR
+SELECT 0.1::DOUBLE * 3 AS d1, 1e20::DOUBLE AS d2, 0.5::FLOAT AS f1, 0.1 AS dec1 FROM s.double_literals_tbl LIMIT 1
+----
+0.30000000000000004	1e+20	0.5	0.1
+
+query II
+explain SELECT 0.1::DOUBLE * 3 AS d1 FROM s.double_literals_tbl
+----
+physical_plan	<REGEX>:.*MYSQL_QUERY.*
+
+# DOUBLE comparisons
+query R
+SELECT r FROM s.double_literals_tbl WHERE r = 0.1::DOUBLE OR r = 1e-6 ORDER BY r
+----
+1e-06
+0.1
+
+# a FLOAT constant compares equal to the same value in a FLOAT column
+query R
+SELECT f FROM s.double_literals_tbl WHERE f = 0.1::FLOAT OR f > 0.7::FLOAT ORDER BY f
+----
+0.1
+1.0
+
+query II
+explain SELECT f FROM s.double_literals_tbl WHERE f = 0.1::FLOAT OR f > 0.7::FLOAT ORDER BY f
+----
+physical_plan	<REGEX>:.*MYSQL_QUERY.*
+
+statement ok
+DROP TABLE s.double_literals_tbl
