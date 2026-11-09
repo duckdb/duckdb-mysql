@@ -1033,7 +1033,151 @@ bool MySQLCapabilities::SupportsPushdown(const TableRef &ref) {
 	}
 }
 
+//! Collects the names of the CTEs defined anywhere in a query, and the names of the tables that are
+//! referenced with a catalog or schema qualifier
+struct MySQLCTENameCollector {
+	case_insensitive_set_t cte_names;
+	case_insensitive_set_t qualified_table_names;
+
+	void Collect(const QueryNode &node) {
+		for (auto &cte_pair : node.cte_map.map) {
+			cte_names.insert(cte_pair.first.GetIdentifierName());
+			if (cte_pair.second->query_node) {
+				Collect(*cte_pair.second->query_node);
+			}
+		}
+		for (auto &modifier : node.modifiers) {
+			switch (modifier->type) {
+			case ResultModifierType::ORDER_MODIFIER:
+				for (auto &order : modifier->Cast<OrderModifier>().orders) {
+					Collect(*order.expression);
+				}
+				break;
+			case ResultModifierType::LIMIT_MODIFIER: {
+				auto &limit_mod = modifier->Cast<LimitModifier>();
+				Collect(limit_mod.limit);
+				Collect(limit_mod.offset);
+				break;
+			}
+			default:
+				break;
+			}
+		}
+		switch (node.type) {
+		case QueryNodeType::SELECT_NODE: {
+			auto &select = node.Cast<SelectNode>();
+			Collect(select.select_list);
+			Collect(select.from_table);
+			Collect(select.where_clause);
+			Collect(select.groups.group_expressions);
+			Collect(select.having);
+			Collect(select.qualify);
+			break;
+		}
+		case QueryNodeType::SET_OPERATION_NODE:
+			for (auto &child : node.Cast<SetOperationNode>().children) {
+				Collect(*child);
+			}
+			break;
+		case QueryNodeType::RECURSIVE_CTE_NODE: {
+			auto &cte = node.Cast<RecursiveCTENode>();
+			Collect(*cte.left);
+			Collect(*cte.right);
+			break;
+		}
+		case QueryNodeType::UPDATE_QUERY_NODE: {
+			auto &update = node.Cast<UpdateQueryNode>();
+			Collect(update.table);
+			Collect(update.from_table);
+			if (update.set_info) {
+				Collect(update.set_info->expressions);
+				Collect(update.set_info->condition);
+			}
+			Collect(update.returning_list);
+			break;
+		}
+		case QueryNodeType::DELETE_QUERY_NODE: {
+			auto &del = node.Cast<DeleteQueryNode>();
+			Collect(del.table);
+			for (auto &using_clause : del.using_clauses) {
+				Collect(using_clause);
+			}
+			Collect(del.condition);
+			Collect(del.returning_list);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	void Collect(const unique_ptr<TableRef> &ref) {
+		if (!ref) {
+			return;
+		}
+		switch (ref->type) {
+		case TableReferenceType::BASE_TABLE: {
+			auto &name = ref->Cast<BaseTableRef>().GetQualifiedName();
+			if (!name.Catalog().empty() || !name.Schema().empty()) {
+				qualified_table_names.insert(name.Name().GetIdentifierName());
+			}
+			break;
+		}
+		case TableReferenceType::JOIN: {
+			auto &join = ref->Cast<JoinRef>();
+			Collect(join.left);
+			Collect(join.right);
+			Collect(join.condition);
+			break;
+		}
+		case TableReferenceType::SUBQUERY:
+			Collect(*ref->Cast<SubqueryRef>().subquery->node);
+			break;
+		default:
+			break;
+		}
+	}
+
+	void Collect(const ParsedExpression &expr) {
+		if (expr.GetExpressionClass() == ExpressionClass::SUBQUERY) {
+			auto &subquery = expr.Cast<SubqueryExpression>();
+			if (subquery.Subquery() && subquery.Subquery()->node) {
+				Collect(*subquery.Subquery()->node);
+			}
+		}
+		ParsedExpressionIterator::EnumerateChildren(expr, [&](const ParsedExpression &child) { Collect(child); });
+	}
+
+	void Collect(const unique_ptr<ParsedExpression> &expr) {
+		if (expr) {
+			Collect(*expr);
+		}
+	}
+
+	void Collect(const vector<unique_ptr<ParsedExpression>> &expressions) {
+		for (auto &expr : expressions) {
+			Collect(*expr);
+		}
+	}
+};
+
+//! The catalog name is removed from the table references of a pushed down query - a table that DuckDB reads
+//! because it is qualified (FROM db.tbl) would then refer to a CTE with the same name in MySQL
+static bool MySQLHasQualifiedTableNamedLikeCTE(const QueryNode &node) {
+	MySQLCTENameCollector collector;
+	collector.Collect(node);
+	for (auto &table_name : collector.qualified_table_names) {
+		if (collector.cte_names.count(table_name) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool MySQLCapabilities::SupportsPushdown(const QueryNode &node) {
+	if (MySQLHasQualifiedTableNamedLikeCTE(node)) {
+		return false;
+	}
 	if (!node.cte_map.map.empty() && !version.SupportsCTEs()) {
 		// common table expressions require MySQL 8.0 / MariaDB 10.2
 		return false;
