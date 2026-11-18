@@ -1,0 +1,59 @@
+# name: test/sql/mysql_execute_load_local.test
+# description: Test that LOAD DATA LOCAL INFILE is rejected by the client
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+# enable LOAD DATA LOCAL on the server side, so only the client can reject it
+statement ok
+CALL mysql_execute('s', 'SET GLOBAL local_infile = 1')
+
+statement ok
+COPY (SELECT 42 AS i) TO '{TEST_DIR}/load_local.csv' (HEADER false)
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE IF EXISTS test_load_local_tbl')
+
+statement ok
+CALL mysql_execute('s', 'CREATE TABLE test_load_local_tbl(i INTEGER)')
+
+# MySQL cannot prepare LOAD DATA, MariaDB can
+statement error
+CALL mysql_execute('s', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/load_local.csv'' INTO TABLE test_load_local_tbl')
+----
+<REGEX>:.*(not supported in the prepared statement protocol|The used command is not allowed).*
+
+# basic interface (mysql_real_query)
+statement error
+CALL mysql_execute('s', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/load_local.csv'' INTO TABLE test_load_local_tbl',
+  prepare=FALSE)
+----
+<REGEX>:.*(Loading local data is disabled|The used command is not allowed).*
+
+statement error
+CALL mysql_execute('s', 'load data local infile ''{TEST_DIR}/load_local.csv'' into table test_load_local_tbl',
+  prepare=FALSE)
+----
+<REGEX>:.*(Loading local data is disabled|The used command is not allowed).*
+
+statement error
+FROM mysql_query('s', 'SELECT 1',
+  preliminary_queries=['LOAD DATA LOCAL INFILE ''{TEST_DIR}/load_local.csv'' INTO TABLE test_load_local_tbl'])
+----
+<REGEX>:.*(Loading local data is disabled|The used command is not allowed).*
+
+query I
+SELECT COUNT(*) FROM s.test_load_local_tbl
+----
+0
+
+statement ok
+CALL mysql_execute('s', 'DROP TABLE test_load_local_tbl')
+
+statement ok
+CALL mysql_execute('s', 'SET GLOBAL local_infile = 0')
