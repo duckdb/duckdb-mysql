@@ -1,0 +1,130 @@
+# name: test/sql/attach_local_infile.test
+# description: Client-side LOCAL INFILE options, secrets, and connection reuse
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# Reject misspelled boolean values instead of silently enabling file uploads.
+foreach value invalid 2 off
+
+statement error
+ATTACH 'local_infile={value}' AS invalid_local_infile (TYPE mysql)
+----
+local_infile must be either 0, 1, false or true
+
+endloop
+
+statement error
+ATTACH 'local_infile=0 local_infile=1' AS invalid_local_infile (TYPE mysql)
+----
+Duplicate 'local_infile' parameter
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner local_infile=1' AS local_on (TYPE mysql)
+
+statement ok
+SET VARIABLE original_local_infile = (SELECT local_infile FROM mysql_query('local_on', 'SELECT @@GLOBAL.local_infile AS local_infile'))
+
+statement ok
+CALL mysql_execute('local_on', 'SET GLOBAL local_infile=1')
+
+statement ok
+CREATE OR REPLACE TABLE local_on.local_infile_test(i INTEGER)
+
+statement ok
+COPY (SELECT 42 AS i) TO '{TEST_DIR}/mysql_local_infile.csv' (FORMAT CSV, HEADER false)
+
+# Prove that the server and fixture permit an upload when explicitly enabled.
+statement ok
+CALL mysql_execute('local_on', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/mysql_local_infile.csv'' INTO TABLE local_infile_test', prepare=false)
+
+foreach value 0 false FALSE
+
+# Force the localhost socket attempt to fail and exercise the TCP retry.
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner socket={TEST_DIR}/missing_mysql.sock local_infile={value}' AS local_off (TYPE mysql)
+
+# Hold a connection so the following queries need another connection from the pool.
+statement ok
+SET VARIABLE held_connection = mysql_pin_connection('local_off')
+
+query I
+SELECT i FROM local_off.local_infile_test
+----
+42
+
+statement error
+CALL mysql_execute('local_off', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/mysql_local_infile.csv'' INTO TABLE local_infile_test', prepare=false)
+----
+<REGEX>:.*(local infile|local data|LOCAL INFILE).*
+
+statement ok
+SELECT mysql_close_pinned_connection('local_off', getvariable('held_connection'))
+
+statement ok
+DETACH local_off
+
+endloop
+
+statement ok
+CREATE SECRET local_infile_secret (TYPE mysql, LOCAL_INFILE false)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS secret_off (TYPE mysql, SECRET local_infile_secret)
+
+statement error
+CALL mysql_execute('secret_off', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/mysql_local_infile.csv'' INTO TABLE local_infile_test', prepare=false)
+----
+<REGEX>:.*(local infile|local data|LOCAL INFILE).*
+
+statement ok
+DETACH secret_off
+
+# Explicit DSN values override the secret in both directions.
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner local_infile=true' AS override_on (TYPE mysql, SECRET local_infile_secret)
+
+statement ok
+CALL mysql_execute('override_on', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/mysql_local_infile.csv'' INTO TABLE local_infile_test', prepare=false)
+
+statement ok
+DETACH override_on
+
+statement ok
+CREATE OR REPLACE SECRET local_infile_secret (TYPE mysql, LOCAL_INFILE true)
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner local_infile=0' AS override_off (TYPE mysql, SECRET local_infile_secret)
+
+statement error
+CALL mysql_execute('override_off', 'LOAD DATA LOCAL INFILE ''{TEST_DIR}/mysql_local_infile.csv'' INTO TABLE local_infile_test', prepare=false)
+----
+<REGEX>:.*(local infile|local data|LOCAL INFILE).*
+
+statement ok
+DETACH override_off
+
+statement ok
+DROP SECRET local_infile_secret
+
+statement ok
+ATTACH 'mysql://root@localhost/mysqlscanner?local-infile=0' AS uri_off (TYPE mysql, READ_ONLY)
+
+query I
+SELECT COUNT(*) FROM uri_off.local_infile_test
+----
+2
+
+statement ok
+DETACH uri_off
+
+statement ok
+DROP TABLE local_on.local_infile_test
+
+statement ok
+CALL mysql_execute('local_on', 'SET GLOBAL local_infile=' || getvariable('original_local_infile'))
+
+statement ok
+DETACH local_on

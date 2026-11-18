@@ -70,6 +70,8 @@ unique_ptr<BaseSecret> CreateMySQLSecretFunction(ClientContext &, CreateSecretIn
 			result->secret_map["port"] = named_param.second.ToString();
 		} else if (lower_name == "socket") {
 			result->secret_map["socket"] = named_param.second.ToString();
+		} else if (lower_name == "local_infile") {
+			result->secret_map["local_infile"] = named_param.second.ToString();
 		} else if (lower_name == "ssl_mode") {
 			result->secret_map["ssl_mode"] = named_param.second.ToString();
 		} else if (lower_name == "ssl_ca") {
@@ -103,6 +105,7 @@ void SetMySQLSecretParameters(CreateSecretFunction &function) {
 	function.named_parameters["user"] = LogicalType::VARCHAR;
 	function.named_parameters["database"] = LogicalType::VARCHAR;
 	function.named_parameters["socket"] = LogicalType::VARCHAR;
+	function.named_parameters["local_infile"] = LogicalType::BOOLEAN;
 	function.named_parameters["ssl_mode"] = LogicalType::VARCHAR;
 	function.named_parameters["ssl_ca"] = LogicalType::VARCHAR;
 	function.named_parameters["ssl_capath"] = LogicalType::VARCHAR;

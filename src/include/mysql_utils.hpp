@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "mysql.h"
 
 #include "duckdb.hpp"
@@ -48,6 +50,7 @@ struct MySQLConnectionParameters {
 	string ssl_crl_path;
 	string ssl_key;
 	uint32_t connect_timeout = 0;
+	std::optional<bool> local_infile;
 };
 
 enum class MySQLResultStreaming { UNINITIALIZED, ALLOW_STREAMING, FORCE_MATERIALIZATION };
@@ -78,7 +81,7 @@ private:
 	static MYSQL *CallMySQLInit();
 	static MYSQL *CallMySQLRealConnect(MYSQL *mysql, const char *host, const char *user, const char *passwd,
 	                                   const char *db, unsigned int port, const char *unix_socket,
-	                                   unsigned long clientflag);
+	                                   const MySQLConnectionParameters &config);
 };
 
 } // namespace duckdb

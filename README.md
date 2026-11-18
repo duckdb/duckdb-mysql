@@ -24,6 +24,31 @@ The connection string determines the parameters for how to connect to MySQL as a
 | socket          | Unix socket file name                                          | `MYSQL_UNIX_PORT`       | NULL         |
 | compress        | Compress MySQL packet                                          | `MYSQL_COMPRESS`        | 1            |
 | connect_timeout | Timeout in seconds for connecting to the MySQL server          | `MYSQL_CONNECT_TIMEOUT` | 0 (no limit) |
+| local_infile    | Allow client-side `LOAD DATA LOCAL INFILE` (`0`/`false` or `1`/`true`) |                   | Connector/C default |
+
+### Disabling Local File Uploads
+
+Set `local_infile=0` to disable local-file uploads in the MySQL client:
+
+```sql
+ATTACH 'host=localhost user=reader database=analytics local_infile=0'
+AS mysql_db (TYPE mysql, READ_ONLY);
+```
+
+The equivalent URI parameter is `local-infile=0`. MySQL secrets also support a boolean `LOCAL_INFILE` parameter:
+
+```sql
+CREATE SECRET mysql_reader (
+    TYPE mysql,
+    HOST 'localhost',
+    USER 'reader',
+    DATABASE 'analytics',
+    LOCAL_INFILE false
+);
+ATTACH '' AS mysql_secret_db (TYPE mysql, SECRET mysql_reader, READ_ONLY);
+```
+
+An explicit connection-string parameter overrides the secret. The option applies before every connection attempt, including retries and connections created by the pool. Omitting it preserves the Connector/C default. `READ_ONLY` restricts database writes and does not disable local-file uploads.
 
 
 The tables in the file can be read as if they were normal DuckDB tables, but the underlying data is read directly from MySQL at query time.

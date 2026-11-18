@@ -154,6 +154,13 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 				                            "disabled/required/preferred - got %s",
 				                            value);
 			}
+		} else if (key == "local_infile") {
+			set_options.insert("local_infile");
+			if (value != "0" && value != "1" && !StringUtil::CIEquals(value, "false") &&
+			    !StringUtil::CIEquals(value, "true")) {
+				throw InvalidInputException("local_infile must be either 0, 1, false or true");
+			}
+			result.local_infile = ParseBoolValue(value);
 		} else if (key == "ssl_mode") {
 			set_options.insert("ssl_mode");
 			auto val = StringUtil::Lower(value);
@@ -200,7 +207,7 @@ std::tuple<MySQLConnectionParameters, unordered_set<string>> MySQLUtils::ParseCo
 		} else {
 			throw InvalidInputException("Unrecognized configuration parameter \"%s\" "
 			                            "- expected options are host, "
-			                            "user, passwd, db, port, socket, connect_timeout",
+			                            "user, passwd, db, port, socket, connect_timeout, local_infile",
 			                            key);
 		}
 	}
@@ -311,7 +318,7 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 	const char *passwd = config.passwd.empty() ? nullptr : config.passwd.c_str();
 	const char *db = config.db.empty() ? nullptr : config.db.c_str();
 	const char *unix_socket = config.unix_socket.empty() ? nullptr : config.unix_socket.c_str();
-	result = CallMySQLRealConnect(mysql, host, user, passwd, db, config.port, unix_socket, config.client_flag);
+	result = CallMySQLRealConnect(mysql, host, user, passwd, db, config.port, unix_socket, config);
 	if (!result) {
 		string original_error = mysql_error(mysql);
 		string attempted_host = host ? host : "nullptr (default)";
@@ -325,8 +332,7 @@ MYSQL *MySQLUtils::Connect(const string &dsn, const string &attach_path) {
 				mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
 			}
 			// re-try to establish connection specifying IP address to avoid using unix sockets
-			result = CallMySQLRealConnect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket,
-			                              config.client_flag);
+			result = CallMySQLRealConnect(mysql, "127.0.0.1", user, passwd, db, config.port, unix_socket, config);
 
 			if (!result) {
 				string second_attempt_error = mysql_error(mysql);
@@ -421,7 +427,15 @@ MYSQL *MySQLUtils::CallMySQLInit() {
 
 MYSQL *MySQLUtils::CallMySQLRealConnect(MYSQL *mysql, const char *host, const char *user, const char *passwd,
                                         const char *db, unsigned int port, const char *unix_socket,
-                                        unsigned long clientflag) {
+                                        const MySQLConnectionParameters &config) {
+	// Failed connection attempts can clear options, so apply this before every attempt.
+	if (config.local_infile.has_value()) {
+		unsigned int local_infile = config.local_infile.value();
+		if (mysql_options(mysql, MYSQL_OPT_LOCAL_INFILE, &local_infile) != 0) {
+			mysql_close(mysql);
+			throw IOException("Failed to set MySQL local_infile option");
+		}
+	}
 	bool lock_needed = true;
 	{
 		lock_guard<mutex> guard(libmariadb_races_lock);
@@ -432,14 +446,14 @@ MYSQL *MySQLUtils::CallMySQLRealConnect(MYSQL *mysql, const char *host, const ch
 
 	if (lock_needed) {
 		lock_guard<mutex> guard(libmariadb_races_lock);
-		MYSQL *res = mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, clientflag);
+		MYSQL *res = mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, config.client_flag);
 		if (res) {
 			real_connect_succeeded_at_least_once = true;
 		}
 		return res;
 	}
 
-	return mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, clientflag);
+	return mysql_real_connect(mysql, host, user, passwd, db, port, unix_socket, config.client_flag);
 }
 
 } // namespace duckdb
