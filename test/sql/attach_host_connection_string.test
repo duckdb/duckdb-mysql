@@ -1,0 +1,35 @@
+# name: test/sql/attach_host_connection_string.test
+# description: Test that the host is not interpreted as a libmariadb connection string or a connection plugin URL
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CALL mysql_execute('s', 'DROP DATABASE IF EXISTS host_connection_string_db')
+
+# "plugin://" prefix does not load a connection plugin
+statement error
+ATTACH 'host="test_plugin://localhost" user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+----
+Unknown server host 'test_plugin://localhost'
+
+# options after ';' are not parsed
+statement error
+ATTACH 'host="localhost;init-command=CREATE DATABASE host_connection_string_db" user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+----
+Unknown server host 'localhost;init-command=CREATE DATABASE host_connection_string_db'
+
+statement error
+ATTACH 'host="host=localhost" user=root port=0 database=mysqlscanner' AS s1 (TYPE MYSQL_SCANNER)
+----
+Unknown server host 'host=localhost'
+
+query I
+SELECT COUNT(*) FROM mysql_query('s', 'SELECT schema_name FROM information_schema.schemata WHERE schema_name = ''host_connection_string_db''')
+----
+0

@@ -20,6 +20,9 @@ vcpkg_from_github(
         cmake-export.diff
         no-abs-path.diff
         no-local-infile.diff
+        ed25519-static.diff
+        no-dlopen.diff
+        no-host-connection-string.diff
 )
 file(REMOVE_RECURSE
     "${SOURCE_PATH}/cmake/FindIconv.cmake"
@@ -67,7 +70,7 @@ vcpkg_cmake_configure(
         # plugins/auth
         -DCLIENT_PLUGIN_AUTH_GSSAPI_CLIENT=OFF
         -DCLIENT_PLUGIN_CACHING_SHA2_PASSWORD=${plugin_type}
-        -DCLIENT_PLUGIN_CLIENT_ED25519=DYNAMIC # want ${plugin_type}, but STATIC fails
+        -DCLIENT_PLUGIN_CLIENT_ED25519=STATIC
         -DCLIENT_PLUGIN_DIALOG=${plugin_type}
         -DCLIENT_PLUGIN_PARSEC=OFF
         -DCLIENT_PLUGIN_MYSQL_CLEAR_PASSWORD=${plugin_type}

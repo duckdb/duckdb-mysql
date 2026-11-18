@@ -1,0 +1,207 @@
+diff --git a/libmariadb/ma_client_plugin.c.in b/libmariadb/ma_client_plugin.c.in
+index de9fa99..2513fc8 100644
+--- a/libmariadb/ma_client_plugin.c.in
++++ b/libmariadb/ma_client_plugin.c.in
+@@ -42,9 +42,6 @@
+ #include "errmsg.h"
+ #include <mysql/client_plugin.h>
+ 
+-#ifndef WIN32
+-#include <dlfcn.h>
+-#endif
+ 
+ const char *disabled_plugins= "@PLUGINS_DISABLED@";
+ 
+@@ -216,54 +213,10 @@ err2:
+ err1:
+   my_set_error(mysql, CR_AUTH_PLUGIN_CANNOT_LOAD, SQLSTATE_UNKNOWN,
+                ER(CR_AUTH_PLUGIN_CANNOT_LOAD), plugin->name, errmsg);
+-  if (dlhandle)
+-    (void)dlclose(dlhandle);
+   return NULL;
+ }
+ 
+ 
+-/**
+-  Loads plugins which are specified in the environment variable
+-  LIBMYSQL_PLUGINS.
+-  
+-  Multiple plugins must be separated by semicolon. This function doesn't
+-  return or log an error.
+-
+-  The function is be called by mysql_client_plugin_init
+-
+-  @todo
+-  Support extended syntax, passing parameters to plugins, for example
+-  LIBMYSQL_PLUGINS="plugin1(param1,param2);plugin2;..."
+-  or
+-  LIBMYSQL_PLUGINS="plugin1=int:param1,str:param2;plugin2;..."
+-*/
+-
+-static void load_env_plugins(MYSQL *mysql)
+-{
+-  char *plugs, *free_env, *s= getenv("LIBMYSQL_PLUGINS");
+-
+-  if (ma_check_env_str(s))
+-    return;
+-
+-  free_env= strdup(s);
+-  plugs= s= free_env;
+-
+-  if (!free_env)
+-  {
+-    SET_CLIENT_ERROR(mysql, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
+-    return;
+-  }
+-
+-  do {
+-    if ((s= strchr(plugs, ';')))
+-      *s= '\0';
+-    mysql_load_plugin(mysql, plugs, -1, 0);
+-    plugs= s + 1;
+-  } while (s);
+-
+-  free(free_env);
+-}
+-
+ /********** extern functions to be used by libmariadb *********************/
+ 
+ /**
+@@ -300,8 +253,6 @@ int mysql_client_plugin_init()
+ 
+   pthread_mutex_unlock(&LOCK_load_client_plugin);
+ 
+-  load_env_plugins(&mysql);
+-
+   return 0;
+ }
+ 
+@@ -325,8 +276,6 @@ void mysql_client_plugin_deinit()
+     {
+       if (p->plugin->deinit)
+         p->plugin->deinit();
+-      if (p->dlhandle)
+-        (void)dlclose(p->dlhandle);
+     }
+ 
+   memset(&plugin_list, 0, sizeof(plugin_list));
+@@ -365,114 +314,17 @@ struct st_mysql_client_plugin * STDCALL
+ mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
+                     int argc, va_list args)
+ {
+-  const char *errmsg;
+-#ifdef _WIN32
+-  char errbuf[1024];
+-#endif
+-  char dlpath[FN_REFLEN+1];
+-  void *sym, *dlhandle = NULL;
+-  struct st_mysql_client_plugin *plugin;
+-  char *env_plugin_dir= getenv("MARIADB_PLUGIN_DIR");
++  (void)type;
++  (void)argc;
++  (void)args;
+ 
+   CLEAR_CLIENT_ERROR(mysql);
+   if (is_not_initialized(mysql, name))
+     return NULL;
+ 
+-  pthread_mutex_lock(&LOCK_load_client_plugin);
+-
+-  /* make sure the plugin wasn't loaded meanwhile */
+-  if (type >= 0 && find_plugin(name, type))
+-  {
+-    errmsg= "it is already loaded";
+-    goto err;
+-  }
+-
+-  /* Compile dll path */
+-#ifndef WIN32
+-  snprintf(dlpath, sizeof(dlpath) - 1, "%s/%s%s",
+-           mysql->options.extension && mysql->options.extension->plugin_dir ?
+-           mysql->options.extension->plugin_dir : (env_plugin_dir) ? env_plugin_dir :
+-           MARIADB_PLUGINDIR, name, SO_EXT);
+-#else
+-  {
+-    char *p= (mysql->options.extension && mysql->options.extension->plugin_dir) ?
+-             mysql->options.extension->plugin_dir : env_plugin_dir;
+-    snprintf(dlpath, sizeof(dlpath), "%s%s%s%s", p ? p : "", p ? "\\" : "", name, SO_EXT);
+-  }
+-#endif
+-
+-  if (strpbrk(name, "()[]!@#$%^&/*;.,'?\\"))
+-  {
+-    errmsg= "invalid plugin name";
+-    goto err;
+-  }
+-
+-
+-  /* Open new dll handle */
+-  if (!(dlhandle= dlopen((const char *)dlpath, RTLD_NOW)))
+-  {
+-#ifdef _WIN32
+-   char winmsg[255];
+-   size_t len;
+-   winmsg[0] = 0;
+-   FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM,
+-                 NULL,
+-                 GetLastError(),
+-                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+-                 winmsg, 255, NULL);
+-   len= strlen(winmsg);
+-   while (len > 0 && (winmsg[len - 1] == '\n' || winmsg[len - 1] == '\r'))
+-     len--;
+-   if (len)
+-     winmsg[len] = 0;
+-   snprintf(errbuf, sizeof(errbuf), "%s Library path is '%s'", winmsg, dlpath);
+-   errmsg= errbuf;
+-#else
+-    errmsg= dlerror();
+-#endif
+-    goto err;
+-  }
+-
+-
+-  if (!(sym= dlsym(dlhandle, plugin_declarations_sym)))
+-  {
+-    errmsg= "not a plugin";
+-    (void)dlclose(dlhandle);
+-    goto err;
+-  }
+-
+-  plugin= (struct st_mysql_client_plugin*)sym;
+-
+-  if (type >=0 && type != plugin->type)
+-  {
+-    errmsg= "type mismatch";
+-    goto err;
+-  }
+-
+-  if (strcmp(name, plugin->name))
+-  {
+-    errmsg= "name mismatch";
+-    goto err;
+-  }
+-
+-  if (type < 0 && find_plugin(name, plugin->type))
+-  {
+-    errmsg= "it is already loaded";
+-    goto err;
+-  }
+-
+-  plugin= add_plugin(mysql, plugin, dlhandle, argc, args);
+-
+-  pthread_mutex_unlock(&LOCK_load_client_plugin);
+-
+-  return plugin;
+-
+-err:
+-  if (dlhandle)
+-    dlclose(dlhandle);
+-  pthread_mutex_unlock(&LOCK_load_client_plugin);
++  /* loading plugins from shared libraries is removed, only built-in plugins can be used */
+   my_set_error(mysql, CR_AUTH_PLUGIN_CANNOT_LOAD, SQLSTATE_UNKNOWN,
+-               ER(CR_AUTH_PLUGIN_CANNOT_LOAD), name, errmsg);
++               ER(CR_AUTH_PLUGIN_CANNOT_LOAD), name, "dynamic plugin loading is disabled");
+   return NULL;
+ }
+ 
