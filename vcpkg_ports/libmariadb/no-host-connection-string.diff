@@ -1,0 +1,75 @@
+diff --git a/libmariadb/mariadb_lib.c b/libmariadb/mariadb_lib.c
+index 471ed96..39d3be9 100644
+--- a/libmariadb/mariadb_lib.c
++++ b/libmariadb/mariadb_lib.c
+@@ -1507,10 +1507,6 @@ mysql_real_connect(MYSQL *mysql, const char *host, const char *user,
+ 		   const char *passwd, const char *db,
+ 		   uint port, const char *unix_socket,unsigned long client_flag)
+ {
+-  char *end= NULL;
+-  char *connection_handler= (mysql->options.extension) ?
+-                            mysql->options.extension->connection_handler : 0;
+-
+   if (!mysql->options.extension || !mysql->options.extension->tls_verification_callback)
+     mysql_optionsv(mysql, MARIADB_OPT_TLS_VERIFICATION_CALLBACK, ma_pvio_tls_verify_server_cert);
+ 
+@@ -1531,54 +1527,11 @@ mysql_real_connect(MYSQL *mysql, const char *host, const char *user,
+ 
+   reset_tls_error(mysql);
+ 
+-  /* if host contains a semicolon or equal sign, we need to parse connection string */
+-  if (host && (strchr(host, ';') || strchr(host, '=')))
+-  {
+-    if (parse_connection_string(mysql, NULL, host, strlen(host)))
+-      return NULL;
+-    /* if host was passed in connection string, it is now
+-       stored in mysql->options.host */
+-    host= NULL;
+-  } else if (connection_handler ||
+-      (host && (end= strstr(host, "://"))))
+-  {
+-    MARIADB_CONNECTION_PLUGIN *plugin;
+-    char plugin_name[64];
+-
+-    if (!connection_handler || !connection_handler[0])
+-    {
+-      memset(plugin_name, 0, 64);
+-      ma_strmake(plugin_name, host, MIN(end - host, 63));
+-      end+= 3;
+-    }
+-    else
+-      ma_strmake(plugin_name, connection_handler, MIN(63, strlen(connection_handler)));
+-
+-    if (!(plugin= (MARIADB_CONNECTION_PLUGIN *)mysql_client_find_plugin(mysql, plugin_name, MARIADB_CLIENT_CONNECTION_PLUGIN)))
+-      return NULL;
+-
+-    if (!(mysql->extension->conn_hdlr= (MA_CONNECTION_HANDLER *)calloc(1, sizeof(MA_CONNECTION_HANDLER))))
+-    {
+-      SET_CLIENT_ERROR(mysql, CR_OUT_OF_MEMORY, SQLSTATE_UNKNOWN, 0);
+-      return NULL;
+-    }
+-
+-    /* save URL for reconnect */
+-    OPT_SET_EXTENDED_VALUE_STR(&mysql->options, url, host);
+-
+-    mysql->extension->conn_hdlr->plugin= plugin;
+-
+-    if (plugin && plugin->connect)
+-    {
+-      MYSQL *my= plugin->connect(mysql, end, user, passwd, db, port, unix_socket, client_flag);
+-      if (!my)
+-      {
+-        free(mysql->extension->conn_hdlr);
+-        mysql->extension->conn_hdlr= NULL;
+-      }
+-      return my;
+-    }
+-  }
++  /*
++    Parsing the host as a connection string (with ';' or '=') and selecting
++    a connection plugin by the "plugin://" host prefix are removed: the host
++    is always passed to the default connection method as is.
++  */
+   return mysql->methods->db_connect(mysql, host, user, passwd,
+                                     db, port, unix_socket, client_flag);
+ }

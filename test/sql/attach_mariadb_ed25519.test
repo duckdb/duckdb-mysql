@@ -1,0 +1,40 @@
+# name: test/sql/attach_mariadb_ed25519.test
+# description: Test connecting with the ed25519 authentication plugin (built into the client statically)
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+require-env MARIADB_SERVER
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement maybe
+CALL mysql_execute('s', 'INSTALL SONAME ''auth_ed25519''')
+----
+already installed
+
+statement ok
+CALL mysql_execute('s', 'DROP USER IF EXISTS ''ed25519_user''@''%''')
+
+statement ok
+CALL mysql_execute('s', 'CREATE USER ''ed25519_user''@''%'' IDENTIFIED VIA ed25519 USING PASSWORD(''ed25519_pwd'')')
+
+statement ok
+CALL mysql_execute('s', 'GRANT SELECT ON mysqlscanner.* TO ''ed25519_user''@''%''')
+
+statement ok
+ATTACH 'host=localhost user=ed25519_user password=ed25519_pwd port=0 database=mysqlscanner' AS s_ed25519 (TYPE MYSQL_SCANNER)
+
+query I
+FROM mysql_query('s_ed25519', 'SELECT CURRENT_USER()')
+----
+ed25519_user@%
+
+statement ok
+DETACH s_ed25519
+
+statement ok
+CALL mysql_execute('s', 'DROP USER ''ed25519_user''@''%''')
