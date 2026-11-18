@@ -1,0 +1,284 @@
+diff --git a/libmariadb/ma_loaddata.c b/libmariadb/ma_loaddata.c
+index c59285e..c36e63c 100644
+--- a/libmariadb/ma_loaddata.c
++++ b/libmariadb/ma_loaddata.c
+@@ -52,116 +52,18 @@
+ #endif
+ #include <ma_common.h>
+ 
+-typedef struct st_mysql_infile_info
+-{
+-  MA_FILE   *fp;
+-  int        error_no;
+-  char       error_msg[MYSQL_ERRMSG_SIZE + 1];
+-  const char *filename;
+-} MYSQL_INFILE_INFO;
+-
+-/* {{{ mysql_local_infile_init */
+-static
+-int mysql_local_infile_init(void **ptr, const char *filename, void *userdata)
+-{
+-  MYSQL_INFILE_INFO *info;
+-  MYSQL *mysql= (MYSQL *)userdata;
+-
+-  info = (MYSQL_INFILE_INFO *)malloc(sizeof(MYSQL_INFILE_INFO));
+-  if (!info) {
+-    return(1);
+-  }
+-  memset(info, 0, sizeof(MYSQL_INFILE_INFO));
+-  *ptr = info;
+-
+-  info->filename = filename;
+-
+-  info->fp= ma_open(filename, "rb", mysql);
+-
+-  if (!info->fp)
+-  {
+-    /* error handling is done via mysql_local_infile_error function, so we
+-       need to copy error to info */
+-    if (mysql_errno(mysql) && !info->error_no)
+-    {
+-      info->error_no= mysql_errno(mysql);
+-      ma_strmake(info->error_msg, mysql_error(mysql), MYSQL_ERRMSG_SIZE);
+-    }
+-    else
+-    {
+-      info->error_no = errno;
+-      snprintf((char *)info->error_msg, sizeof(info->error_msg), 
+-                  CER(CR_FILE_NOT_FOUND), filename, info->error_no);
+-    }
+-    return(1);
+-  }
+-
+-  return(0);
+-}
+-/* }}} */
+-
+-
+-/* {{{ mysql_local_infile_read */
+-static
+-int mysql_local_infile_read(void *ptr, char * buf, unsigned int buf_len)
+-{
+-  MYSQL_INFILE_INFO *info = (MYSQL_INFILE_INFO *)ptr;
+-  size_t count;
+-
+-  count= ma_read((void *)buf, 1, (size_t)buf_len, info->fp);
+-
+-  if (count == (size_t)-1)
+-  {
+-    info->error_no = errno;
+-    snprintf((char *)info->error_msg, sizeof(info->error_msg), 
+-              CER(CR_FILE_READ), info->filename, info->error_no);
+-  }
+-  return((int)count);
+-}
+-/* }}} */
+-
+-
+-/* {{{ mysql_local_infile_error */
+-static
+-int mysql_local_infile_error(void *ptr, char *error_buf, unsigned int error_buf_len)
+-{
+-  MYSQL_INFILE_INFO *info = (MYSQL_INFILE_INFO *)ptr;
+-
+-  if (info) {
+-    ma_strmake(error_buf, info->error_msg, error_buf_len);
+-    return(info->error_no);
+-  }
+-
+-  ma_strmake(error_buf, "Unknown error", error_buf_len);
+-  return(CR_UNKNOWN_ERROR);
+-}
+-/* }}} */
+-
+-
+-/* {{{ mysql_local_infile_end */
+-static
+-void mysql_local_infile_end(void *ptr)
+-{
+-  MYSQL_INFILE_INFO *info = (MYSQL_INFILE_INFO *)ptr;
+-
+-  if (info)
+-  {
+-    if (info->fp)
+-      ma_close(info->fp);
+-    free(ptr);
+-  }		
+-  return;
+-}
+-/* }}} */
+-
++/*
++  LOAD DATA LOCAL INFILE support is removed: the client never reads local
++  files and rejects all file requests from the server.
++*/
+ 
+ /* {{{ mysql_local_infile_default */
+ void mysql_set_local_infile_default(MYSQL *conn)
+ {
+-  conn->options.local_infile_init = mysql_local_infile_init;
+-  conn->options.local_infile_read = mysql_local_infile_read;
+-  conn->options.local_infile_error = mysql_local_infile_error;
+-  conn->options.local_infile_end = mysql_local_infile_end;
++  conn->options.local_infile_init = NULL;
++  conn->options.local_infile_read = NULL;
++  conn->options.local_infile_error = NULL;
++  conn->options.local_infile_end = NULL;
+   return;
+ }
+ /* }}} */
+@@ -174,11 +76,12 @@ void STDCALL mysql_set_local_infile_handler(MYSQL *conn,
+         int (*local_infile_error)(void *, char *, uint),
+         void *userdata)
+ {
+-  conn->options.local_infile_init=  local_infile_init;
+-  conn->options.local_infile_read=  local_infile_read;
+-  conn->options.local_infile_end=   local_infile_end;
+-  conn->options.local_infile_error= local_infile_error;
+-  conn->options.local_infile_userdata = userdata;
++  (void)local_infile_init;
++  (void)local_infile_read;
++  (void)local_infile_end;
++  (void)local_infile_error;
++  (void)userdata;
++  mysql_set_local_infile_default(conn);
+   return;
+ }
+ /* }}} */
+@@ -186,80 +89,12 @@ void STDCALL mysql_set_local_infile_handler(MYSQL *conn,
+ /* {{{ mysql_handle_local_infile */
+ my_bool mysql_handle_local_infile(MYSQL *conn, const char *filename, my_bool can_local_infile)
+ {
+-  unsigned int buflen= 4096;
+-  int bufread;
+-  unsigned char *buf= NULL;
+-  void *info= NULL;
+-  my_bool result= 1;
+-
+-  /* check if all callback functions exist */
+-  if (!conn->options.local_infile_init || !conn->options.local_infile_end ||
+-      !conn->options.local_infile_read || !conn->options.local_infile_error)
+-  {
+-    conn->options.local_infile_userdata= conn;
+-    mysql_set_local_infile_default(conn);
+-  }
+-
+-  if (!(conn->options.client_flag & CLIENT_LOCAL_FILES) ||
+-      !can_local_infile)
+- {
+-    my_set_error(conn, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "Load data local infile forbidden");
+-    /* write empty packet to server */
+-    ma_net_write(&conn->net, (unsigned char *)"", 0);
+-    ma_net_flush(&conn->net);
+-    goto infile_error;
+-  }
+-
+-  /* allocate buffer for reading data */
+-  buf = (uchar *)malloc(buflen);
+-
+-  /* init handler: allocate read buffer and open file */
+-  if (conn->options.local_infile_init(&info, filename,
+-                                      conn->options.local_infile_userdata))
+-  {
+-    char tmp_buf[MYSQL_ERRMSG_SIZE];
+-    int tmp_errno;
+-
+-    tmp_errno= conn->options.local_infile_error(info, tmp_buf, sizeof(tmp_buf));
+-    my_set_error(conn, tmp_errno, SQLSTATE_UNKNOWN, tmp_buf);
+-    ma_net_write(&conn->net, (unsigned char *)"", 0);
+-    ma_net_flush(&conn->net);
+-    goto infile_error;
+-  }
+-
+-  /* read data */
+-  while ((bufread= conn->options.local_infile_read(info, (char *)buf, buflen)) > 0)
+-  {
+-    if (ma_net_write(&conn->net, (unsigned char *)buf, bufread))
+-    {
+-      my_set_error(conn, CR_SERVER_LOST, SQLSTATE_UNKNOWN, NULL);
+-      goto infile_error;
+-    }
+-  }
+-
+-  /* send empty packet for eof */
+-  if (ma_net_write(&conn->net, (unsigned char *)"", 0) || 
+-      ma_net_flush(&conn->net))
+-  {
+-    my_set_error(conn, CR_SERVER_LOST, SQLSTATE_UNKNOWN, NULL);
+-    goto infile_error;
+-  }
+-
+-  /* error during read occurred */
+-  if (bufread < 0)
+-  {
+-    char tmp_buf[MYSQL_ERRMSG_SIZE];
+-    int tmp_errno= conn->options.local_infile_error(info, tmp_buf, sizeof(tmp_buf));
+-    my_set_error(conn, tmp_errno, SQLSTATE_UNKNOWN, tmp_buf);
+-    goto infile_error;
+-  }
+-
+-  result = 0;
+-
+-infile_error:
+-  conn->options.local_infile_end(info);
+-  free(buf);
+-  return(result);
++  (void)filename;
++  (void)can_local_infile;
++  my_set_error(conn, CR_UNKNOWN_ERROR, SQLSTATE_UNKNOWN, "Load data local infile forbidden");
++  /* write empty packet to server */
++  ma_net_write(&conn->net, (unsigned char *)"", 0);
++  ma_net_flush(&conn->net);
++  return 1;
+ }
+ /* }}} */
+-
+diff --git a/libmariadb/mariadb_lib.c b/libmariadb/mariadb_lib.c
+index 471ed96..a3411f9 100644
+--- a/libmariadb/mariadb_lib.c
++++ b/libmariadb/mariadb_lib.c
+@@ -1373,10 +1373,9 @@ mysql_init(MYSQL *mysql)
+   strcpy(mysql->net.sqlstate, "00000");
+   mysql->net.last_error[0]= mysql->net.last_errno= mysql->net.extension->extended_errno= 0;
+ 
+-  if (ENABLED_LOCAL_INFILE != LOCAL_INFILE_MODE_OFF)
+-    mysql->options.client_flag|= CLIENT_LOCAL_FILES;
+-  mysql->extension->auto_local_infile= ENABLED_LOCAL_INFILE == LOCAL_INFILE_MODE_AUTO
+-                                       ? WAIT_FOR_QUERY : ALWAYS_ACCEPT;
++  /* LOAD DATA LOCAL INFILE support is removed */
++  mysql->options.client_flag&= ~CLIENT_LOCAL_FILES;
++  mysql->extension->auto_local_infile= WAIT_FOR_QUERY;
+   mysql->options.reconnect= 0;
+   return mysql;
+ error:
+@@ -3501,15 +3500,8 @@ mysql_optionsv(MYSQL *mysql,enum mysql_option option, ...)
+     mysql->options.named_pipe=1;		/* Force named pipe */
+     break;
+   case MYSQL_OPT_LOCAL_INFILE:			/* Allow LOAD DATA LOCAL ?*/
+-    if (!arg1 || test(*(unsigned int*) arg1))
+-      mysql->options.client_flag|= CLIENT_LOCAL_FILES;
+-    else
+-      mysql->options.client_flag&= ~CLIENT_LOCAL_FILES;
+-    if (arg1) {
+-      CHECK_OPT_EXTENSION_SET(&mysql->options);
+-      mysql->extension->auto_local_infile= *(uint*)arg1 == LOCAL_INFILE_MODE_AUTO
+-                                           ? WAIT_FOR_QUERY : ALWAYS_ACCEPT;
+-    }
++    /* LOAD DATA LOCAL INFILE support is removed, the option is ignored */
++    mysql->options.client_flag&= ~CLIENT_LOCAL_FILES;
+     break;
+   case MYSQL_INIT_COMMAND:
+     options_add_initcommand(&mysql->options, (char *)arg1);
+diff --git a/plugins/auth/my_auth.c b/plugins/auth/my_auth.c
+index 0684eec..5552c58 100644
+--- a/plugins/auth/my_auth.c
++++ b/plugins/auth/my_auth.c
+@@ -289,6 +289,8 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
+ 
+   mysql->client_flag|= mysql->options.client_flag;
+   mysql->client_flag|= CLIENT_CAPABILITIES;
++  /* LOAD DATA LOCAL INFILE support is removed, never announce it to the server */
++  mysql->client_flag&= ~CLIENT_LOCAL_FILES;
+ 
+   if (mysql->client_flag & CLIENT_MULTI_STATEMENTS)
+     mysql->client_flag|= CLIENT_MULTI_RESULTS;
