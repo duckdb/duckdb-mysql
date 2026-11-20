@@ -1,0 +1,37 @@
+# name: test/sql/remote_pushdown/remote_pushdown_values.test
+# description: Push down VALUES lists (EXPRESSION_LIST) used as UPDATE sources
+# group: [remote_pushdown]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+statement ok
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
+
+statement ok
+CREATE OR REPLACE TABLE s.values_upd (a INTEGER PRIMARY KEY, b INTEGER)
+
+statement ok
+INSERT INTO s.values_upd VALUES (1, 0), (2, 0)
+
+# DuckLake-style UPDATE FROM a VALUES CTE is pushed to the server
+query II
+explain
+WITH v(a, b) AS (VALUES (1, 10), (2, 20))
+UPDATE s.values_upd SET b = v.b FROM v WHERE s.values_upd.a = v.a
+----
+physical_plan	<REGEX>:(?s).*MYSQL_QUERY.*
+
+statement ok
+WITH v(a, b) AS (VALUES (1, 10), (2, 20))
+UPDATE s.values_upd SET b = v.b FROM v WHERE s.values_upd.a = v.a
+
+query II
+SELECT a, b FROM s.values_upd ORDER BY a
+----
+1	10
+2	20
+
+statement ok
+DROP TABLE s.values_upd

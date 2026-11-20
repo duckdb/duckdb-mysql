@@ -19,6 +19,8 @@
 #include "duckdb/parser/result_modifier.hpp"
 #include "duckdb/parser/tableref.hpp"
 
+#include "mysql_version.hpp"
+
 namespace duckdb {
 class CaseExpression;
 class FunctionArgument;
@@ -47,7 +49,6 @@ class CommonTableExpressionMap;
 //! * unnamed derived tables get a generated alias (required by MySQL)
 //! Constructs that cannot be serialized are rejected up-front by MySQLCatalog::SupportsPushdown -
 //! encountering them here is an internal error.
-struct MySQLVersion;
 
 class MySQLSQLWriter {
 public:
@@ -104,6 +105,8 @@ private:
 	ClientContext &context;
 	//! The NO PAD binary collation attached to string literals (derived from the server version)
 	string binary_collation;
+	//! Runtime server type (from the version string on attach), not the client library
+	MySQLServerType server_type;
 	//! Counter for generating aliases for unnamed derived tables (MySQL requires an alias)
 	idx_t unnamed_subquery_index = 0;
 };
