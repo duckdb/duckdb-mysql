@@ -1039,8 +1039,8 @@ bool MySQLCapabilities::SupportsPushdown(const TableRef &ref) {
 		// mysql doesn't support any table functions
 		return false;
 	case TableReferenceType::EXPRESSION_LIST:
-		// VALUES lists are serialized without the ROW(...) keyword MySQL requires in a FROM clause
-		return false;
+		// VALUES lists: MariaDB accepts VALUES (..), (..); MySQL requires VALUES ROW(..), ROW(..)
+		return true;
 	default:
 		// pivot references, column data references, ... - not supported
 		return false;
