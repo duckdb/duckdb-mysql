@@ -367,10 +367,6 @@ CALL mysql_query('simple', 'DROP TABLE preliminary_queries_test', preliminary_qu
 # results of statements run with prepare=FALSE and of preliminary queries are drained,
 # the same connection remains usable
 
-# create a table
-statement ok
-CREATE OR REPLACE TABLE simple.large_tbl AS FROM range(100000) t(i)
-
 statement ok
 BEGIN TRANSACTION
 

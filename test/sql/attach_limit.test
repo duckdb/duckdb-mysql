@@ -9,10 +9,6 @@ require-env MYSQL_TEST_DATABASE_AVAILABLE
 statement ok
 ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS s (TYPE MYSQL_SCANNER)
 
-# create a table
-statement ok
-CREATE OR REPLACE TABLE s.large_tbl AS FROM range(100000) t(i)
-
 query I
 FROM s.large_tbl LIMIT 5
 ----
