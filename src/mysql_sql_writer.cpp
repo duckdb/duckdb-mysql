@@ -32,6 +32,7 @@
 #include "duckdb/parser/statement/drop_statement.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
+#include "duckdb/parser/tableref/expressionlistref.hpp"
 #include "duckdb/parser/tableref/joinref.hpp"
 #include "duckdb/parser/tableref/subqueryref.hpp"
 
@@ -42,7 +43,7 @@
 namespace duckdb {
 
 MySQLSQLWriter::MySQLSQLWriter(ClientContext &context, const MySQLVersion &version)
-    : context(context), binary_collation(version.GetBinaryCollation()) {
+    : context(context), binary_collation(version.GetBinaryCollation()), server_type(version.server_type) {
 }
 
 vector<string> MySQLSQLWriter::ToStatements(ClientContext &context, const MySQLVersion &version,
@@ -616,6 +617,27 @@ string MySQLSQLWriter::WriteTableRef(const TableRef &ref) {
 		}
 		return "(" + WriteQueryNode(*subquery.subquery->node) + ") AS " + WriteIdentifier(alias);
 	}
+	case TableReferenceType::EXPRESSION_LIST: {
+		auto &expr_list = ref.Cast<ExpressionListRef>();
+		const bool use_row_constructor = server_type == MySQLServerType::MYSQL;
+		string result = "(VALUES ";
+		for (idx_t row_idx = 0; row_idx < expr_list.values.size(); row_idx++) {
+			if (row_idx > 0) {
+				result += ", ";
+			}
+			if (use_row_constructor) {
+				result += "ROW";
+			}
+			result += "(" + WriteExpressionList(expr_list.values[row_idx]) + ")";
+		}
+		result += ")";
+		string alias = ref.alias.GetIdentifierName();
+		if (alias.empty()) {
+			alias = "mysql_unnamed_values" + to_string(++unnamed_subquery_index);
+		}
+		result += " AS " + WriteIdentifier(alias);
+		return result;
+	}
 	default:
 		throw InternalException("MySQLSQLWriter: unsupported table ref type - should have been blocked by "
 		                        "SupportsPushdown");
@@ -813,16 +835,41 @@ string MySQLSQLWriter::WriteSelectNode(const SelectNode &node) {
 }
 
 string MySQLSQLWriter::WriteUpdateNode(const UpdateQueryNode &node) {
-	string result = WriteCTEMap(node.cte_map);
+	const bool fold_cte_into_from = server_type == MySQLServerType::MARIADB && !node.cte_map.map.empty() &&
+	                                node.from_table && node.from_table->type == TableReferenceType::BASE_TABLE;
+	string result;
+	if (!fold_cte_into_from) {
+		result += WriteCTEMap(node.cte_map);
+	}
 	result += "UPDATE ";
 	result += WriteTableRef(*node.table);
 	if (node.from_table) {
-		result += ", " + WriteTableRef(*node.from_table);
+		result += ", ";
+		if (fold_cte_into_from) {
+			auto &from_base = node.from_table->Cast<BaseTableRef>();
+			string alias =
+			    from_base.alias.empty() ? from_base.Table().GetIdentifierName() : from_base.alias.GetIdentifierName();
+			result += "(" + WriteCTEMap(node.cte_map) + "SELECT * FROM " + WriteTableRef(*node.from_table) + ") AS " +
+			          WriteIdentifier(alias);
+		} else {
+			result += WriteTableRef(*node.from_table);
+		}
 	}
 	result += " SET ";
+	string target_alias;
+	if (node.table && node.from_table) {
+		if (!node.table->alias.empty()) {
+			target_alias = node.table->alias.GetIdentifierName();
+		} else if (node.table->type == TableReferenceType::BASE_TABLE) {
+			target_alias = node.table->Cast<BaseTableRef>().Table().GetIdentifierName();
+		}
+	}
 	for (idx_t i = 0; i < node.set_info->columns.size(); i++) {
 		if (i > 0) {
 			result += ", ";
+		}
+		if (!target_alias.empty()) {
+			result += WriteIdentifier(target_alias) + ".";
 		}
 		result += WriteIdentifier(node.set_info->columns[i].GetIdentifierName()) + " = " +
 		          WriteExpression(*node.set_info->expressions[i]);
