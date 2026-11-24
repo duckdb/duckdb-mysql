@@ -2,3 +2,6 @@
 /.cache
 /.local
 /.vscode
+/duckdb_unittest_tempdir
+/AGENTS.md
+/CLAUDE.md
