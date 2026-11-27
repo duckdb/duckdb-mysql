@@ -1,0 +1,317 @@
+# name: test/sql/remote_connect_transactions.test
+# description: Test transactions and the session state issued while CONNECT-ed
+# group: [sql]
+
+require mysql_scanner
+
+require-env MYSQL_TEST_DATABASE_AVAILABLE
+
+# con2 observes the changes made by con1 from another MySQL session
+statement ok con2
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS observer (TYPE MYSQL)
+
+statement ok con2
+CALL mysql_execute('observer', 'DROP TABLE IF EXISTS connect_tx_t')
+
+statement ok con2
+CALL mysql_execute('observer', 'CREATE TABLE connect_tx_t(i INT) ENGINE=InnoDB')
+
+statement ok con1
+CONNECT 'host=localhost user=root port=0 database=mysqlscanner' (TYPE MYSQL)
+
+# rolled back DML (DDL commits implicitly in MySQL)
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (7)
+
+statement ok con1
+UPDATE connect_tx_t SET i = 8
+
+query II con1
+SELECT count(*), max(i) FROM connect_tx_t
+----
+1	8
+
+# the transaction is not committed yet
+query I con2
+FROM mysql_query('observer', 'SELECT count(*) FROM connect_tx_t')
+----
+0
+
+statement ok con1
+ROLLBACK
+
+query I con1
+SELECT count(*) FROM connect_tx_t
+----
+0
+
+# committed DML
+
+statement ok con1
+START TRANSACTION
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (42)
+
+statement ok con1
+COMMIT
+
+query I con2
+FROM mysql_query('observer', 'SELECT i FROM connect_tx_t')
+----
+42
+
+# rolled back DML on existing rows
+
+statement ok con1
+BEGIN
+
+statement ok con1
+DELETE FROM connect_tx_t
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (43)
+
+statement ok con1
+ROLLBACK
+
+query I con1
+SELECT i FROM connect_tx_t
+----
+42
+
+# statements outside of a transaction are committed right away
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (44)
+
+query I con2
+FROM mysql_query('observer', 'SELECT i FROM connect_tx_t ORDER BY i')
+----
+42
+44
+
+# an error does not end the transaction in MySQL
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (45)
+
+statement error con1
+SELECT * FROM connect_tx_nonexistent
+----
+connect_tx_nonexistent
+
+query I con1
+SELECT i FROM connect_tx_t ORDER BY i
+----
+42
+44
+45
+
+statement ok con1
+ROLLBACK
+
+query I con1
+SELECT i FROM connect_tx_t ORDER BY i
+----
+42
+44
+
+# the session state is kept between the statements
+
+statement ok con1
+CREATE TEMPORARY TABLE connect_tx_temp(i INT)
+
+statement ok con1
+INSERT INTO connect_tx_temp VALUES (1)
+
+query I con1
+SELECT i FROM connect_tx_temp
+----
+1
+
+statement ok con1
+SET @connect_tx_var = 'connect_tx_session'
+
+query I con1
+SELECT @connect_tx_var
+----
+connect_tx_session
+
+# DISCONNECT rolls back an open transaction and ends the session
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (46)
+
+statement ok con1
+DISCONNECT
+
+query I con2
+FROM mysql_query('observer', 'SELECT i FROM connect_tx_t ORDER BY i')
+----
+42
+44
+
+# a session to an attached database ends with DISCONNECT, a new CONNECT starts a new session (the connection
+# returned to the pool is reset)
+
+statement ok con1
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS my (TYPE MYSQL)
+
+statement ok con1
+CONNECT my
+
+statement ok con1
+CREATE TEMPORARY TABLE connect_tx_temp(i INT)
+
+statement ok con1
+SET @connect_tx_var = 'connect_tx_session'
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (47)
+
+statement ok con1
+DISCONNECT
+
+statement ok con1
+CONNECT my
+
+statement error con1
+SELECT i FROM connect_tx_temp
+----
+connect_tx_temp
+
+query I con1
+SELECT @connect_tx_var IS NULL
+----
+1
+
+query I con1
+SELECT i FROM connect_tx_t ORDER BY i
+----
+42
+44
+
+statement ok con1
+DISCONNECT
+
+statement ok con1
+DETACH my
+
+# the session time zone setting applies to the session
+
+statement ok con1
+SET mysql_session_time_zone = '+05:00'
+
+statement ok con1
+CONNECT 'host=localhost user=root port=0 database=mysqlscanner' (TYPE MYSQL)
+
+query I con1
+SELECT @@session.time_zone
+----
++05:00
+
+statement ok con1
+DISCONNECT
+
+statement ok con1
+RESET mysql_session_time_zone
+
+# the access mode of the attached database applies to the session
+
+statement ok con1
+ATTACH 'host=localhost user=root port=0 database=mysqlscanner' AS my_ro (TYPE MYSQL, READ_ONLY)
+
+statement ok con1
+CONNECT my_ro
+
+query I con1
+SELECT count(*) FROM connect_tx_t
+----
+2
+
+statement error con1
+INSERT INTO connect_tx_t VALUES (48)
+----
+READ ONLY transaction
+
+statement ok con1
+BEGIN
+
+statement error con1
+INSERT INTO connect_tx_t VALUES (48)
+----
+READ ONLY transaction
+
+statement ok con1
+ROLLBACK
+
+statement ok con1
+DISCONNECT
+
+statement ok con1
+DETACH my_ro
+
+# the session works without the connection pool
+
+statement ok con1
+SET mysql_pool_size = 0
+
+statement ok con1
+CONNECT 'host=localhost user=root port=0 database=mysqlscanner' (TYPE MYSQL)
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (49)
+
+query I con1
+SELECT i FROM connect_tx_t ORDER BY i
+----
+42
+44
+49
+
+statement ok con1
+ROLLBACK
+
+query I con1
+SELECT i FROM connect_tx_t ORDER BY i
+----
+42
+44
+
+statement ok con1
+BEGIN
+
+statement ok con1
+INSERT INTO connect_tx_t VALUES (50)
+
+statement ok con1
+DISCONNECT
+
+statement ok con1
+RESET mysql_pool_size
+
+query I con2
+FROM mysql_query('observer', 'SELECT i FROM connect_tx_t ORDER BY i')
+----
+42
+44
+
+statement ok con2
+CALL mysql_execute('observer', 'DROP TABLE connect_tx_t')

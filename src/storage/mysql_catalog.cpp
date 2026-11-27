@@ -32,7 +32,9 @@ MySQLCatalog::MySQLCatalog(AttachedDatabase &db_p, string connection_string_p, s
                            shared_ptr<MySQLConnectionPool> pool_p, bool remote_pushdown_enabled_p)
     : Catalog(db_p), catalog_name(db_p.GetName()), connection_string(std::move(connection_string_p)),
       attach_path(std::move(attach_path_p)), access_mode(access_mode), schemas(*this, schemas_to_load),
-      connection_pool(std::move(pool_p)), remote_pushdown_enabled(std::move(remote_pushdown_enabled_p)) {
+      connection_pool(std::move(pool_p)), remote_pushdown_enabled(std::move(remote_pushdown_enabled_p)),
+      connect_sessions(std::make_shared<dbconnector::connect::ConnectSessions<MySQLConnection>>(
+          *connection_pool, "mysql_connect_session")) {
 	MySQLConnectionParameters connection_params;
 	unordered_set<string> unused;
 	std::tie(connection_params, unused) = MySQLUtils::ParseConnectionParameters(connection_string);
@@ -608,10 +610,39 @@ unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, unique_
 	return RemoteExecuteInternal(context, std::move(statements), std::move(extra_args));
 }
 
+uint64_t MySQLCatalog::GetConnectSessionConnection(ClientContext &context) {
+	return connect_sessions->GetConnection(context, GetAttached(), [this](ClientContext &client) {
+		// like mysql_pin_connection, the session does not wait for a free slot in the pool
+		auto connection = connection_pool->ForceAcquire();
+		try {
+			auto &conn = connection.GetConnection();
+			// the session is not run in a MySQLTransaction, which initializes the connections it acquires
+			conn.Initialize(client, MySQLTransaction::GetConnectionInitOptions(client));
+			if (access_mode == AccessMode::READ_ONLY) {
+				// the statements of the session used to run in read-only transactions - keep the transactions of
+				// the session read-only, including the autocommit statements (resetting the connection, when it is
+				// returned to the pool, resets this)
+				conn.Execute(client, "SET SESSION TRANSACTION READ ONLY");
+			}
+		} catch (...) {
+			connection.Invalidate();
+			throw;
+		}
+		return connection;
+	});
+}
+
 unique_ptr<TableRef> MySQLCatalog::RemoteExecute(ClientContext &context, const string &sql) {
+	// the statements issued while CONNECT-ed run on the connection of the CONNECT session as written, outside of the
+	// transaction DuckDB runs them in - the client controls the transactions of the session
+	auto connection_id = GetConnectSessionConnection(context);
 	vector<string> statements;
 	statements.push_back(sql);
-	return RemoteExecuteInternal(context, std::move(statements));
+	vector<unique_ptr<ParsedExpression>> extra_args;
+	extra_args.push_back(make_uniq<ComparisonExpression>(ExpressionType::COMPARE_EQUAL,
+	                                                     make_uniq<ColumnRefExpression>("connection"),
+	                                                     ConstantExpression::FromValue(Value::UBIGINT(connection_id))));
+	return RemoteExecuteInternal(context, std::move(statements), std::move(extra_args));
 }
 
 unique_ptr<TableRef> MySQLCatalog::RemoteExecuteInternal(ClientContext &context, vector<string> statements,

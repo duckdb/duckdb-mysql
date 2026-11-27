@@ -45,9 +45,11 @@ public:
 	}
 	optional_ptr<CatalogEntry> ReferenceEntry(shared_ptr<CatalogEntry> &entry);
 
+	//! The options the connections are initialized with (type config, session time zone), read from the settings
+	static MySQLConnectionInitOptions GetConnectionInitOptions(ClientContext &context);
+
 private:
 	static bool GetTransactionsEnabled(ClientContext &context);
-	static MySQLConnectionInitOptions GetConnectionInitOptions(ClientContext &context);
 
 	MySQLCatalog &catalog;
 	const bool transactions_enabled = true;
