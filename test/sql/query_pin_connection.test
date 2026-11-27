@@ -91,3 +91,42 @@ RESET VARIABLE conn
 
 statement ok
 DETACH s
+
+# connections can be pinned with the connection pool disabled, and stay pinned after they are used
+
+statement ok
+SET mysql_pool_size = 0
+
+statement ok
+ATTACH 'host=localhost user=root port=3306 database=mysql' AS s_no_pool (TYPE mysql)
+
+statement ok
+SET VARIABLE conn = mysql_pin_connection('s_no_pool')
+
+statement ok
+CALL mysql_execute('s_no_pool', 'CREATE TEMPORARY TABLE temp1(col1 INT)', connection=getvariable('conn'))
+
+statement ok
+CALL mysql_execute('s_no_pool', 'INSERT INTO temp1 values(42)', connection=getvariable('conn'))
+
+query I
+FROM mysql_query('s_no_pool', 'SELECT * FROM temp1', connection=getvariable('conn'))
+----
+42
+
+statement ok
+SELECT mysql_close_pinned_connection('s_no_pool', getvariable('conn'))
+
+statement error
+SELECT mysql_close_pinned_connection('s_no_pool', getvariable('conn'))
+----
+not found in the specified attached database
+
+statement ok
+RESET VARIABLE conn
+
+statement ok
+DETACH s_no_pool
+
+statement ok
+RESET mysql_pool_size

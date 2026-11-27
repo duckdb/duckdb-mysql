@@ -19,6 +19,7 @@
 #include "duckdb/planner/logical_operator.hpp"
 
 #include "dbconnector/attached/attached_catalog.hpp"
+#include "dbconnector/connect.hpp"
 
 #include "storage/mysql_capabilities.hpp"
 #include "storage/mysql_connection_pool.hpp"
@@ -95,6 +96,12 @@ public:
 	RemoteExecuteInternal(ClientContext &context, vector<string> statements,
 	                      vector<unique_ptr<ParsedExpression>> extra_args = vector<unique_ptr<ParsedExpression>>());
 
+	//! Returns the ID of the pinned connection that runs the statements the client issues while CONNECT-ed to this
+	//! database, pinning a connection first if there is none yet. All the statements of the CONNECT session run on
+	//! this connection, so that the transactions the client issues (BEGIN / COMMIT / ROLLBACK) and the MySQL
+	//! session state span them
+	uint64_t GetConnectSessionConnection(ClientContext &context);
+
 	void ClearCache();
 
 	static void MaterializeMySQLScans(PhysicalOperator &op);
@@ -119,6 +126,8 @@ private:
 	MySQLCapabilities capabilities;
 	shared_ptr<MySQLConnectionPool> connection_pool;
 	bool remote_pushdown_enabled;
+	//! The CONNECT sessions of the clients
+	std::shared_ptr<dbconnector::connect::ConnectSessions<MySQLConnection>> connect_sessions;
 };
 
 } // namespace duckdb
