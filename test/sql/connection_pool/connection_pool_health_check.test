@@ -23,6 +23,9 @@ s	1
 statement ok
 DETACH s
 
+# the health check is run every time the connection is taken from the pool (the alive bypass window is disabled
+# by default)
+
 statement ok
 SET GLOBAL mysql_pool_health_check_query = 'SELECT_FAIL'
 
@@ -34,22 +37,31 @@ SELECT current_setting('mysql_pool_health_check_query')
 ----
 SELECT_FAIL
 
+# the health check is not run when the connection is returned to the pool
 query II
 SELECT catalog_name, available_connections
 FROM mysql_configure_pool(catalog_name='s')
 ----
-s	0
+s	1
+
+statement ok
+SET VARIABLE cache_misses_before = (SELECT cache_misses FROM mysql_configure_pool(catalog_name='s'))
+
+statement ok
+SET VARIABLE conn_id_before = (SELECT id FROM mysql_query('s', 'SELECT CONNECTION_ID() AS id'))
 
 query I
-FROM mysql_query('s', 'SELECT 42')
+SELECT id <> getvariable('conn_id_before') FROM mysql_query('s', 'SELECT CONNECTION_ID() AS id')
 ----
-42
+true
 
-query II
-SELECT catalog_name, available_connections
+# the connection failed the health check every time it was taken from the pool, it was discarded and a new one
+# was opened
+query III
+SELECT catalog_name, available_connections, cache_misses - getvariable('cache_misses_before')
 FROM mysql_configure_pool(catalog_name='s')
 ----
-s	0
+s	1	2
 
 statement ok
 DETACH s
@@ -69,27 +81,25 @@ FROM mysql_configure_pool(catalog_name='s')
 ----
 s	1
 
+statement ok
+SET VARIABLE cache_misses_before = (SELECT cache_misses FROM mysql_configure_pool(catalog_name='s'))
+
 query I
 FROM mysql_query('s', 'SELECT 42')
 ----
 42
-
-query II
-SELECT catalog_name, available_connections
-FROM mysql_configure_pool(catalog_name='s')
-----
-s	1
 
 query I
 SELECT count(*) FROM s.large_tbl
 ----
 100000
 
-query II
-SELECT catalog_name, available_connections
+# the connection passed the health check every time it was taken from the pool and was reused
+query III
+SELECT catalog_name, available_connections, cache_misses - getvariable('cache_misses_before')
 FROM mysql_configure_pool(catalog_name='s')
 ----
-s	1
+s	1	0
 
 statement ok
 RESET GLOBAL mysql_pool_health_check_query

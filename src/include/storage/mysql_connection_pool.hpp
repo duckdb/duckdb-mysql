@@ -20,6 +20,9 @@ namespace duckdb {
 
 using MySQLPooledConnection = dbconnector::pool::PooledConnection<MySQLConnection>;
 
+//! The health check is run every time the connection is taken from the pool by default (the alive bypass is disabled)
+static constexpr uint64_t MYSQL_DEFAULT_ALIVE_BYPASS_WINDOW_MILLIS = 0;
+
 class MySQLConnectionPool : public dbconnector::pool::ConnectionPool<MySQLConnection> {
 public:
 	MySQLConnectionPool(ClientContext &context, string connection_string, string attach_path);
