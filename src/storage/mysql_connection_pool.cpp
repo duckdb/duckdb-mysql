@@ -94,6 +94,10 @@ dbconnector::pool::ConnectionPoolConfig MySQLConnectionPool::CreateConfig(Client
 	    ReadUBigIntOption(ctx, "mysql_pool_connection_idle_timeout_millis", config.idle_timeout_millis);
 	config.start_reaper_thread = ReadBooleanOption(ctx, "mysql_pool_enable_reaper_thread", config.start_reaper_thread);
 	config.health_check_query = ReadVarcharOption(ctx, "mysql_pool_health_check_query");
+	// MySQL connections are not checked without a round trip to the server, so the bypass is disabled by default:
+	// within the window a connection closed by the server would be returned from the pool
+	config.alive_bypass_window_millis =
+	    ReadUBigIntOption(ctx, "mysql_pool_alive_bypass_window_millis", MYSQL_DEFAULT_ALIVE_BYPASS_WINDOW_MILLIS);
 	return config;
 }
 

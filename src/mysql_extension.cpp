@@ -217,6 +217,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "The query that is used to check that the connection is healthy. 'mysql_ping()' is used "
 	                          "instead of  query if this parameter is empty (default)",
 	                          LogicalType::VARCHAR, string(), nullptr, SetScope::GLOBAL);
+	config.AddExtensionOption(
+	    "mysql_pool_alive_bypass_window_millis",
+	    "Number of milliseconds after returning the connection to the pool, during which the connection is "
+	    "considered to be alive and the health check ('mysql_pool_health_check_query' option) is not run when the "
+	    "connection is taken from the pool. The connections closed by the server within this window are not detected "
+	    "and are returned from the pool. Setting this option to 0 disables the bypass, so the health check is run "
+	    "every time the connection is taken from the pool (default: 0)",
+	    LogicalType::UBIGINT, Value::UBIGINT(MYSQL_DEFAULT_ALIVE_BYPASS_WINDOW_MILLIS), nullptr, SetScope::GLOBAL);
 	OptimizerExtension mysql_optimizer;
 	mysql_optimizer.optimize_function = MySQLOptimizer::Optimize;
 	OptimizerExtension::Register(config, std::move(mysql_optimizer));
